@@ -20,6 +20,8 @@ env:
   PYTHON_VERSION: "3.12"
   QDRANT_URL: http://localhost:6333
   REDIS_URL: redis://localhost:6379/0
+  # Set to "true" once GitHub Actions secrets are configured (DATABASE_URL, OPENAI_*, CLOUDINARY_*).
+  RUN_SECRET_DEPENDENT_TESTS: "false"
 
 jobs:
   unit-tests:
@@ -60,6 +62,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests
+    if: env.RUN_SECRET_DEPENDENT_TESTS == 'true'
     runs-on: ubuntu-latest
     services:
       redis:
@@ -133,6 +136,7 @@ jobs:
 
   system-tests:
     name: System Tests
+    if: env.RUN_SECRET_DEPENDENT_TESTS == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -173,6 +177,15 @@ jobs:
             echo "docker-compose.yml not found — system tests will be skipped"
             exit 0
           fi
+          mkdir -p backend
+          {
+            printf 'ENVIRONMENT=ci\n'
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+            printf 'CLOUDINARY_CLOUD_NAME=%s\n' "$CLOUDINARY_CLOUD_NAME"
+            printf 'CLOUDINARY_API_KEY=%s\n' "$CLOUDINARY_API_KEY"
+            printf 'CLOUDINARY_API_SECRET=%s\n' "$CLOUDINARY_API_SECRET"
+          } > backend/.env
           docker compose up -d --wait --timeout 120
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
