@@ -1,25 +1,12 @@
 import { useApp } from "../context/AppContext";
 import { ChatInput } from "./ChatInput";
-import { IconSpark } from "./icons";
 import { ModalityChips } from "./ModalityChips";
 import { SearchResults } from "./SourceCard";
-
-const USER_DISPLAY_NAME = "Ammer";
-
-function getUserDisplayName(): string {
-  try {
-    return localStorage.getItem("scrutinize_user_name") ?? USER_DISPLAY_NAME;
-  } catch {
-    return USER_DISPLAY_NAME;
-  }
-}
 
 export function SearchView() {
   const { state, setSearchQuery, setModalityFilter, runSearch } = useApp();
   const { search, apiConnected } = state;
-  const userName = getUserDisplayName();
   const isEmptyState = !search.result && !search.loading && !search.error;
-
   function handleSubmit() {
     void runSearch();
   }
