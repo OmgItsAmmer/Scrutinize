@@ -13,11 +13,14 @@ dependencies = [
     "cloudinary>=1.41",
     "fastapi>=0.115",
     "httpx>=0.28",
+    "openai>=1.58",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
     "python-multipart>=0.0.17",
+    "qdrant-client>=1.17.0,<1.19.0",
     "redis>=5.2",
     "sqlmodel>=0.0.22",
+    "tiktoken>=0.8",
     "uvicorn[standard]>=0.32",
 ]
 

@@ -1,11 +1,25 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _env_files() -> tuple[str, ...]:
+    """Load repo-root .env when scripts run from backend/ (see Makefile)."""
+    candidates = (
+        _REPO_ROOT / ".env",
+        _BACKEND_ROOT / ".env",
+        Path(".env"),
+    )
+    return tuple(str(path) for path in candidates if path.is_file())
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_files() or (".env",),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -21,6 +35,29 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
 
     openai_api_key: str = ""
+
+    # Embeddings & Qdrant (M5)
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    embedding_batch_size: int = 100
+    qdrant_collection: str = "segments"
+
+    # Text ingestion (M2)
+    text_chunk_size: int = 400
+    text_chunk_overlap: int = 50
+    max_upload_bytes: int = 10 * 1024 * 1024
+
+    # Audio ingestion (M3)
+    whisper_model: str = "whisper-1"
+    audio_segment_min_seconds: float = 15.0
+    audio_segment_max_seconds: float = 30.0
+
+    # Video ingestion (M4)
+    vision_model: str = "gpt-4o-mini"
+    video_keyframe_interval_seconds: float = 5.0
+    video_max_keyframes: int = 15
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
 
     # Cloudinary — raw file uploads (text, audio, video); relational data lives in Neon.
     cloudinary_cloud_name: str = ""
