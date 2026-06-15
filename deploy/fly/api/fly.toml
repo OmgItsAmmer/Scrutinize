@@ -1,0 +1,36 @@
+app = "scrutinize-api"
+primary_region = "ord"
+
+[build]
+  dockerfile = "../../../backend/Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+  DEBUG = "false"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0   # budget: scale to zero; use 1 for always-on
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 40
+
+[[vm]]
+  memory = "256mb"           # budget; use "512mb" for always-on
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks]
+  [checks.health]
+    grace_period = "20s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    port = 8000
+    timeout = "5s"
+    type = "http"
