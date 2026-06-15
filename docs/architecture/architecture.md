@@ -1,15 +1,15 @@
-# Architecture — Multi-Modal AI Embedding & Retrieval System
+# Architecture — Scrutinize
 
-> Codename used throughout this doc: **Polysearch**. Rename freely — it's just a placeholder so the docs read naturally.
+Multi-modal AI embedding & retrieval system.
 
 ## 1. Overview
 
-Polysearch is a unified ingestion + retrieval system that lets a user drop in **text, audio, and video**, and later ask **one natural-language question** that can match content from *any* of those modalities. The system is split into four layers:
+**Scrutinize** is a unified ingestion + retrieval system that lets a user drop in **text, audio, and video**, and later ask **one natural-language question** that can match content from *any* of those modalities. The system is split into four layers:
 
 1. **Client** — React chat-style UI (upload + search in one surface)
 2. **API layer** — FastAPI, the single entry point for the frontend
 3. **Processing layer** — async workers that turn raw files into embeddings + metadata
-4. **Data layer** — a native vector database (Qdrant) for similarity search + Postgres/Storage (Supabase) for metadata, files, and job state
+4. **Data layer** — a native vector database (Qdrant) for similarity search + **Neon Postgres** for metadata/jobs + **Cloudinary** for raw files
 
 A thin **agent layer** sits on top of the data layer at query time to turn "raw nearest-neighbor hits" into a useful, cited answer.
 
@@ -46,12 +46,12 @@ flowchart TB
 
     subgraph DATA["Data Layer"]
         QD[("Qdrant<br/>Vector DB")]
-        PG[("Supabase Postgres<br/>metadata + jobs")]
-        S3[("Supabase Storage<br/>raw files")]
+        PG[("Neon Postgres<br/>metadata + jobs")]
+        CL[("Cloudinary<br/>raw files")]
     end
 
     FE -- "1. upload file" --> UP
-    UP -- "store raw file" --> S3
+    UP -- "store raw file" --> CL
     UP -- "create file + job row" --> PG
     UP -- "enqueue job" --> QUEUE
 
@@ -85,8 +85,8 @@ flowchart TB
 | Processing | Text / Audio / Video workers | Modality-specific pipelines that produce **segments** (text + timestamps + metadata) ready for embedding |
 | AI Services | OpenAI API | Embeddings, transcription (Whisper), vision captioning (GPT-4o-mini), and the two retrieval agents |
 | Vector DB | Qdrant | Stores embeddings + payload, runs the nearest-neighbor search |
-| Relational DB | Supabase Postgres | Source of truth for files, jobs, segments, users |
-| Object Storage | Supabase Storage | Raw uploaded files (so audio/video results can be played back / scrubbed to a timestamp) |
+| Relational DB | Neon Postgres | Source of truth for files, jobs, segments, users |
+| Object Storage | Cloudinary | Raw uploaded files (HTTPS URLs for playback / seek) |
 | Agents | Router + Synthesis (GPT-4o-mini) | Turn a raw query into a filtered vector search, and turn raw hits into a cited natural-language answer |
 
 ---
@@ -115,12 +115,17 @@ You said you're open to exploring a *real* native vector database rather than a 
 - *ChromaDB* — great for a 1-day prototype, but it's not what most teams consider "production" — weaker filtering/scaling story than Qdrant.
 - *pgvector* — would let us drop Qdrant entirely and keep everything in Postgres. Rejected because the brief specifically asks for a dedicated vector DB, and pgvector's ANN performance/feature set (no native multi-vector points, weaker payload-filter + vector hybrid story) is behind purpose-built engines at this scale.
 
-### 4.3 Relational DB + Storage — **Supabase (Postgres + Storage)**
+### 4.3 Relational DB — **Neon** + Object Storage — **Cloudinary**
 
-- **Postgres** is the natural home for *structured* state: files, processing jobs, segments, users. This is data you'll want to `JOIN`, paginate, and query with SQL — not vector data.
-- **Storage** (S3-compatible) holds the *original* audio/video/text files, because the search results need to link back to a playable file (with a timestamp) — the vector DB only stores embeddings + small payload, not binaries.
-- Bundling both (plus optional Auth, if you add multi-user support later) under one provider removes an entire ops surface for a small project, while still being "real" infra you could scale later (Supabase is just managed Postgres + S3 + GoTrue under the hood).
-- **Why not just Qdrant for everything?** Qdrant payload is JSON and not meant for relational queries/joins/transactions — e.g. "show me all jobs that failed in the last hour" or "list every file uploaded by user X" is a Postgres query, not a vector query.
+- **Neon** (serverless Postgres) hosts *structured* state: files, processing jobs, segments, users. Branching, connection pooling, and scale-to-zero suit a POC that still needs real SQL (`JOIN`, pagination, transactions) without running Postgres in Docker.
+- **Cloudinary** holds the *original* audio/video/text files with CDN-backed HTTPS URLs, because search results need a playable link with timestamps — the vector DB only stores embeddings + small payload, not binaries.
+- Splitting relational (Neon) from media storage (Cloudinary) keeps each service focused and lets Cloudinary handle transcoding/delivery optimizations for audio and video later if needed.
+- **Why not just Qdrant for everything?** Qdrant payload is JSON and not meant for relational queries/joins/transactions — e.g. "show me all jobs that failed in the last hour" is a Neon SQL query, not a vector query.
+
+**Neon connection notes:**
+- Use the **pooled** connection string (`-pooler` host) for the API and Celery workers.
+- Append `sslmode=require` (handled automatically when the host contains `neon.tech`).
+- Set `DATABASE_URL` in `.env`; it is not bundled in Docker Compose.
 
 ### 4.4 LLM / AI — **OpenAI API**, multi-agent retrieval
 
@@ -162,30 +167,30 @@ This two-agent split is the same shape used by most production RAG systems (quer
 
 ```mermaid
 flowchart LR
-    A[Upload .txt/.md/.pdf] --> B[Store raw file in Supabase Storage]
+    A[Upload .txt/.md/.pdf] --> B[Store raw file in Cloudinary]
     B --> C[Extract + chunk text<br/>~300-500 token chunks, overlap]
     C --> D["Embed each chunk<br/>(text-embedding-3-small)"]
     D --> E["Upsert to Qdrant<br/>payload: modality=text, chunk text, file_id, chunk_index"]
-    E --> F["Write segment rows to Postgres<br/>+ mark job 'indexed'"]
+    E --> F["Write segment rows to Neon<br/>+ mark job 'indexed'"]
 ```
 
 ### 5.2 Ingestion — Audio
 
 ```mermaid
 flowchart LR
-    A[Upload audio file] --> B[Store raw file in Supabase Storage]
+    A[Upload audio file] --> B[Store raw file in Cloudinary]
     B --> C["Transcribe with Whisper<br/>(returns timestamped segments)"]
     C --> D["Chunk transcript into segments<br/>(~15-30s windows)"]
     D --> E["Embed each segment text<br/>(text-embedding-3-small)"]
     E --> F["Upsert to Qdrant<br/>payload: modality=audio, transcript, start/end time, file_id"]
-    F --> G["Write segment rows to Postgres<br/>+ mark job 'indexed'"]
+    F --> G["Write segment rows to Neon<br/>+ mark job 'indexed'"]
 ```
 
 ### 5.3 Ingestion — Video
 
 ```mermaid
 flowchart LR
-    A[Upload video file] --> B[Store raw file in Supabase Storage]
+    A[Upload video file] --> B[Store raw file in Cloudinary]
     B --> C["FFmpeg: extract audio track"]
     B --> D["FFmpeg: extract keyframes every N seconds"]
     C --> E["Whisper: transcribe audio<br/>(timestamped)"]
@@ -194,7 +199,7 @@ flowchart LR
     F --> G
     G --> H["Embed each merged segment<br/>(text-embedding-3-small)"]
     H --> I["Upsert to Qdrant<br/>payload: modality=video, transcript+caption, start/end time, file_id"]
-    I --> J["Write segment rows to Postgres<br/>+ mark job 'indexed'"]
+    I --> J["Write segment rows to Neon<br/>+ mark job 'indexed'"]
 ```
 
 ### 5.4 Query / Search
@@ -251,10 +256,10 @@ Qdrant's named-vector support means this is an **additive** schema change — no
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` (point id) | UUID | matches `segments.id` in Postgres |
+| `id` (point id) | UUID | matches `segments.id` in Neon |
 | vector: `text_vector` | float[1536] | `text-embedding-3-small`, cosine distance |
 | *(Phase B)* vector: `visual_vector` | float[512] | CLIP ViT-B/32 image embedding |
-| payload.`file_id` | UUID | FK to Postgres `files.id` |
+| payload.`file_id` | UUID | FK to Neon `files.id` |
 | payload.`modality` | enum: `text` \| `audio` \| `video` | used for filtered search |
 | payload.`content` | string | the transcript / caption / text chunk that was embedded |
 | payload.`start_time` | float \| null | seconds, null for plain text |
@@ -265,7 +270,7 @@ Qdrant's named-vector support means this is an **additive** schema change — no
 
 ---
 
-## 8. Relational Schema (Supabase Postgres)
+## 8. Relational Schema (Neon Postgres)
 
 ```sql
 -- Uploaded source files
@@ -312,14 +317,29 @@ create index on processing_jobs (file_id, status);
 
 ## 9. Non-Functional Considerations
 
-- **Security**: API keys (OpenAI, Qdrant, Supabase) stay server-side only; frontend never talks to OpenAI/Qdrant directly. Add Supabase Auth + JWT on `/upload` and `/search` if multi-user.
+- **Security**: API keys (OpenAI, Qdrant, Neon, Cloudinary) stay server-side only; frontend never talks to OpenAI/Qdrant/Neon/Cloudinary directly. Add auth on `/upload` and `/search` if multi-user.
 - **File limits**: enforce max upload size and allowed MIME types at the API layer before enqueueing work.
 - **Cost control**: cache embeddings by content hash (don't re-embed identical chunks); batch Whisper/embedding calls where possible; keep `gpt-4o-mini` as default and only escalate to `gpt-4o` for captioning if quality testing shows it's needed.
-- **Scalability path**: Celery workers scale horizontally; Qdrant can move from single-node Docker → Qdrant Cloud cluster with zero schema change; Supabase scales as managed Postgres.
+- **Scalability path**: Celery workers scale horizontally; Qdrant can move from single-node Docker → Qdrant Cloud; Neon scales as managed Postgres with pooling.
 
 ---
 
-## 10. Local Dev / Deployment (Docker Compose sketch)
+## 10. Testing & CI/CD
+
+Scrutinize uses **pytest** with marker-based test tiers. Ruff is used locally for formatting/linting but is **not** part of CI.
+
+| Tier | Location | Scope | CI job |
+|---|---|---|---|
+| **Unit** | `tests/unit/` | Pure logic — chunking, embedding wrapper (mocked OpenAI), Qdrant client (mocked), agent prompts (mocked) | `unit-tests` |
+| **Integration** | `tests/integration/` | Real Qdrant + Redis + Neon (`DATABASE_URL` secret); mocked OpenAI/Whisper where billing/rate limits apply | `integration-tests` |
+| **System** | `tests/system/` | Full stack via `docker compose` — upload → worker → index → search end-to-end | `system-tests` |
+| **Security** | `tests/security/` + static analysis | Auth boundary checks, path traversal on upload, secret-leak scans (`bandit`), dependency audit (`pip-audit`) | `security-tests` |
+
+**GitHub Actions** (`.github/workflows/ci.yml`) runs all four tiers on every push/PR to `main`. Integration and system jobs start Redis + Qdrant locally and connect to Neon via the `DATABASE_URL` secret. Other secrets (`OPENAI_API_KEY`, `CLOUDINARY_*`) are injected for jobs that hit external APIs.
+
+---
+
+## 11. Local Dev / Deployment (Docker Compose sketch)
 
 ```yaml
 services:
@@ -332,22 +352,20 @@ services:
   backend:
     build: ./backend
     ports: ["8000:8000"]
+    env_file: .env
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - QDRANT_URL=http://qdrant:6333
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
       - REDIS_URL=redis://redis:6379/0
     depends_on: [qdrant, redis]
 
   worker:
     build: ./backend
     command: celery -A app.workers.celery_app worker --loglevel=info
+    env_file: .env
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - QDRANT_URL=http://qdrant:6333
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
       - REDIS_URL=redis://redis:6379/0
     depends_on: [redis, qdrant]
 
@@ -363,4 +381,4 @@ volumes:
   qdrant_data:
 ```
 
-Supabase (Postgres + Storage) is used as a hosted/managed service rather than self-hosted in this compose file — sign up for a free project and drop the URL/key into `.env`.
+Neon (Postgres) and Cloudinary (media storage) are hosted services — configure `DATABASE_URL` and `CLOUDINARY_*` in `.env`. Docker Compose runs Redis, Qdrant, backend, worker, and frontend only. See [Cloudinary runbook](../runbooks/cloudinary-setup.md).

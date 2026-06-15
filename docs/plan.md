@@ -1,4 +1,6 @@
-# Project Plan — Module-Wise Division & Phases
+# Project Plan — Scrutinize
+
+Module-wise division & phases for **Scrutinize**, a multi-modal AI embedding & retrieval system.
 
 This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modules**. Each phase lists which modules it touches, the concrete tasks, the deliverable, and how it maps back to the brief's submission requirements.
 
@@ -8,8 +10,8 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 
 | Module | Name | Lives in | Summary |
 |---|---|---|---|
-| **M0** | Infrastructure & DevOps | repo root, `docker-compose.yml` | Repo scaffold, Docker, env config, Qdrant/Redis/Postgres provisioning |
-| **M1** | Backend Core | `backend/app/core`, `api/` | FastAPI app, config, Pydantic schemas, Postgres models, job orchestration |
+| **M0** | Infrastructure & DevOps | repo root, `docker-compose.yml`, `.github/workflows/` | Repo scaffold, Docker, env config, Qdrant/Redis provisioning, Neon `DATABASE_URL`, GitHub Actions CI |
+| **M1** | Backend Core | `backend/app/core`, `api/` | FastAPI app, config, Pydantic schemas, Neon/SQLModel models, job orchestration |
 | **M2** | Text Ingestion | `backend/app/services/text_processor.py` | Text chunking + embedding pipeline |
 | **M3** | Audio Ingestion | `backend/app/services/audio_processor.py` | Whisper transcription + segment embedding pipeline |
 | **M4** | Video Ingestion | `backend/app/services/video_processor.py` | FFmpeg extraction + transcription + captioning + segment embedding pipeline |
@@ -26,7 +28,7 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 |---|---|---|---|
 | **Phase 0** — Setup | (pre-Milestone 1) | M0, M1 | Repo, infra, and a working "hello world" API + frontend wired together |
 | **Phase 1** — Ingestion Pipeline | **Milestone 1** | M2, M3, M4, M5 | Each modality can be uploaded and produces vectors in Qdrant |
-| **Phase 2** — Indexing & Context | **Milestone 2** | M1, M2–M5, M0 | Rich payload (transcripts/captions), Postgres metadata, job status tracking |
+| **Phase 2** — Indexing & Context | **Milestone 2** | M1, M2–M5, M0 | Rich payload (transcripts/captions), Neon metadata, job status tracking |
 | **Phase 3** — Search & Demo UI | **Milestone 3** | M6, M7 | Cross-modal search via agents, surfaced in the React UI |
 | **Phase 4** — Polish & Submission | (submission guidelines) | M7, M8 | Tests, docs, README, architecture/report writeups, demo video |
 
@@ -40,14 +42,18 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 |---|---|
 | Repo scaffold | Monorepo: `/backend`, `/frontend`, `/docs`, `docker-compose.yml`, `.env.example` |
 | Qdrant up | Run via Docker Compose, confirm `GET /collections` works |
-| Supabase project | Create project, get Postgres connection string + Storage bucket + service key |
+| Neon project | Create project at [neon.tech](https://neon.tech), copy **pooled** connection string → `DATABASE_URL` in `.env` |
+| Schema on Neon | `make db-migrate` (runs `backend/migrations/001_initial.sql`) |
+| Cloudinary | Create cloud, copy credentials for raw file uploads (`CLOUDINARY_*`) — see `docs/runbooks/cloudinary-setup.md` |
 | FastAPI skeleton | `app/main.py` with health check `/health`, CORS configured for the React dev server |
-| Postgres models | `files`, `processing_jobs`, `segments` tables (from `architecture.md` §8) via SQL migration or `SQLModel`/`SQLAlchemy` |
+| SQLModel models | `files`, `processing_jobs`, `segments` tables (from `architecture.md` §8) |
 | Redis + Celery skeleton | One no-op task (`ping`) wired up to confirm the worker connects |
 | Frontend scaffold | Vite + React + Tailwind, talking to `/health` to confirm connectivity |
-| Env management | `.env` for `OPENAI_API_KEY`, `QDRANT_URL`, `SUPABASE_URL`, `SUPABASE_KEY`, `REDIS_URL` |
+| Env management | `.env` for `DATABASE_URL` (Neon), `CLOUDINARY_*`, `OPENAI_API_KEY`, `QDRANT_URL`, `REDIS_URL` |
+| CI skeleton | `.github/workflows/ci.yml` — four jobs: unit, integration, system, security (no ruff); pytest marker config in `backend/pyproject.toml` |
+| Test layout | `tests/unit/`, `tests/integration/`, `tests/system/`, `tests/security/` with `@pytest.mark.unit` etc. |
 
-**Deliverable:** `docker-compose up` brings up frontend + backend + worker + Qdrant + Redis, frontend shows a green "API connected" state, Postgres tables exist, Supabase Storage bucket exists.
+**Deliverable:** `docker compose up` brings up frontend + backend + worker + Qdrant + Redis (Neon + Cloudinary are external), frontend shows a green "API connected" state, Neon tables exist, Cloudinary configured, and CI runs.
 
 ---
 
@@ -64,14 +70,14 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 - [ ] `/upload` accepts `.txt` / `.md` (PDF optional/stretch)
 - [ ] Chunk text into ~300–500 token windows with overlap (tiktoken-aware)
 - [ ] Embed each chunk → upsert to Qdrant with `modality=text`
-- [ ] Write `segments` rows to Postgres
+- [ ] Write `segments` rows to Neon
 
 ### M3 — Audio
 - [ ] `/upload` accepts `.mp3` / `.wav` / `.m4a`
 - [ ] Send to Whisper API → get timestamped transcript
 - [ ] Window transcript into ~15–30s segments
 - [ ] Embed each segment → upsert with `modality=audio`, `start_time`/`end_time`
-- [ ] Write `segments` rows to Postgres
+- [ ] Write `segments` rows to Neon
 
 ### M4 — Video
 - [ ] `/upload` accepts `.mp4` / `.mov`
@@ -80,7 +86,7 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 - [ ] GPT-4o-mini vision: caption each keyframe
 - [ ] Merge transcript + captions into time-aligned segments
 - [ ] Embed each segment → upsert with `modality=video`, `start_time`/`end_time`
-- [ ] Write `segments` rows to Postgres
+- [ ] Write `segments` rows to Neon
 
 **Deliverable (matches brief Milestone 1):** "A functional pipeline that takes an input file and successfully generates and stores its vector embedding in the chosen vector database" — for **all three modalities**, each independently testable via `/upload` + a Qdrant point count check.
 
@@ -130,14 +136,17 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 
 | Task | Detail |
 |---|---|
-| Unit tests | Embedding service (mocked OpenAI), chunking logic, Qdrant upsert/search wrapper, router/synthesis agent (mocked) |
-| Integration test | One end-to-end test per modality: upload sample file → poll status → confirm Qdrant point exists → search returns it |
-| README | Setup instructions, `.env.example`, `docker-compose up` quickstart, architecture diagram embed |
-| Project report | Architecture decisions (link to `architecture.md`), challenges (e.g. cross-modal embedding alignment, video processing latency/cost), what was deferred (CLIP/CLAP phase B) and why |
+| Unit tests | `tests/unit/` — embedding service (mocked OpenAI), chunking logic, Qdrant upsert/search wrapper, router/synthesis agent (mocked); run locally via `pytest -m unit` |
+| Integration tests | `tests/integration/` — one flow per modality against real Qdrant + Redis + Neon (`DATABASE_URL`); OpenAI mocked or keyed via CI secret |
+| System tests | `tests/system/` — full `docker compose up` stack: health checks, upload→index→search happy path, `/library` and `/status` visibility |
+| Security tests | `tests/security/` — upload path traversal, MIME/size enforcement, auth on protected routes; plus `bandit` (SAST) and `pip-audit` (dependency CVEs) in CI |
+| CI/CD | `.github/workflows/ci.yml` runs unit → integration → system → security on push/PR; ruff is **not** gated in CI (local dev only) |
+| README | Setup instructions, `.env.example`, `docker-compose up` quickstart, architecture diagram embed, CI badge |
+| Project report | Architecture decisions (link to `docs/architecture/architecture.md`), challenges (e.g. cross-modal embedding alignment, video processing latency/cost), what was deferred (CLIP/CLAP phase B) and why |
 | Demo recording | Walk through: upload one file per modality → run the 4 example queries from the brief → show results with playback |
-| Repo hygiene | `.gitignore`, no committed secrets, consistent formatting (`ruff`/`black`, `eslint`/`prettier`) |
+| Repo hygiene | `.gitignore`, no committed secrets, consistent formatting (`ruff`/`black` locally, `eslint`/`prettier` for frontend) |
 
-**Deliverable (matches Submission Guidelines):** GitHub repo (shared with the relevant person), `docs/architecture.md` + `docs/plan.md` + `docs/frontend.md` + report, demo video.
+**Deliverable (matches Submission Guidelines):** GitHub repo for **Scrutinize** (shared with the relevant person), `docs/architecture/architecture.md` + `docs/plan.md` + `docs/frontend.md` + report, demo video, green CI on `main`.
 
 ---
 
@@ -161,4 +170,5 @@ This plan maps the brief's **3 milestones** onto **5 build phases** and **8 modu
 | "Find a song by XYZ" can't be answered by transcription alone if the audio is instrumental/no lyrics | Document this as a known limitation; rely on filename/metadata matching as a fallback; mention CLAP as future work |
 | Whisper/GPT-4o-mini rate limits during a live demo | Pre-index demo files ahead of time; have a fallback recorded demo |
 | Scope creep into "OmniAgent"-style generic agents | Keep the agent layer to exactly 2 agents (router, synthesis) per `architecture.md` §4.4 |
+| CI flakiness on system tests (Docker timing) | Retry health-check waits; keep system suite small (smoke-level); run heavier flows in integration tier |
 | Qdrant payload/schema drift between Phase 1 and Phase 2 | Lock the payload schema (§7 of `architecture.md`) before Phase 1 ingestion starts |
