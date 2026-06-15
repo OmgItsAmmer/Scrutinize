@@ -343,12 +343,6 @@ Scrutinize uses **pytest** with marker-based test tiers. Ruff is used locally fo
 
 ```yaml
 services:
-  frontend:
-    build: ./frontend
-    ports: ["5173:5173"]
-    environment:
-      - VITE_API_URL=http://localhost:8000
-
   backend:
     build: ./backend
     ports: ["8000:8000"]
@@ -381,4 +375,4 @@ volumes:
   qdrant_data:
 ```
 
-Neon (Postgres) and Cloudinary (media storage) are hosted services — configure `DATABASE_URL` and `CLOUDINARY_*` in `.env`. Docker Compose runs Redis, Qdrant, backend, worker, and frontend only. See [Cloudinary runbook](../runbooks/cloudinary-setup.md).
+Neon (Postgres) and Cloudinary (media storage) are hosted services — configure `DATABASE_URL` and `CLOUDINARY_*` in `.env`. Docker Compose runs Redis, Qdrant, backend, and worker; the React frontend runs locally via `npm run dev` in `frontend/` for Vite HMR. See [Cloudinary runbook](../runbooks/cloudinary-setup.md).

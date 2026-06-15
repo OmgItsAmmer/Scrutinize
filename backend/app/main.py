@@ -7,6 +7,7 @@ from app import __version__
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.database import init_db
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.models.file import File  # noqa: F401
 from app.models.processing_job import ProcessingJob  # noqa: F401
 from app.models.segment import Segment  # noqa: F401
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RateLimitMiddleware)
 
     app.include_router(api_router)
     return app
