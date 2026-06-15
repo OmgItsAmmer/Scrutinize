@@ -57,7 +57,7 @@ npm run build        # tsc -b && vite build → dist/
 npm run preview      # preview production build
 ```
 
-Via Docker: `docker compose up --build` (includes frontend service).
+Via Docker: backend stack only — run `docker compose up`, then `npm run dev` locally for HMR.
 
 ## Dependencies
 

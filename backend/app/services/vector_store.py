@@ -8,6 +8,7 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    FilterSelector,
     MatchValue,
     PointStruct,
     VectorParams,
@@ -36,7 +37,10 @@ class VectorStore:
     TEXT_VECTOR_NAME = "text_vector"
 
     def __init__(self, settings: Settings) -> None:
-        self._client = QdrantClient(url=settings.qdrant_url.rstrip("/"))
+        self._client = QdrantClient(
+            url=settings.qdrant_url.rstrip("/"),
+            check_compatibility=False,
+        )
         self._collection = settings.qdrant_collection
         self._vector_size = settings.embedding_dimensions
 
@@ -120,3 +124,20 @@ class VectorStore:
             return 0
         info = self._client.get_collection(self._collection)
         return info.points_count or 0
+
+    def delete_by_file_id(self, file_id: UUID) -> None:
+        if not self.collection_exists():
+            return
+        self._client.delete(
+            collection_name=self._collection,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="file_id",
+                            match=MatchValue(value=str(file_id)),
+                        )
+                    ]
+                )
+            ),
+        )

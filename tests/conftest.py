@@ -15,6 +15,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.core.config import get_settings  # noqa: E402
+from app.core.rate_limit import reset_rate_limit_store  # noqa: E402
 from app.core.database import (  # noqa: E402
     get_session,
     init_db,
@@ -29,20 +30,39 @@ from app.models.segment import Segment  # noqa: E402
 from app.schemas.health import DependencyCheck  # noqa: E402
 
 
+_TEST_DEFAULTS = {
+    "DATABASE_URL": "sqlite://",
+    "OPENAI_API_KEY": "test-key",
+    "CLOUDINARY_CLOUD_NAME": "test-cloud",
+    "CLOUDINARY_API_KEY": "test-api-key",
+    "CLOUDINARY_API_SECRET": "test-api-secret",
+    "RATE_LIMIT_ENABLED": "false",
+}
+
+
 @pytest.fixture(autouse=True)
-def _test_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
-    # Satisfy Settings validation without opening a real Postgres connection in unit tests.
-    if not os.getenv("DATABASE_URL"):
-        monkeypatch.setenv("DATABASE_URL", "sqlite://")
+def _test_env(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    # Integration/system jobs inject real secrets via CI; don't clobber them.
+    if request.node.get_closest_marker("integration") or request.node.get_closest_marker("system"):
+        if not os.getenv("DATABASE_URL"):
+            monkeypatch.setenv("DATABASE_URL", "sqlite://")
+        yield
+        return
+
+    for key, value in _TEST_DEFAULTS.items():
+        if not os.getenv(key):
+            monkeypatch.setenv(key, value)
     yield
 
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache() -> Generator[None, None, None]:
     get_settings.cache_clear()
+    reset_rate_limit_store()
     reset_engine()
     yield
     get_settings.cache_clear()
+    reset_rate_limit_store()
     reset_engine()
 
 

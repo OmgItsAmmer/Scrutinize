@@ -26,22 +26,15 @@ export function SearchView() {
 
   return (
     <div className="flex h-full flex-col bg-[var(--chatly-bg)]">
-      <header className="flex items-center justify-end px-8 py-4">
-        <span className="text-xs text-[var(--chatly-text-secondary)]">
-          Semantic search across text, audio, and video
-        </span>
-      </header>
+      
 
       <div className="flex flex-1 flex-col overflow-y-auto px-6">
         {isEmptyState && (
           <div className="flex flex-1 flex-col items-center justify-center pb-8">
             <div className="mb-10 w-full max-w-2xl text-center">
-              <div className="mb-3 flex items-center justify-center gap-2 text-base font-medium text-[var(--chatly-text-secondary)]">
-                <IconSpark className="h-4 w-4 text-amber-500" />
-                <span>Hey {userName}</span>
-              </div>
+              
               <h1 className="text-[2rem] font-bold leading-tight tracking-tight text-[var(--chatly-text-primary)] sm:text-[2.5rem]">
-                What&apos;s on your mind today?
+               Hey,  What&apos;s on your mind today?
               </h1>
             </div>
 

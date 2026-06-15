@@ -1,4 +1,4 @@
-.PHONY: up down logs backend-shell db-migrate test test-unit test-integration test-system test-security lint
+.PHONY: up down logs backend-shell db-migrate test test-unit test-integration test-system test-security lint install-frontend frontend-dev
 
 up:
 	docker compose up --build
@@ -61,3 +61,6 @@ test-security:
 lint:
 	cd backend && ruff check app
 	cd backend && ruff format --check app
+
+frontend-dev:
+	cd frontend && npm run dev

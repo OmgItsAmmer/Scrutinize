@@ -8,10 +8,8 @@ export type ModelOption = {
 };
 
 const MODELS: ModelOption[] = [
-  { id: "gpt-4o-mini", label: "GPT-4o-mini", provider: "OpenAI" },
-  { id: "gpt-4o", label: "GPT-4o", provider: "OpenAI" },
-  { id: "claude-sonnet", label: "Claude Sonnet 4.6", provider: "Anthropic" },
-  { id: "gemini-flash", label: "Gemini 3.1 Flash", provider: "Google" },
+  { id: "gpt-4o-mini", label: "GPT-4o-mini (recommended)", provider: "OpenAI" },
+ 
 ];
 
 type ModelSelectorProps = {

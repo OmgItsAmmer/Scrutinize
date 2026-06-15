@@ -3,9 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - main
       - develop
-      - "feature/**"
   pull_request:
     branches:
       - main
@@ -60,8 +58,6 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    # Temporarily disabled until GitHub Actions secrets are configured (DATABASE_URL, OPENAI_*, CLOUDINARY_*).
-    if: false
     runs-on: ubuntu-latest
     services:
       redis:
@@ -135,8 +131,6 @@ jobs:
 
   system-tests:
     name: System Tests
-    # Temporarily disabled until GitHub Actions secrets are configured (DATABASE_URL, OPENAI_*, CLOUDINARY_*).
-    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

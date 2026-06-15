@@ -113,3 +113,17 @@ class JobOrchestrator:
     def list_segments_for_file(self, file_id: UUID) -> list[Segment]:
         statement = select(Segment).where(Segment.file_id == file_id)
         return list(self.session.exec(statement).all())
+
+    def delete_file(self, file_id: UUID) -> File:
+        file_record = self.session.get(File, file_id)
+        if file_record is None:
+            raise LookupError(f"File {file_id} not found")
+
+        for segment in self.list_segments_for_file(file_id):
+            self.session.delete(segment)
+        for job in self.list_jobs_for_file(file_id):
+            self.session.delete(job)
+
+        self.session.delete(file_record)
+        self.session.commit()
+        return file_record

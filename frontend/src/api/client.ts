@@ -1,4 +1,5 @@
 import type {
+  DeleteFileResponse,
   HealthResponse,
   JobStatusResponse,
   LibraryResponse,
@@ -75,4 +76,15 @@ export function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {
 
 export function fetchLibrary(): Promise<LibraryResponse> {
   return request<LibraryResponse>("/library");
+}
+
+export function deleteLibraryFile(fileId: string): Promise<DeleteFileResponse> {
+  return request<DeleteFileResponse>(`/library/${fileId}`, {
+    method: "DELETE",
+  });
+}
+
+export function libraryFileContentUrl(fileId: string, download = false): string {
+  const params = download ? "?download=true" : "";
+  return `${API_URL}/library/${fileId}/content${params}`;
 }

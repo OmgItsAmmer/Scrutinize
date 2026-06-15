@@ -12,6 +12,7 @@ import {
   fetchHealth,
   fetchJobStatus,
   fetchLibrary,
+  deleteLibraryFile as deleteLibraryFileRequest,
   getApiUrl,
   searchContent,
   uploadFile,
@@ -74,7 +75,8 @@ type Action =
   | { type: "SET_DRAG_ACTIVE"; active: boolean }
   | { type: "LIBRARY_START" }
   | { type: "LIBRARY_SUCCESS"; files: LibraryFileItem[] }
-  | { type: "LIBRARY_ERROR"; error: string };
+  | { type: "LIBRARY_ERROR"; error: string }
+  | { type: "LIBRARY_FILE_REMOVED"; fileId: string };
 
 const initialState: AppState = {
   view: "search",
@@ -208,6 +210,14 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         library: { ...state.library, loading: false, error: action.error },
       };
+    case "LIBRARY_FILE_REMOVED":
+      return {
+        ...state,
+        library: {
+          ...state.library,
+          files: state.library.files.filter((file) => file.id !== action.fileId),
+        },
+      };
     default:
       return state;
   }
@@ -224,6 +234,7 @@ type AppContextValue = {
   uploadFiles: (files: FileList | File[]) => Promise<void>;
   setDragActive: (active: boolean) => void;
   refreshLibrary: () => Promise<void>;
+  deleteLibraryFile: (fileId: string) => Promise<void>;
   dismissUploadJob: (jobId: string) => void;
 };
 
@@ -312,6 +323,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteLibraryFile = useCallback(async (fileId: string) => {
+    try {
+      await deleteLibraryFileRequest(fileId);
+      dispatch({ type: "LIBRARY_FILE_REMOVED", fileId });
+    } catch (error) {
+      dispatch({ type: "LIBRARY_ERROR", error: formatError(error) });
+      throw error;
+    }
+  }, []);
+
   useEffect(() => {
     if (state.view === "library") {
       void refreshLibrary();
@@ -384,9 +405,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       uploadFiles: uploadFilesHandler,
       setDragActive: (active) => dispatch({ type: "SET_DRAG_ACTIVE", active }),
       refreshLibrary,
+      deleteLibraryFile,
       dismissUploadJob: (jobId) => dispatch({ type: "UPLOAD_JOB_REMOVE", jobId }),
     }),
-    [refreshLibrary, runSearch, state, uploadFilesHandler],
+    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

@@ -72,6 +72,15 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    # Rate limiting — protects OpenAI/Whisper quotas from request floods.
+    rate_limit_enabled: bool = True
+    rate_limit_expensive_requests: int = 10
+    rate_limit_expensive_window_seconds: int = 60
+    rate_limit_general_requests: int = 120
+    rate_limit_general_window_seconds: int = 60
+    rate_limit_global_requests: int = 300
+    rate_limit_global_window_seconds: int = 60
+
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
 

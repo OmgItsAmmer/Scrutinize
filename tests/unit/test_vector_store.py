@@ -47,3 +47,19 @@ def test_search_applies_modality_filter():
     assert kwargs["limit"] == 5
     assert kwargs["using"] == VectorStore.TEXT_VECTOR_NAME
     assert kwargs["query_filter"] is not None
+
+
+@pytest.mark.unit
+def test_delete_by_file_id_uses_filter_selector():
+    settings = Settings(qdrant_collection="segments-test")
+    store = VectorStore(settings)
+    store._client = MagicMock()
+    store._client.collection_exists.return_value = True
+    file_id = uuid4()
+
+    store.delete_by_file_id(file_id)
+
+    store._client.delete.assert_called_once()
+    _, kwargs = store._client.delete.call_args
+    assert kwargs["collection_name"] == "segments-test"
+    assert kwargs["points_selector"].filter is not None

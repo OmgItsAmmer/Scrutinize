@@ -26,13 +26,20 @@ Multi-modal AI embedding and retrieval system. Upload text, audio, and video; se
    make db-migrate
    ```
 
-4. Start the stack (Redis, Qdrant, backend, worker, frontend):
+4. Start backend services (Redis, Qdrant, backend, worker):
 
    ```bash
    docker compose up --build
    ```
 
-5. Open the app:
+5. In a second terminal, start the frontend dev server (Vite HMR):
+
+   ```bash
+   make install-frontend   # first time only
+   make frontend-dev
+   ```
+
+6. Open the app:
 
    - Frontend: http://localhost:5173
    - API docs: http://localhost:8000/docs

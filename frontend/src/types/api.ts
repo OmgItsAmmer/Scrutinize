@@ -62,11 +62,18 @@ export type LibraryFileItem = {
   uploaded_at: string;
   duration_seconds: number | null;
   size_bytes: number | null;
+  storage_url: string;
+  thumbnail_url: string | null;
 };
 
 export type LibraryResponse = {
   files: LibraryFileItem[];
   total: number;
+};
+
+export type DeleteFileResponse = {
+  file_id: string;
+  message: string;
 };
 
 export type ModalityFilter = FileModality | "all";

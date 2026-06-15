@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import { formatDateTime, formatDurationSeconds } from "../lib/format";
-import type { FileStatus, LibraryFileItem } from "../types/api";
+import type { FileModality, FileStatus, LibraryFileItem } from "../types/api";
+import { IconDocument, IconFilm, IconTrash, IconWaveform } from "./icons";
+import { MediaPreviewModal } from "./MediaPreviewModal";
 
 function statusBadge(status: FileStatus): string {
   switch (status) {
@@ -15,9 +18,59 @@ function statusBadge(status: FileStatus): string {
   }
 }
 
-function LibraryRow({ file }: { file: LibraryFileItem }) {
+function ThumbnailPlaceholder({ modality }: { modality: FileModality }) {
+  const styles = {
+    text: "bg-sky-100 text-sky-700",
+    audio: "bg-violet-100 text-violet-700",
+    video: "bg-amber-100 text-amber-700",
+  }[modality];
+
+  const Icon = modality === "video" ? IconFilm : modality === "audio" ? IconWaveform : IconDocument;
+
+  return (
+    <div
+      className={`flex h-14 w-20 items-center justify-center rounded-lg border border-zinc-200 ${styles}`}
+    >
+      <Icon className="h-6 w-6" />
+    </div>
+  );
+}
+
+function FileThumbnail({ file, onClick }: { file: LibraryFileItem; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group overflow-hidden rounded-lg border border-zinc-200 transition hover:border-zinc-300 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+      title={`Preview ${file.filename}`}
+    >
+      {file.thumbnail_url ? (
+        <img
+          src={file.thumbnail_url}
+          alt={file.filename}
+          className="h-14 w-20 object-cover transition group-hover:scale-105"
+          loading="lazy"
+        />
+      ) : (
+        <ThumbnailPlaceholder modality={file.modality} />
+      )}
+    </button>
+  );
+}
+
+type LibraryRowProps = {
+  file: LibraryFileItem;
+  deleting: boolean;
+  onPreview: (file: LibraryFileItem) => void;
+  onDelete: (file: LibraryFileItem) => void;
+};
+
+function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryRowProps) {
   return (
     <tr className="border-b border-zinc-100 last:border-0">
+      <td className="px-4 py-3">
+        <FileThumbnail file={file} onClick={() => onPreview(file)} />
+      </td>
       <td className="px-4 py-3 text-sm font-medium text-zinc-900">{file.filename}</td>
       <td className="px-4 py-3 text-sm capitalize text-zinc-600">{file.modality}</td>
       <td className="px-4 py-3">
@@ -30,22 +83,55 @@ function LibraryRow({ file }: { file: LibraryFileItem }) {
       <td className="px-4 py-3 text-sm text-zinc-600">{file.segment_count}</td>
       <td className="px-4 py-3 text-sm text-zinc-600">{formatDurationSeconds(file.duration_seconds)}</td>
       <td className="px-4 py-3 text-sm text-zinc-500">{formatDateTime(file.uploaded_at)}</td>
+      <td className="px-4 py-3 text-right">
+        <button
+          type="button"
+          onClick={() => onDelete(file)}
+          disabled={deleting}
+          className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+          title={`Delete ${file.filename}`}
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+          {deleting ? "Deleting…" : "Delete"}
+        </button>
+      </td>
     </tr>
   );
 }
 
 export function LibraryView() {
-  const { state, refreshLibrary } = useApp();
+  const { state, refreshLibrary, deleteLibraryFile } = useApp();
   const { library } = state;
+  const [previewFile, setPreviewFile] = useState<LibraryFileItem | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(file: LibraryFileItem) {
+    const confirmed = window.confirm(
+      `Delete "${file.filename}"? This removes the file from Cloudinary, Qdrant, and Neon.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(file.id);
+    try {
+      await deleteLibraryFile(file.id);
+      if (previewFile?.id === file.id) {
+        setPreviewFile(null);
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="flex h-full flex-col overflow-y-auto px-8 py-8">
-      <div className="mx-auto w-full max-w-5xl">
+      <div className="mx-auto w-full max-w-6xl">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-zinc-900">My Index</h1>
             <p className="mt-2 text-sm text-zinc-500">
-              All uploaded files and their indexing status.
+              All uploaded files and their indexing status. Click a thumbnail to preview.
             </p>
           </div>
           <button
@@ -78,17 +164,25 @@ export function LibraryView() {
               <table className="min-w-full">
                 <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
                   <tr>
+                    <th className="px-4 py-3">Preview</th>
                     <th className="px-4 py-3">File</th>
                     <th className="px-4 py-3">Type</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Segments</th>
                     <th className="px-4 py-3">Duration</th>
                     <th className="px-4 py-3">Uploaded</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {library.files.map((file) => (
-                    <LibraryRow key={file.id} file={file} />
+                    <LibraryRow
+                      key={file.id}
+                      file={file}
+                      deleting={deletingId === file.id}
+                      onPreview={setPreviewFile}
+                      onDelete={(item) => void handleDelete(item)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -96,6 +190,10 @@ export function LibraryView() {
           )}
         </div>
       </div>
+
+      {previewFile && (
+        <MediaPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
     </div>
   );
 }

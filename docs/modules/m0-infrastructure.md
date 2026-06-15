@@ -26,7 +26,7 @@ Scrutinize/
 
 | Artifact | Role |
 |---|---|
-| `docker-compose.yml` | Redis, Qdrant, backend, Celery worker, frontend |
+| `docker-compose.yml` | Redis, Qdrant, backend, Celery worker |
 | `.env.example` | Template for Neon, Cloudinary, Redis, Qdrant, OpenAI |
 | `.github/workflows/ci.yml` | unit / integration / system / security jobs (no ruff gate) |
 | `Makefile` | Dev and test commands (see below) |
@@ -43,7 +43,8 @@ Scrutinize/
 | `qdrant` | 6333 | Vector DB (used by health check; ingestion in later phases) |
 | `backend` | 8000 | FastAPI (`env_file: .env`) |
 | `worker` | — | `celery -A app.workers.celery_app worker` |
-| `frontend` | 5173 | Vite dev server |
+
+Frontend runs locally via `make frontend-dev` (`npm run dev` in `frontend/`) for Vite HMR.
 
 **Hosted (not in Compose):** Neon Postgres (`DATABASE_URL`), Cloudinary (`CLOUDINARY_*`).
 
@@ -76,6 +77,7 @@ Setup guides: [Cloudinary runbook](../runbooks/cloudinary-setup.md)
 | `make cloudinary-smoke` | Test Cloudinary upload |
 | `make install-backend` | `pip install -e "./backend[dev]"` |
 | `make install-frontend` | `npm install` in `frontend/` |
+| `make frontend-dev` | Vite dev server with HMR (`frontend/`) |
 | `make test-unit` | `pytest tests/unit -m unit` |
 | `make test-integration` | `pytest tests/integration -m integration` |
 | `make test-system` | `pytest tests/system -m system` |
@@ -105,10 +107,11 @@ cp .env.example .env
 make install-backend
 make db-migrate
 docker compose up --build
+make frontend-dev   # separate terminal
 ```
 
 ## Consumed by
 
 - **M1** — Neon, Redis, Qdrant, Cloudinary config
-- **M7** — frontend Docker service, `VITE_API_URL`
+- **M7** — `VITE_API_URL`, local Vite dev server
 - **M8** — CI workflow, test layout

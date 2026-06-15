@@ -15,8 +15,15 @@ class LibraryFileItem(BaseModel):
     uploaded_at: datetime
     duration_seconds: float | None = None
     size_bytes: int | None = None
+    storage_url: str
+    thumbnail_url: str | None = None
 
 
 class LibraryResponse(BaseModel):
     files: list[LibraryFileItem]
     total: int
+
+
+class DeleteFileResponse(BaseModel):
+    file_id: UUID
+    message: str

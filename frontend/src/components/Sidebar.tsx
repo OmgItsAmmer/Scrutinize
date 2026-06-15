@@ -8,9 +8,9 @@ const NAV_ITEMS: {
   icon: typeof IconPlus;
   clearSearch?: boolean;
 }[] = [
-  { id: "search", label: "New Search", icon: IconPlus, clearSearch: true },
+  { id: "search", label: "New Chat", icon: IconPlus, clearSearch: true },
   { id: "upload", label: "Upload", icon: IconUpload },
-  { id: "library", label: "My Index", icon: IconLibrary },
+  { id: "library", label: "My Library", icon: IconLibrary },
 ];
 
 export function Sidebar() {
