@@ -1,0 +1,261 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  QDRANT_URL: http://localhost:6333
+  REDIS_URL: redis://localhost:6379/0
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements*.txt
+            backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/pyproject.toml ]; then
+            pip install -e "./backend[dev]"
+          elif [ -f backend/requirements-dev.txt ]; then
+            pip install -r backend/requirements-dev.txt
+            pip install -r backend/requirements.txt
+          else
+            pip install pytest pytest-asyncio httpx
+          fi
+
+      - name: Run unit tests
+        run: |
+          if find tests/unit -name 'test_*.py' -print -quit 2>/dev/null | grep -q .; then
+            pytest tests/unit -m unit -v --tb=short
+          else
+            echo "No unit tests found under tests/unit — skipping"
+          fi
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.18.2
+        ports:
+          - 6333:6333
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements*.txt
+            backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/pyproject.toml ]; then
+            pip install -e "./backend[dev]"
+          elif [ -f backend/requirements-dev.txt ]; then
+            pip install -r backend/requirements-dev.txt
+            pip install -r backend/requirements.txt
+          else
+            pip install pytest pytest-asyncio httpx
+          fi
+
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "${QDRANT_URL}/collections" > /dev/null; then
+              echo "Qdrant is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Qdrant did not become ready in time"
+          exit 1
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+        run: |
+          if find tests/integration -name 'test_*.py' -print -quit 2>/dev/null | grep -q .; then
+            pytest tests/integration -m integration -v --tb=short
+          else
+            echo "No integration tests found under tests/integration — skipping"
+          fi
+
+  system-tests:
+    name: System Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements*.txt
+            backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/pyproject.toml ]; then
+            pip install -e "./backend[dev]"
+          elif [ -f backend/requirements-dev.txt ]; then
+            pip install -r backend/requirements-dev.txt
+            pip install -r backend/requirements.txt
+          else
+            pip install pytest pytest-asyncio httpx
+          fi
+
+      - name: Start stack
+        id: stack
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+        run: |
+          if [ ! -f docker-compose.yml ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "docker-compose.yml not found — system tests will be skipped"
+            exit 0
+          fi
+          mkdir -p backend
+          {
+            printf 'ENVIRONMENT=ci\n'
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+            printf 'CLOUDINARY_CLOUD_NAME=%s\n' "$CLOUDINARY_CLOUD_NAME"
+            printf 'CLOUDINARY_API_KEY=%s\n' "$CLOUDINARY_API_KEY"
+            printf 'CLOUDINARY_API_SECRET=%s\n' "$CLOUDINARY_API_SECRET"
+          } > backend/.env
+          docker compose up -d --wait --timeout 120
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run system tests
+        if: steps.stack.outputs.ready == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          VITE_API_URL: http://localhost:8000
+        run: pytest tests/system -m system -v --tb=short
+
+      - name: Skip system tests (stack not configured)
+        if: steps.stack.outputs.ready != 'true'
+        run: echo "System test stack not configured yet — job passes until docker-compose.yml exists"
+
+      - name: Tear down stack
+        if: always() && steps.stack.outputs.ready == 'true'
+        run: |
+          if [ -f docker-compose.yml ]; then
+            docker compose down -v
+          fi
+
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements*.txt
+            backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/pyproject.toml ]; then
+            pip install -e "./backend[dev]"
+          elif [ -f backend/requirements-dev.txt ]; then
+            pip install -r backend/requirements-dev.txt
+            pip install -r backend/requirements.txt
+          else
+            pip install pytest bandit pip-audit
+          fi
+          pip install bandit pip-audit
+
+      - name: Run Bandit (SAST)
+        run: |
+          if [ -d backend/app ]; then
+            bandit -r backend/app -ll -q
+          else
+            echo "backend/app not found — skipping Bandit until application code exists"
+          fi
+
+      - name: Run pip-audit (dependency CVEs)
+        run: |
+          if [ -f backend/requirements.txt ]; then
+            pip-audit -r backend/requirements.txt
+          elif [ -f backend/pyproject.toml ]; then
+            pip-audit
+          else
+            echo "No requirements manifest yet — skipping pip-audit"
+          fi
+
+      - name: Run security pytest suite
+        run: |
+          if find tests/security -name 'test_*.py' -print -quit 2>/dev/null | grep -q .; then
+            pytest tests/security -m security -v --tb=short
+          else
+            echo "No security tests found under tests/security — skipping pytest (Bandit/pip-audit still ran)"
+          fi
