@@ -1,0 +1,19 @@
+app = "scrutinize-worker"
+primary_region = "ord"
+
+[build]
+  dockerfile = "../../../backend/Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+
+[processes]
+  worker = "celery -A app.workers.celery_app worker --loglevel=info"
+
+[[vm]]
+  memory = "1gb"             # budget text-only; use "2gb" for video / always-on
+  cpu_kind = "shared"
+  cpus = 1                   # use 2 with 2gb for video
+
+# Worker has no public HTTP service — omit [http_service]
+# It will NOT auto-start from browser traffic; scale manually (§5d).

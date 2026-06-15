@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.core.rate_limit import (
@@ -11,7 +10,6 @@ from app.core.rate_limit import (
     reset_rate_limit_store,
     route_tier,
 )
-from app.main import create_app
 
 
 def _limiter(
@@ -83,24 +81,22 @@ def test_get_client_ip_prefers_forwarded_header():
 
 
 @pytest.mark.unit
-def test_middleware_returns_429_when_limit_exceeded(monkeypatch):
+def test_middleware_returns_429_when_limit_exceeded(client, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
-    monkeypatch.setenv("RATE_LIMIT_EXPENSIVE_REQUESTS", "1")
+    monkeypatch.setenv("RATE_LIMIT_GENERAL_REQUESTS", "1")
     reset_rate_limit_store()
 
     from app.core.config import get_settings
 
     get_settings.cache_clear()
 
-    app = create_app()
-    with TestClient(app) as client:
-        first = client.post("/search", json={"query": "hello"})
-        assert first.status_code in {200, 422, 500}
+    first = client.get("/library")
+    assert first.status_code == 200
 
-        second = client.post("/search", json={"query": "hello again"})
-        assert second.status_code == 429
-        assert "Rate limit exceeded" in second.json()["detail"]
-        assert second.headers.get("Retry-After")
+    second = client.get("/library")
+    assert second.status_code == 429
+    assert "Rate limit exceeded" in second.json()["detail"]
+    assert second.headers.get("Retry-After")
 
     get_settings.cache_clear()
     reset_rate_limit_store()

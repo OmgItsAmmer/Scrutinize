@@ -1,0 +1,27 @@
+app = "scrutinize-qdrant"
+primary_region = "ord"
+
+[build]
+  image = "qdrant/qdrant:v1.18.2"
+
+[mounts]
+  source = "qdrant_data"
+  destination = "/qdrant/storage"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 6333
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 6333
+
+[checks]
+  [checks.http]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/collections"
+    port = 6333
+    timeout = "5s"
+    type = "http"
