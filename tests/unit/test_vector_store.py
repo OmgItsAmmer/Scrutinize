@@ -38,11 +38,12 @@ def test_search_applies_modality_filter():
     store = VectorStore(settings)
     store._client = MagicMock()
     store._client.collection_exists.return_value = True
-    store._client.search.return_value = []
+    store._client.query_points.return_value = MagicMock(points=[])
 
     with patch.object(store, "ensure_collection"):
         store.search([0.1, 0.2], top_k=5, modality="text")
 
-    _, kwargs = store._client.search.call_args
+    _, kwargs = store._client.query_points.call_args
     assert kwargs["limit"] == 5
+    assert kwargs["using"] == VectorStore.TEXT_VECTOR_NAME
     assert kwargs["query_filter"] is not None

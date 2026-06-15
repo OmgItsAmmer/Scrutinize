@@ -6,6 +6,10 @@ up:
 down:
 	docker compose down -v
 
+reset-qdrant:
+	docker compose down -v
+	docker compose pull qdrant
+
 logs:
 	docker compose logs -f
 
@@ -29,6 +33,9 @@ check-audio-ingestion:
 
 check-video-ingestion:
 	cd backend && python scripts/check_video_ingestion.py $(FILE)
+
+check-search:
+	cd backend && python scripts/check_search.py $(QUERY)
 
 install-backend:
 	cd backend && pip install -e ".[dev]"

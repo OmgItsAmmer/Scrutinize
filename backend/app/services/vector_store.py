@@ -99,19 +99,20 @@ class VectorStore:
                 must=[FieldCondition(key="modality", match=MatchValue(value=modality))]
             )
 
-        results = self._client.search(
+        response = self._client.query_points(
             collection_name=self._collection,
-            query_vector=(self.TEXT_VECTOR_NAME, query_vector),
+            query=query_vector,
+            using=self.TEXT_VECTOR_NAME,
             limit=top_k,
             query_filter=query_filter,
         )
         return [
             {
-                "id": hit.id,
-                "score": hit.score,
-                "payload": hit.payload,
+                "id": point.id,
+                "score": point.score,
+                "payload": point.payload,
             }
-            for hit in results
+            for point in response.points
         ]
 
     def count_points(self) -> int:

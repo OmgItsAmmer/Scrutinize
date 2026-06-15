@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
 
+    # Search & agents (M6)
+    router_model: str = "gpt-4o-mini"
+    synthesis_model: str = "gpt-4o-mini"
+    search_top_k: int = 5
+
     # Cloudinary — raw file uploads (text, audio, video); relational data lives in Neon.
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
