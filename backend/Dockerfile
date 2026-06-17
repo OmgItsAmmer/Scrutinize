@@ -15,4 +15,5 @@ RUN pip install --upgrade pip && pip install .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# PORT is set in fly.toml; default 8000 for local Docker.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

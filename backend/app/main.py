@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,16 +13,24 @@ from app.models.file import File  # noqa: F401
 from app.models.processing_job import ProcessingJob  # noqa: F401
 from app.models.segment import Segment  # noqa: F401
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
     if not settings.database_url.strip():
-        raise RuntimeError(
-            "DATABASE_URL is required. Add your Neon Postgres connection string to .env "
-            "(see .env.example)."
+        msg = (
+            "DATABASE_URL is required. Set it via fly secrets set -a scrutinize-api "
+            "DATABASE_URL=..."
         )
-    init_db()
+        logger.error(msg)
+        raise RuntimeError(msg)
+    try:
+        init_db()
+    except Exception:
+        logger.exception("Database init failed — check DATABASE_URL and Neon connectivity")
+        raise
     yield
 
 

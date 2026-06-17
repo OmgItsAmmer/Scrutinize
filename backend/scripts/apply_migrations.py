@@ -43,11 +43,12 @@ def apply_migration(path: Path, dsn: str) -> None:
 
 def main() -> None:
     database_url = _load_database_url()
-    migration = MIGRATIONS_DIR / "001_initial.sql"
-    if not migration.exists():
-        print(f"Migration not found: {migration}", file=sys.stderr)
+    migrations = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    if not migrations:
+        print(f"No migrations found in {MIGRATIONS_DIR}", file=sys.stderr)
         sys.exit(1)
-    apply_migration(migration, database_url)
+    for migration in migrations:
+        apply_migration(migration, database_url)
 
 
 if __name__ == "__main__":
