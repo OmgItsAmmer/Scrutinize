@@ -25,14 +25,8 @@ primary_region = "ord"
     hard_limit = 50
     soft_limit = 40
 
-  [[http_service.checks]]
-    grace_period = "30s"
-    interval = "30s"
-    method = "GET"
-    path = "/health"
-    port = 8000
-    timeout = "10s"
-    type = "http"
+# No [http_service.checks] — Fly health probes keep the machine awake.
+# Frontend wake: GET /health on landing (see AppContext.tsx).
 
 [[vm]]
   memory = "512mb"           # 256mb OOMs under load; 512mb minimum for API

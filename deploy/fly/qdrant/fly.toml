@@ -16,12 +16,4 @@ primary_region = "ord"
   [[services.ports]]
     port = 6333
 
-[checks]
-  [checks.http]
-    grace_period = "30s"
-    interval = "15s"
-    method = "GET"
-    path = "/collections"
-    port = 6333
-    timeout = "5s"
-    type = "http"
+# No [checks] — avoid keeping the machine awake between user visits.
