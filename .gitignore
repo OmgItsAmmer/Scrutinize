@@ -17,3 +17,4 @@ qdrant_data/
 Thumbs.db
 *.log
 backend/.env
+frontend/.env
