@@ -4,12 +4,14 @@ from typing import Any
 from uuid import UUID
 
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
     FilterSelector,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -61,8 +63,29 @@ class VectorStore:
             },
         )
 
+    def _ensure_payload_indexes(self) -> None:
+        """Qdrant Cloud requires payload indexes before filter/delete on fields."""
+        if not self.collection_exists():
+            return
+
+        for field_name in ("file_id", "modality"):
+            try:
+                self._client.create_payload_index(
+                    collection_name=self._collection,
+                    field_name=field_name,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except UnexpectedResponse as exc:
+                # Index already exists — safe to ignore.
+                if exc.status_code not in {400, 409}:
+                    raise
+                message = str(exc).lower()
+                if "already exists" not in message and "already indexed" not in message:
+                    raise
+
     def ensure_collection(self) -> None:
         self.create_collection()
+        self._ensure_payload_indexes()
 
     def upsert_segments(self, segments: list[VectorSegment]) -> None:
         if not segments:
@@ -129,6 +152,7 @@ class VectorStore:
     def delete_by_file_id(self, file_id: UUID) -> None:
         if not self.collection_exists():
             return
+        self._ensure_payload_indexes()
         self._client.delete(
             collection_name=self._collection,
             points_selector=FilterSelector(

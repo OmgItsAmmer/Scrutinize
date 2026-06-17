@@ -124,6 +124,9 @@ class JobOrchestrator:
         for job in self.list_jobs_for_file(file_id):
             self.session.delete(job)
 
+        # SQLAlchemy may flush DELETE files before child rows without an explicit flush.
+        self.session.flush()
+
         self.session.delete(file_record)
         self.session.commit()
         return file_record
