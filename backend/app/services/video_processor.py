@@ -94,12 +94,11 @@ class VideoProcessor:
                     temp_dir_path / "frames",
                     settings=self._settings,
                 )
+                frame_paths = [frame_path for frame_path, _ in keyframe_items]
+                frame_captions = self._vision_service.caption_images(frame_paths)
                 captions = [
-                    KeyframeCaption(
-                        timestamp=timestamp,
-                        caption=self._vision_service.caption_image(frame_path),
-                    )
-                    for frame_path, timestamp in keyframe_items
+                    KeyframeCaption(timestamp=timestamp, caption=caption)
+                    for (_, timestamp), caption in zip(keyframe_items, frame_captions, strict=True)
                 ]
 
                 merged_windows = merge_transcript_with_captions(transcript_windows, captions)

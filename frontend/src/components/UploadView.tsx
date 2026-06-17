@@ -45,9 +45,9 @@ export function UploadView() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-8 py-8">
+    <div className="flex h-full flex-col overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto w-full max-w-2xl">
-        <h1 className="text-2xl font-semibold text-zinc-900">Upload content</h1>
+        <h1 className="text-xl font-semibold text-zinc-900 sm:text-2xl">Upload content</h1>
         <p className="mt-2 text-sm text-zinc-500">
           Add text, audio, or video files. Scrutinize will index them in the background.
         </p>
@@ -69,7 +69,7 @@ export function UploadView() {
             setDragActive(false);
             handleFiles(event.dataTransfer.files);
           }}
-          className={`mt-8 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed px-8 py-16 text-center transition ${
+          className={`mt-6 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed px-4 py-10 text-center transition sm:mt-8 sm:px-8 sm:py-16 ${
             upload.dragActive
               ? "border-zinc-900 bg-zinc-50"
               : "border-zinc-200 bg-white hover:border-zinc-300"

@@ -58,14 +58,14 @@ function FileThumbnail({ file, onClick }: { file: LibraryFileItem; onClick: () =
   );
 }
 
-type LibraryRowProps = {
+type LibraryItemProps = {
   file: LibraryFileItem;
   deleting: boolean;
   onPreview: (file: LibraryFileItem) => void;
   onDelete: (file: LibraryFileItem) => void;
 };
 
-function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryRowProps) {
+function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
   return (
     <tr className="border-b border-zinc-100 last:border-0">
       <td className="px-4 py-3">
@@ -99,6 +99,43 @@ function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryRowProps) {
   );
 }
 
+function LibraryFileCard({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
+  return (
+    <article className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <div className="flex gap-3">
+        <FileThumbnail file={file} onClick={() => onPreview(file)} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-zinc-900">{file.filename}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <span className="text-xs capitalize text-zinc-500">{file.modality}</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusBadge(file.status)}`}
+            >
+              {file.status}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+        <span>
+          {file.segment_count} segments · {formatDurationSeconds(file.duration_seconds)}
+        </span>
+        <span>{formatDateTime(file.uploaded_at)}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => onDelete(file)}
+        disabled={deleting}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+        title={`Delete ${file.filename}`}
+      >
+        <IconTrash className="h-3.5 w-3.5" />
+        {deleting ? "Deleting…" : "Delete"}
+      </button>
+    </article>
+  );
+}
+
 export function LibraryView() {
   const { state, refreshLibrary, deleteLibraryFile } = useApp();
   const { library } = state;
@@ -125,20 +162,20 @@ export function LibraryView() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-8 py-8">
+    <div className="flex h-full flex-col overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto w-full max-w-6xl">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-zinc-900">My Index</h1>
-            <p className="mt-2 text-sm text-zinc-500">
-              All uploaded files and their indexing status. Click a thumbnail to preview.
+            <h1 className="text-xl font-semibold text-zinc-900 sm:text-2xl">My Index</h1>
+            <p className="mt-1.5 text-sm text-zinc-500 sm:mt-2">
+              All uploaded files and their indexing status. Tap a thumbnail to preview.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void refreshLibrary()}
             disabled={library.loading}
-            className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+            className="w-full rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 sm:w-auto"
           >
             {library.loading ? "Refreshing…" : "Refresh"}
           </button>
@@ -150,7 +187,7 @@ export function LibraryView() {
           </div>
         )}
 
-        <div className="mt-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+        <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm sm:mt-8">
           {library.loading && library.files.length === 0 ? (
             <div className="flex items-center justify-center px-6 py-16 text-sm text-zinc-500">
               Loading index…
@@ -160,33 +197,46 @@ export function LibraryView() {
               No files indexed yet. Upload text, audio, or video to get started.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  <tr>
-                    <th className="px-4 py-3">Preview</th>
-                    <th className="px-4 py-3">File</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Segments</th>
-                    <th className="px-4 py-3">Duration</th>
-                    <th className="px-4 py-3">Uploaded</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {library.files.map((file) => (
-                    <LibraryRow
-                      key={file.id}
-                      file={file}
-                      deleting={deletingId === file.id}
-                      onPreview={setPreviewFile}
-                      onDelete={(item) => void handleDelete(item)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="space-y-3 p-3 md:hidden">
+                {library.files.map((file) => (
+                  <LibraryFileCard
+                    key={file.id}
+                    file={file}
+                    deleting={deletingId === file.id}
+                    onPreview={setPreviewFile}
+                    onDelete={(item) => void handleDelete(item)}
+                  />
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
+                <table className="min-w-full">
+                  <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    <tr>
+                      <th className="px-4 py-3">Preview</th>
+                      <th className="px-4 py-3">File</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Segments</th>
+                      <th className="px-4 py-3">Duration</th>
+                      <th className="px-4 py-3">Uploaded</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {library.files.map((file) => (
+                      <LibraryRow
+                        key={file.id}
+                        file={file}
+                        deleting={deletingId === file.id}
+                        onPreview={setPreviewFile}
+                        onDelete={(item) => void handleDelete(item)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       </div>

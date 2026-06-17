@@ -34,8 +34,8 @@ External costs (Neon, Cloudinary, OpenAI, Vercel) are usage-based or free-tier w
 4. Deploy API on Fly with `min_machines_running = 0` (§4).
 5. Deploy frontend on Vercel with `VITE_API_URL` pointing at the Fly API (§6).
 6. Set `CORS_ORIGINS` on the API to your Vercel URL (§4c, §6c).
-7. Deploy worker, then `**fly scale count worker=0`** until you need ingestion (§5).
-8. Before uploads: `fly scale count worker=1 -a scrutinize-worker`.
+7. Deploy worker, then **`fly scale count worker=0 -a scrutinize-worker --yes`** until you need ingestion (§5).
+8. Before uploads: `fly scale count worker=1 -a scrutinize-worker --yes`.
 
 ---
 
@@ -83,13 +83,45 @@ External costs (Neon, Cloudinary, OpenAI, Vercel) are usage-based or free-tier w
 
 Keep Qdrant at **v1.18.x** when self-hosting — it must stay compatible with `qdrant-client` in `backend/pyproject.toml`. Qdrant Cloud manages version compatibility for managed clusters.
 
+### How the worker is used (not connected to Vercel)
+
+The browser **only** talks to the Fly API (`VITE_API_URL` on Vercel). The worker has **no public URL** and is **never** configured on Vercel.
+
+```text
+Upload flow:
+
+  Vercel UI  ──POST /upload──►  scrutinize-api
+                                    │
+                                    ├─► Cloudinary (store file)
+                                    ├─► Neon (create file + job rows)
+                                    └─► Redis (enqueue Celery task via task.delay)
+
+  scrutinize-worker  ◄──poll Redis──  picks up task
+        │
+        ├─► Cloudinary (download file)
+        ├─► OpenAI (transcribe / embed / caption)
+        ├─► Qdrant (store vectors)
+        └─► Neon (update job status → indexed | failed)
+
+  Vercel UI  ──GET /jobs/{id}──►  scrutinize-api  (poll every 2s until done)
+  Vercel UI  ──POST /search──►   scrutinize-api  (search uses Qdrant; no worker needed)
+```
+
+| User action | Frontend calls | Worker involved? |
+|---|---|---|
+| Health / library / search | API only | No |
+| Upload file | `POST /upload` → API enqueues to Redis | **Yes** — must be running (`worker=1`) |
+| Watch upload progress | `GET /jobs/{id}` → API reads Neon | No (worker already updated Neon) |
+
+If the worker is scaled to **0**, uploads succeed but jobs stay **pending** until you start it (§5d). Search works without the worker as long as content was already indexed.
+
 ---
 
 ## Prerequisites
 
 - [Fly.io account](https://fly.io/app/sign-up) with billing enabled (pay-as-you-go; no permanent free tier for new orgs)
 - [Vercel account](https://vercel.com/signup) (Hobby tier is sufficient)
-- `[flyctl` installed](https://fly.io/docs/hands-on/install-flyctl/) and logged in (`fly auth login`)
+- `[flyctl` installed]([https://fly.io/docs/hands-on/install-flyctl/](https://fly.io/docs/hands-on/install-flyctl/)) and logged in (`fly auth login`)
 - Scrutinize repo cloned locally
 - External services already configured:
   - [Neon](https://neon.tech) — pooled `DATABASE_URL` (free tier OK for budget; see [README](../../README.md#quick-start))
@@ -334,13 +366,21 @@ For self-hosted Qdrant (§3b), use `QDRANT_URL="http://scrutinize-qdrant.interna
 
 Notes:
 
-- `**CORS_ORIGINS**` must be a JSON array string listing every frontend origin (Vercel preview URL, production URL, custom domain). Example with previews: `'["https://scrutinize.vercel.app","https://scrutinize-git-main-you.vercel.app"]'`
+- **`CORS_ORIGINS`** — JSON array or comma-separated list. PowerShell examples:
+  ```powershell
+  # JSON array (preferred)
+  fly secrets set -a scrutinize-api CORS_ORIGINS='["https://your-app.vercel.app"]'
+
+  # Comma-separated (also works)
+  fly secrets set -a scrutinize-api CORS_ORIGINS="https://your-app.vercel.app"
+  ```
+  Use your **Vercel** URL, not `scrutinize-api.fly.dev`. After changing secrets, redeploy the API.
 - Set `CORS_ORIGINS` after the first Vercel deploy when you know the hostname (§6c).
 - Never commit secrets to git.
 
 ### 4d. Deploy
 
-Run from the **`backend`** directory (Fly uses the current directory as build context; running from repo root sends an empty context and the build fails):
+Run from the `**backend**` directory (Fly uses the current directory as build context; running from repo root sends an empty context and the build fails):
 
 ```bash
 cd backend
@@ -423,7 +463,7 @@ fly secrets set -a scrutinize-worker \
 
 ### 5d. Deploy and scale
 
-From **`backend`**:
+From `**backend**`:
 
 ```bash
 cd backend
@@ -433,26 +473,26 @@ fly deploy --config ../deploy/fly/worker/fly.toml --ha=false
 **Budget — start stopped (no compute cost):**
 
 ```bash
-fly scale count worker=0 -a scrutinize-worker
+fly scale count worker=0 -a scrutinize-worker --yes
 ```
 
 **Before uploads / indexing, start the worker:**
 
 ```bash
-fly scale count worker=1 -a scrutinize-worker
+fly scale count worker=1 -a scrutinize-worker --yes
 fly logs -a scrutinize-worker
 ```
 
 **When finished, stop again to save cost:**
 
 ```bash
-fly scale count worker=0 -a scrutinize-worker
+fly scale count worker=0 -a scrutinize-worker --yes
 ```
 
 **Always-on — keep one worker running:**
 
 ```bash
-fly scale count worker=1 -a scrutinize-worker
+fly scale count worker=1 -a scrutinize-worker --yes
 fly logs -a scrutinize-worker
 ```
 
@@ -489,6 +529,8 @@ Add in Vercel **Project → Settings → Environment Variables**:
 ### 6c. Deploy and update API CORS
 
 Deploy from the dashboard (or CLI below). Note the production URL, e.g. `https://scrutinize.vercel.app`.
+
+**Landing page wake:** On first load the SPA calls `GET /health` against `VITE_API_URL`. That wakes the Fly API and Redis (auto-start). The worker still requires `fly scale count worker=1` before uploads (§9).
 
 Update API CORS to allow that origin:
 
@@ -585,18 +627,81 @@ fly logs -a scrutinize-qdrant
 fly ssh console -a scrutinize-api
 ```
 
-### Scale
+### Sleep all services (zero compute cost)
+
+Stops all Fly compute. You pay only rootfs storage (~$0.15/GB/mo per machine image).
+
+```bash
+# Worker — only app that must be scaled manually (no HTTP front door)
+fly scale count worker=0 -a scrutinize-worker --yes
+
+# API — auto-stops on idle; force-stop now if you want zero immediately
+fly machine list -q -a scrutinize-api | ForEach-Object { fly machine stop $_ -a scrutinize-api }
+
+# Redis — auto-stops on idle; force-stop now
+fly machine list -q -a scrutinize-redis | ForEach-Object { fly machine stop $_ -a scrutinize-redis }
+
+# Optional: self-hosted Qdrant (always-on profile only)
+fly machine list -q -a scrutinize-qdrant | ForEach-Object { fly machine stop $_ -a scrutinize-qdrant }
+```
+
+**PowerShell one-liner (all Scrutinize apps):**
+
+```powershell
+fly scale count worker=0 -a scrutinize-worker --yes; fly machine list -q -a scrutinize-api | ForEach-Object { fly machine stop $_ -a scrutinize-api }; fly machine list -q -a scrutinize-redis | ForEach-Object { fly machine stop $_ -a scrutinize-redis }
+```
+
+**Why machines stay running:** If the API `fly.toml` includes a `[checks]` block hitting `/health` every 15 s, Fly keeps the API awake and each check pings Redis (waking Redis too). Budget config omits `[checks]` — redeploy the API after changing `deploy/fly/api/fly.toml`. A browser tab left open also polls `/health` every 2 min and can delay auto-stop until the tab is closed.
+
+Verify everything is stopped:
+
+```bash
+fly status -a scrutinize-api
+fly status -a scrutinize-worker
+fly status -a scrutinize-redis
+```
+
+Expect **worker** with no machines; **api** and **redis** machines in `stopped` state.
+
+### Wake all services (on request)
+
+The Vercel frontend calls `GET /health` as soon as the app loads. That HTTPS request **auto-starts the API** (`min_machines_running = 0` + `auto_start_machines = true`). The health check connects to Redis over `.flycast`, which **auto-starts Redis** too.
+
+First request after sleep may take **5–15 s** (cold start). The UI retries automatically.
+
+```bash
+# Same as opening the landing page — wakes API + Redis
+curl -s https://scrutinize-api.fly.dev/health | jq .
+
+# Worker does NOT auto-start from browser traffic — scale up before uploads
+fly scale count worker=1 -a scrutinize-worker --yes
+fly logs -a scrutinize-worker   # wait for "celery@... ready."
+```
+
+**Typical demo flow:**
+
+1. Open your Vercel URL → API + Redis wake from `/health`.
+2. Before uploading: `fly scale count worker=1 -a scrutinize-worker --yes`.
+3. When done indexing: `fly scale count worker=0 -a scrutinize-worker --yes` to save cost.
+
+PowerShell one-liner to wake API + Redis + worker:
+
+```powershell
+curl -s https://scrutinize-api.fly.dev/health; fly scale count worker=1 -a scrutinize-worker --yes
+```
+
+### Scale (capacity tuning)
 
 ```bash
 # Budget: start worker only when ingesting
-fly scale count worker=1 -a scrutinize-worker
-fly scale count worker=0 -a scrutinize-worker
+fly scale count worker=1 -a scrutinize-worker --yes
+fly scale count worker=0 -a scrutinize-worker --yes
 
 # More API capacity
-fly scale count 2 -a scrutinize-api
+fly scale count 2 -a scrutinize-api --yes
 
 # Heavier ingestion throughput (always-on profile)
-fly scale count worker=2 -a scrutinize-worker
+fly scale count worker=2 -a scrutinize-worker --yes
 fly scale vm shared-cpu-2x --memory 4096 -a scrutinize-worker
 ```
 
@@ -664,6 +769,8 @@ Optional tuning vars from `.env.example` (`WHISPER_MODEL`, `VIDEO_MAX_KEYFRAMES`
 
 | Symptom                            | Likely cause                                       | Fix                                                                                                                                            |
 | ---------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| App exits code 1 / `SettingsError` parsing `cors_origins` | Bad `CORS_ORIGINS` quoting on Fly | `fly secrets set -a scrutinize-api CORS_ORIGINS='["https://your-app.vercel.app"]'` then redeploy API |
+| Machines restarting / rate limit   | Crash loop + auto-start storm                      | Fix startup error; wait ~10 min for rate limit; avoid hammering `/health` until stable |
 | First API call slow (~5–15 s)      | Budget API auto-stop cold start                    | Expected; retry or set `min_machines_running = 1` on api                                                                                       |
 | `/health` fails on `database`      | Wrong or missing `DATABASE_URL`                    | Use Neon **pooled** URL with `sslmode=require`                                                                                                 |
 | `/health` fails on `redis`         | Redis Machine stopped or bad URL                   | Ensure `REDIS_URL` uses `.flycast`. Fly Proxy should start it automatically on connection. Check `fly status -a scrutinize-redis`.             |

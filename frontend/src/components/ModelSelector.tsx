@@ -46,9 +46,10 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <IconOpenAI className="h-3.5 w-3.5 text-[var(--chatly-text-primary)]" />
+        <IconOpenAI className="h-3.5 w-3.5 shrink-0 text-[var(--chatly-text-primary)]" />
         <span className="text-[var(--chatly-text-primary)]">{selected.provider}</span>
-        <span>{selected.label}</span>
+        <span className="hidden sm:inline">{selected.label}</span>
+        <span className="sm:hidden">Mini</span>
         <IconChevronDown className="h-3 w-3 opacity-60" />
       </button>
 

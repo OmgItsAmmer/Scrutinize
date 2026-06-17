@@ -29,7 +29,7 @@ def test_video_processor_merges_transcript_and_captions(session):
         TranscriptSegment(start=0.0, end=18.0, text="Hello video")
     ]
     vision_service = MagicMock()
-    vision_service.caption_image.side_effect = ["Person waving", "Room interior"]
+    vision_service.caption_images.return_value = ["Person waving", "Room interior"]
 
     processor = VideoProcessor(
         orchestrator,
@@ -59,5 +59,5 @@ def test_video_processor_merges_transcript_and_captions(session):
         count = processor.process(job.id)
 
     assert count == 1
-    assert vision_service.caption_image.call_count == 2
+    vision_service.caption_images.assert_called_once()
     index_segments.assert_called_once()

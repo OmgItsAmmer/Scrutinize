@@ -22,7 +22,7 @@ type ModalityChipsProps = {
 
 export function ModalityChips({ value, onChange, disabled }: ModalityChipsProps) {
   return (
-    <div className="flex flex-wrap items-start justify-center gap-6 sm:gap-8">
+    <div className="flex flex-wrap items-start justify-center gap-4 sm:gap-6 md:gap-8">
       {FILTERS.map((filter) => {
         const Icon = filter.icon;
         const active = value === filter.id;
@@ -33,12 +33,12 @@ export function ModalityChips({ value, onChange, disabled }: ModalityChipsProps)
             type="button"
             disabled={disabled}
             onClick={() => onChange(filter.id)}
-            className={`group flex w-[72px] flex-col items-center gap-2.5 transition disabled:opacity-50 ${
+            className={`group flex w-16 flex-col items-center gap-2 transition disabled:opacity-50 sm:w-[72px] sm:gap-2.5 ${
               active ? "opacity-100" : "opacity-80 hover:opacity-100"
             }`}
           >
             <span
-              className={`flex h-12 w-12 items-center justify-center rounded-full text-white shadow-sm transition ${
+              className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-sm transition sm:h-12 sm:w-12 ${
                 active ? "scale-105 ring-2 ring-white ring-offset-2" : "group-hover:scale-105"
               }`}
               style={{

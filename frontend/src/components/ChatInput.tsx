@@ -22,7 +22,7 @@ export function ChatInput({ value, onChange, onSubmit, disabled, loading }: Chat
     <div className="w-full rounded-[20px] border border-[var(--chatly-border)] bg-[var(--chatly-panel)] transition focus-within:border-zinc-300"
       style={{ boxShadow: "var(--chatly-input-shadow)" }}
     >
-      <form onSubmit={handleSubmit} className="relative px-5 pt-4 pb-3">
+      <form onSubmit={handleSubmit} className="relative px-3 pt-3 pb-2.5 sm:px-5 sm:pt-4 sm:pb-3">
         <div className="flex items-start gap-3">
           <div className="relative min-h-[44px] min-w-0 flex-1">
             {showAnimatedPlaceholder && <AnimatedPlaceholder paused={Boolean(value)} />}
