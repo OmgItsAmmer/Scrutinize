@@ -30,7 +30,7 @@ jobs:
 
       - name: Deploy API
         working-directory: backend
-        run: fly deploy --config ../deploy/fly/api/fly.toml --ha=false
+        run: flyctl deploy --config ../deploy/fly/api/fly.toml --ha=false
 
   deploy-worker:
     name: Deploy scrutinize-worker
@@ -44,7 +44,7 @@ jobs:
 
       - name: Deploy worker
         working-directory: backend
-        run: fly deploy --config ../deploy/fly/worker/fly.toml --ha=false
+        run: flyctl deploy --config ../deploy/fly/worker/fly.toml --ha=false
 
   deploy-redis:
     name: Deploy scrutinize-redis
@@ -57,7 +57,7 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy Redis
-        run: fly deploy --config deploy/fly/redis/fly.toml --ha=false
+        run: flyctl deploy --config deploy/fly/redis/fly.toml --ha=false
 
   deploy-qdrant:
     name: Deploy scrutinize-qdrant
@@ -71,4 +71,4 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy Qdrant
-        run: fly deploy --config deploy/fly/qdrant/fly.toml --ha=false
+        run: flyctl deploy --config deploy/fly/qdrant/fly.toml --ha=false
