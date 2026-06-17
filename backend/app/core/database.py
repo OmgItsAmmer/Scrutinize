@@ -30,6 +30,7 @@ def get_engine():
             normalize_database_url(settings.database_url),
             echo=settings.debug,
             pool_pre_ping=True,
+            connect_args={"connect_timeout": 15},
         )
     return _engine
 
