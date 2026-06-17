@@ -58,17 +58,3 @@ jobs:
 
       - name: Deploy Redis
         run: flyctl deploy --config deploy/fly/redis/fly.toml --ha=false
-
-  deploy-qdrant:
-    name: Deploy scrutinize-qdrant
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy Qdrant
-        run: flyctl deploy --config deploy/fly/qdrant/fly.toml --ha=false
