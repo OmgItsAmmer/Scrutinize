@@ -19,12 +19,12 @@ function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
 function TextSourceCard({ source }: { source: SearchSource }) {
   return (
     <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
-          <h3 className="text-sm font-semibold text-zinc-900">{source.title}</h3>
+          <h3 className="text-sm font-semibold text-zinc-900 break-words">{source.title}</h3>
         </div>
-        <span className="text-xs text-zinc-500">{(source.score * 100).toFixed(0)}% match</span>
+        <span className="text-xs text-zinc-500 shrink-0">{(source.score * 100).toFixed(0)}% match</span>
       </div>
       <p className="text-sm leading-relaxed text-zinc-700">{source.content}</p>
     </article>
@@ -48,13 +48,13 @@ function AudioSourceCard({ source }: { source: SearchSource }) {
 
   return (
     <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
-          <h3 className="text-sm font-semibold text-zinc-900">{source.title}</h3>
+          <h3 className="text-sm font-semibold text-zinc-900 break-words">{source.title}</h3>
         </div>
         {source.start_time != null && (
-          <span className="text-xs text-zinc-500">@ {formatTimestampSeconds(source.start_time)}</span>
+          <span className="text-xs text-zinc-500 shrink-0">@ {formatTimestampSeconds(source.start_time)}</span>
         )}
       </div>
       <p className="mb-3 text-sm text-zinc-700">{source.content}</p>
@@ -80,13 +80,13 @@ function VideoSourceCard({ source }: { source: SearchSource }) {
 
   return (
     <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
-          <h3 className="text-sm font-semibold text-zinc-900">{source.title}</h3>
+          <h3 className="text-sm font-semibold text-zinc-900 break-words">{source.title}</h3>
         </div>
         {source.start_time != null && (
-          <span className="text-xs text-zinc-500">@ {formatTimestampSeconds(source.start_time)}</span>
+          <span className="text-xs text-zinc-500 shrink-0">@ {formatTimestampSeconds(source.start_time)}</span>
         )}
       </div>
       <p className="mb-3 text-sm text-zinc-700">{source.content}</p>
@@ -120,7 +120,7 @@ type SearchResultsProps = {
 export function SearchResults({ answer, sources, searchQuery }: SearchResultsProps) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Answer</p>
         <p className="text-base leading-relaxed text-zinc-900">{answer}</p>
         <p className="mt-3 text-xs text-zinc-500">Searched for: {searchQuery}</p>

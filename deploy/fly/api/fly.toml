@@ -21,16 +21,9 @@ primary_region = "ord"
     soft_limit = 40
 
 [[vm]]
-  memory = "256mb"           # budget; use "512mb" for always-on
+  memory = "512mb"           # 256mb OOMs under load; 512mb minimum for API
   cpu_kind = "shared"
   cpus = 1
 
-[checks]
-  [checks.health]
-    grace_period = "20s"
-    interval = "15s"
-    method = "GET"
-    path = "/health"
-    port = 8000
-    timeout = "5s"
-    type = "http"
+# No [checks] — a 15s /health check keeps the machine awake and pings Redis,
+# preventing budget scale-to-zero. Frontend wake uses GET /health on landing.

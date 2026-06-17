@@ -3,6 +3,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from app.core.config import Settings
+from app.services.openai_retry import call_with_retry
 from app.services.segment_windowing import TranscriptSegment
 
 
@@ -14,14 +15,23 @@ class TranscriptionService:
             raise RuntimeError("OPENAI_API_KEY is required for transcription.")
         self._client = OpenAI(api_key=settings.openai_api_key)
         self._model = settings.whisper_model
+        self._settings = settings
 
     def transcribe_file(self, audio_path: Path) -> list[TranscriptSegment]:
-        with audio_path.open("rb") as audio_file:
-            response = self._client.audio.transcriptions.create(
-                model=self._model,
-                file=audio_file,
-                response_format="verbose_json",
-            )
+        def _call():
+            with audio_path.open("rb") as audio_file:
+                return self._client.audio.transcriptions.create(
+                    model=self._model,
+                    file=audio_file,
+                    response_format="verbose_json",
+                )
+
+        response = call_with_retry(
+            _call,
+            max_retries=self._settings.openai_max_retries,
+            min_delay_seconds=self._settings.openai_retry_min_delay_seconds,
+            label="whisper",
+        )
 
         segments: list[TranscriptSegment] = []
         for segment in response.segments or []:

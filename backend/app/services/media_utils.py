@@ -106,6 +106,7 @@ def extract_keyframes(
 ) -> list[tuple[Path, float]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     interval = settings.video_keyframe_interval_seconds
+    max_width = settings.video_keyframe_max_width
     output_pattern = str(output_dir / "frame_%04d.jpg")
     run_ffmpeg(
         [
@@ -113,9 +114,11 @@ def extract_keyframes(
             "-i",
             str(input_path),
             "-vf",
-            f"fps=1/{interval}",
+            f"fps=1/{interval},scale={max_width}:-1",
             "-frames:v",
             str(settings.video_max_keyframes),
+            "-q:v",
+            "5",
             output_pattern,
         ],
         settings=settings,

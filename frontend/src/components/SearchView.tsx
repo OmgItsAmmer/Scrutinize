@@ -15,17 +15,16 @@ export function SearchView() {
     <div className="flex h-full flex-col bg-[var(--chatly-bg)]">
       
 
-      <div className="flex flex-1 flex-col overflow-y-auto px-6">
+      <div className="flex flex-1 flex-col overflow-y-auto px-4 sm:px-6">
         {isEmptyState && (
-          <div className="flex flex-1 flex-col items-center justify-center pb-8">
-            <div className="mb-10 w-full max-w-2xl text-center">
-              
-              <h1 className="text-[2rem] font-bold leading-tight tracking-tight text-[var(--chatly-text-primary)] sm:text-[2.5rem]">
-               Hey,  What&apos;s on your mind today?
+          <div className="flex flex-1 flex-col items-center justify-center pb-4 sm:pb-8">
+            <div className="mb-6 w-full max-w-2xl text-center sm:mb-10">
+              <h1 className="text-2xl font-bold leading-tight tracking-tight text-[var(--chatly-text-primary)] sm:text-[2rem] md:text-[2.5rem]">
+                Hey, What&apos;s on your mind today?
               </h1>
             </div>
 
-            <div className="w-full max-w-2xl space-y-8">
+            <div className="w-full max-w-2xl space-y-6 sm:space-y-8">
               <ChatInput
                 value={search.query}
                 onChange={setSearchQuery}
@@ -69,7 +68,7 @@ export function SearchView() {
       </div>
 
       {!isEmptyState && (
-        <div className="border-t border-[var(--chatly-border)] bg-[var(--chatly-panel)]/90 px-6 py-5 backdrop-blur">
+        <div className="border-t border-[var(--chatly-border)] bg-[var(--chatly-panel)]/90 px-4 py-4 backdrop-blur sm:px-6 sm:py-5">
           <div className="mx-auto w-full max-w-2xl space-y-4">
             <ChatInput
               value={search.query}
@@ -87,7 +86,7 @@ export function SearchView() {
         </div>
       )}
 
-      <p className="px-6 pb-5 text-center text-xs text-[var(--chatly-text-muted)]">
+      <p className="px-4 pb-3 text-center text-xs text-[var(--chatly-text-muted)] sm:px-6 sm:pb-5">
         Scrutinize uses AI to search indexed content. Verify important details in source files.
       </p>
     </div>

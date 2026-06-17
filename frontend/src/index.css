@@ -21,8 +21,10 @@ body {
   @apply min-h-screen antialiased;
   background-color: var(--chatly-bg);
   color: var(--chatly-text-primary);
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }

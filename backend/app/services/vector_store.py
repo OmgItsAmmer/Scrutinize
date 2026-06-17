@@ -39,6 +39,7 @@ class VectorStore:
     def __init__(self, settings: Settings) -> None:
         self._client = QdrantClient(
             url=settings.qdrant_url.rstrip("/"),
+            api_key=settings.qdrant_api_key or None,
             check_compatibility=False,
         )
         self._collection = settings.qdrant_collection

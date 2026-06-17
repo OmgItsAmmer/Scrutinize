@@ -112,7 +112,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         health: action.health,
         healthError: action.error,
-        apiConnected: action.health?.status === "ok",
+        apiConnected: action.health !== null,
       };
     case "SET_SEARCH_QUERY":
       return { ...state, search: { ...state.search, query: action.query } };
@@ -255,6 +255,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | undefined;
 
     async function pollHealth() {
       try {
@@ -262,6 +263,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           dispatch({ type: "SET_HEALTH", health, error: null });
         }
+        return true;
       } catch (error) {
         if (!cancelled) {
           dispatch({
@@ -270,14 +272,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
             error: formatError(error),
           });
         }
+        return false;
       }
     }
 
-    pollHealth();
-    const interval = setInterval(pollHealth, 15000);
+    function schedulePoll(ms: number) {
+      if (interval) {
+        clearInterval(interval);
+      }
+      interval = setInterval(() => {
+        if (document.visibilityState === "visible") {
+          void pollHealth();
+        }
+      }, ms);
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void pollHealth().then((ok) => schedulePoll(ok ? 120_000 : 5_000));
+    }
+
+    // Wake API + Redis on landing (Fly auto_start on first /health request).
+    void pollHealth().then((ok) => schedulePoll(ok ? 120_000 : 5_000));
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+      }
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

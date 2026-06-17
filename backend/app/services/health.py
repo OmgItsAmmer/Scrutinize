@@ -29,7 +29,12 @@ def check_redis(settings: Settings) -> DependencyCheck:
 
 def check_qdrant(settings: Settings) -> DependencyCheck:
     try:
-        response = httpx.get(f"{settings.qdrant_url.rstrip('/')}/collections", timeout=3.0)
+        headers = {"api-key": settings.qdrant_api_key} if settings.qdrant_api_key else None
+        response = httpx.get(
+            f"{settings.qdrant_url.rstrip('/')}/collections",
+            headers=headers,
+            timeout=3.0,
+        )
         response.raise_for_status()
         return DependencyCheck(status="ok")
     except Exception as exc:  # noqa: BLE001

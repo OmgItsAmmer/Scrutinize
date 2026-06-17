@@ -96,18 +96,18 @@ export function MediaPreviewModal({ file, onClose }: MediaPreviewModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="relative w-full max-w-3xl rounded-2xl border border-zinc-200 bg-white shadow-xl"
+        className="relative w-full max-h-[92dvh] max-w-3xl overflow-hidden rounded-t-2xl border border-zinc-200 bg-white shadow-xl sm:max-h-none sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="media-preview-title"
       >
-        <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4">
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
           <div className="min-w-0">
             <h2 id="media-preview-title" className="truncate text-base font-semibold text-zinc-900">
               {file.filename}
@@ -134,7 +134,7 @@ export function MediaPreviewModal({ file, onClose }: MediaPreviewModalProps) {
           </div>
         </div>
 
-        <div className="p-5">
+        <div className="overflow-y-auto p-4 sm:p-5">
           {file.modality === "video" && (
             <>
               {mediaError ? (

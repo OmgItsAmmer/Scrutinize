@@ -1,6 +1,7 @@
 from openai import OpenAI
 
 from app.core.config import Settings
+from app.services.openai_retry import call_with_retry
 
 
 class EmbeddingService:
@@ -12,6 +13,7 @@ class EmbeddingService:
         self._client = OpenAI(api_key=settings.openai_api_key)
         self._model = settings.embedding_model
         self._batch_size = settings.embedding_batch_size
+        self._settings = settings
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -20,7 +22,12 @@ class EmbeddingService:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):
             batch = texts[start : start + self._batch_size]
-            response = self._client.embeddings.create(model=self._model, input=batch)
+            response = call_with_retry(
+                lambda b=batch: self._client.embeddings.create(model=self._model, input=b),
+                max_retries=self._settings.openai_max_retries,
+                min_delay_seconds=self._settings.openai_retry_min_delay_seconds,
+                label="embeddings",
+            )
             ordered = sorted(response.data, key=lambda item: item.index)
             vectors.extend(item.embedding for item in ordered)
         return vectors
