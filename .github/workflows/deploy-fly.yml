@@ -32,29 +32,6 @@ jobs:
         working-directory: backend
         run: flyctl deploy --config ../deploy/fly/api/fly.toml --ha=false
 
-  deploy-worker:
-    name: Deploy scrutinize-worker
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy worker
-        working-directory: backend
-        run: flyctl deploy --config ../deploy/fly/worker/fly.toml --ha=false
-
-  deploy-redis:
-    name: Deploy scrutinize-redis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy Redis
-        run: flyctl deploy --config deploy/fly/redis/fly.toml --ha=false
+  # Worker and Redis are NOT auto-deployed — scale manually when needed:
+  #   fly scale count worker=1 -a scrutinize-worker
+  #   fly deploy -c deploy/fly/redis/fly.toml -a scrutinize-redis  (rare)

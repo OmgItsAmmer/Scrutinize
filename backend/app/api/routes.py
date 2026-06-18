@@ -14,6 +14,17 @@ from app.services.job_orchestrator import JobOrchestrator
 router = APIRouter()
 
 
+@router.get("/health/wake", response_model=HealthResponse, tags=["health"])
+def health_wake(settings: Settings = Depends(get_app_settings)) -> HealthResponse:
+    """Lightweight wake probe — no DB/Redis/Qdrant calls (Fly scale-to-zero budget)."""
+    return HealthResponse(
+        status="ok",
+        service=settings.app_name.lower(),
+        version=__version__,
+        checks={},
+    )
+
+
 @router.get("/health", response_model=HealthResponse, tags=["health"])
 def health_check(
     session: Session = Depends(get_db_session),

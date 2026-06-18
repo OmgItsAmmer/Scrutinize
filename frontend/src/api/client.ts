@@ -50,6 +50,11 @@ export function fetchHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");
 }
 
+/** Wakes Fly API only — does not ping Redis or Qdrant. */
+export function fetchHealthWake(): Promise<HealthResponse> {
+  return request<HealthResponse>("/health/wake");
+}
+
 export function searchContent(query: string, modalityFilter: ModalityFilter): Promise<SearchResponse> {
   return request<SearchResponse>("/search", {
     method: "POST",

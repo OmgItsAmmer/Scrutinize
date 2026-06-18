@@ -36,6 +36,7 @@ def test_route_tier_classifies_expensive_endpoints():
     assert route_tier("POST", "/upload") == "expensive"
     assert route_tier("GET", "/library") == "general"
     assert route_tier("GET", "/health") == "exempt"
+    assert route_tier("GET", "/health/wake") == "exempt"
 
 
 @pytest.mark.unit

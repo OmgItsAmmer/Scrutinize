@@ -13,6 +13,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         settings = get_settings()
+        if request.url.path in {"/health", "/health/wake"}:
+            return await call_next(request)
+
         if not settings.rate_limit_enabled:
             return await call_next(request)
 
