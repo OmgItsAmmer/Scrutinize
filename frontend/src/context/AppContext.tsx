@@ -9,7 +9,7 @@ import {
 } from "react";
 import {
   ApiError,
-  fetchHealth,
+  fetchHealthWake,
   fetchJobStatus,
   fetchLibrary,
   deleteLibraryFile as deleteLibraryFileRequest,
@@ -255,15 +255,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retries = 0;
+    const MAX_WAKE_RETRIES = 12;
 
-    async function pollHealth() {
+    async function wakeApi() {
       try {
-        const health = await fetchHealth();
+        const health = await fetchHealthWake();
         if (!cancelled) {
           dispatch({ type: "SET_HEALTH", health, error: null });
         }
-        return true;
+        retries = 0;
       } catch (error) {
         if (!cancelled) {
           dispatch({
@@ -271,37 +273,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
             health: null,
             error: formatError(error),
           });
+          if (retries < MAX_WAKE_RETRIES) {
+            retries += 1;
+            retryTimer = setTimeout(() => void wakeApi(), 5_000);
+          }
         }
-        return false;
       }
-    }
-
-    function schedulePoll(ms: number) {
-      if (interval) {
-        clearInterval(interval);
-      }
-      interval = setInterval(() => {
-        if (document.visibilityState === "visible") {
-          void pollHealth();
-        }
-      }, ms);
     }
 
     function onVisibilityChange() {
-      if (document.visibilityState !== "visible") {
-        return;
+      if (document.visibilityState === "visible") {
+        void wakeApi();
       }
-      void pollHealth().then((ok) => schedulePoll(ok ? 120_000 : 5_000));
     }
 
-    // Wake API + Redis on landing (Fly auto_start on first /health request).
-    void pollHealth().then((ok) => schedulePoll(ok ? 120_000 : 5_000));
+    // One-shot wake on landing — no recurring polls (lets Fly machines sleep).
+    void wakeApi();
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       cancelled = true;
-      if (interval) {
-        clearInterval(interval);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
       }
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

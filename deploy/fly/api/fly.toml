@@ -26,7 +26,7 @@ primary_region = "ord"
     soft_limit = 40
 
 # No [http_service.checks] — Fly health probes keep the machine awake.
-# Frontend wake: GET /health on landing (see AppContext.tsx).
+# Frontend wake: GET /health/wake on landing (no Redis/Qdrant ping).
 
 [[vm]]
   memory = "512mb"           # 256mb OOMs under load; 512mb minimum for API

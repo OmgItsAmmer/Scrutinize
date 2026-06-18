@@ -119,7 +119,7 @@ def get_client_ip(request: Request) -> str:
 
 
 def route_tier(method: str, path: str) -> str:
-    if path == "/health":
+    if path in {"/health", "/health/wake"}:
         return "exempt"
     if (method.upper(), path) in EXPENSIVE_ROUTES:
         return "expensive"
