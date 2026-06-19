@@ -11,6 +11,7 @@ from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.embedding_service import EmbeddingService
 from app.services.job_orchestrator import JobOrchestrator
 from app.services.search_service import SearchService
+from app.services.v2.local_llm_client import LocalLlmClient
 from app.services.vector_store import VectorStore
 
 
@@ -44,6 +45,10 @@ def get_router_agent(settings: Settings = Depends(get_app_settings)) -> RouterAg
 
 def get_synthesis_agent(settings: Settings = Depends(get_app_settings)) -> SynthesisAgent:
     return SynthesisAgent(settings)
+
+
+def get_local_llm_client(settings: Settings = Depends(get_app_settings)) -> LocalLlmClient:
+    return LocalLlmClient(settings)
 
 
 def get_search_service(

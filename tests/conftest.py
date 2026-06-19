@@ -37,6 +37,7 @@ _TEST_DEFAULTS = {
     "CLOUDINARY_API_KEY": "test-api-key",
     "CLOUDINARY_API_SECRET": "test-api-secret",
     "RATE_LIMIT_ENABLED": "false",
+    "LOCAL_LLM_BASE_URL": "http://local-llm.test",
 }
 
 

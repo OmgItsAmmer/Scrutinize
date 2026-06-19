@@ -56,6 +56,14 @@ jobs:
             echo "No unit tests found under tests/unit — skipping"
           fi
 
+      - name: Run v2 unit tests
+        run: |
+          if find tests/unit -name 'test_*v2*.py' -o -name 'test_local_llm*.py' 2>/dev/null | grep -q .; then
+            pytest tests/unit -m v2 -v --tb=short
+          else
+            echo "No v2 unit tests found — skipping"
+          fi
+
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest

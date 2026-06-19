@@ -69,10 +69,24 @@ class Settings(BaseSettings):
     openai_max_retries: int = 8
     openai_retry_min_delay_seconds: float = 2.0
 
-    # Search & agents (M6)
+    # Search & agents (M6 v1)
     router_model: str = "gpt-4o-mini"
     synthesis_model: str = "gpt-4o-mini"
     search_top_k: int = 5
+
+    # Local LLM pipeline (v2 — M6)
+    local_llm_base_url: str = ""
+    local_llm_rewriter_model: str = "qwen3.5:2b"
+    local_llm_gate_model: str = "qwen3.5:0.8b"
+    local_llm_decision_model: str = "qwen3.5:4b"
+    local_llm_timeout_s: float = 120.0
+
+    # v2 pipeline tuning
+    v2_max_pipeline_attempts: int = 2
+    v2_confidence_threshold: float = 0.7
+    v2_rrf_k: int = 60
+    v2_rrf_num_lists: int = 2
+    v2_rrf_top_k: int = 5
 
     # Cloudinary — raw file uploads (text, audio, video); relational data lives in Neon.
     cloudinary_cloud_name: str = ""
@@ -141,6 +155,10 @@ class Settings(BaseSettings):
             and self.cloudinary_api_key
             and self.cloudinary_api_secret
         )
+
+    @property
+    def local_llm_configured(self) -> bool:
+        return bool(self.local_llm_base_url.strip())
 
 
 @lru_cache

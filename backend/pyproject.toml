@@ -45,6 +45,7 @@ markers = [
     "integration: integration tests",
     "system: system tests",
     "security: security tests",
+    "v2: v2 local LLM pipeline tests",
 ]
 
 [tool.ruff]
