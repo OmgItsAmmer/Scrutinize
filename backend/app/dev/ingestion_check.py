@@ -91,6 +91,7 @@ def run_ingestion(path: Path, *, expected: FileModality, skip_upload: bool) -> i
                 embedding_service,
                 vector_store,
                 settings,
+                vision_service=vision_service,
             )
         elif expected == FileModality.AUDIO:
             processor = AudioProcessor(

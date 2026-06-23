@@ -1,3 +1,5 @@
+import logging
+import tempfile
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -9,9 +11,13 @@ from app.models.processing_job import JobStatus
 from app.services.embedding_service import EmbeddingService
 from app.services.job_orchestrator import JobOrchestrator
 from app.services.media_utils import resolve_media_source
+from app.services.qdrant_errors import describe_worker_error
 from app.services.vector_store import VectorSegment, VectorStore
+from app.services.vision_service import VisionService
 
-TEXT_EXTENSIONS = {".txt", ".md"}
+logger = logging.getLogger(__name__)
+
+TEXT_EXTENSIONS = {".txt", ".md", ".pdf"}
 TEXT_STAGE = "text_ingestion"
 
 
@@ -59,11 +65,13 @@ class TextProcessor:
         embedding_service: EmbeddingService,
         vector_store: VectorStore,
         settings: Settings,
+        vision_service: VisionService | None = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._embedding_service = embedding_service
         self._vector_store = vector_store
         self._settings = settings
+        self._vision_service = vision_service
 
     def process(self, job_id: UUID) -> int:
         job = self._orchestrator.get_job(job_id)
@@ -81,19 +89,66 @@ class TextProcessor:
         self._orchestrator.mark_file_status(file_record.id, FileStatus.PROCESSING)
 
         try:
-            raw_text = self._fetch_text(file_record.storage_path, file_record.filename)
-            chunks = chunk_text(
-                raw_text,
-                chunk_size=self._settings.text_chunk_size,
-                overlap=self._settings.text_chunk_overlap,
-            )
-            if not chunks:
-                raise ValueError("Text file is empty after trimming")
+            is_pdf = file_record.filename.lower().endswith(".pdf")
+            if is_pdf:
+                logger.info("Job %s: processing PDF file %s", job_id, file_record.filename)
+                temp_pdf = resolve_media_source(file_record.storage_path, suffix=".pdf")
+                owns_temp_file = file_record.storage_path.startswith(("http://", "https://"))
+                try:
+                    from pypdf import PdfReader
+                    reader = PdfReader(temp_pdf)
+                    pages_text = []
+                    for page in reader.pages:
+                        pages_text.append(page.extract_text() or "")
+                    raw_text = "\n\n".join(pages_text)
 
-            vectors = self._embedding_service.embed_texts(chunks)
+                    chunks = chunk_text(
+                        raw_text,
+                        chunk_size=self._settings.text_chunk_size,
+                        overlap=self._settings.text_chunk_overlap,
+                    )
+
+                    captions = []
+                    with tempfile.TemporaryDirectory() as img_temp_dir:
+                        img_temp_path = Path(img_temp_dir)
+                        image_paths = []
+                        for page_idx, page in enumerate(reader.pages):
+                            for img_idx, img in enumerate(page.images):
+                                suffix = Path(img.name).suffix or ".png"
+                                if suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                                    suffix = ".png"
+                                img_path = img_temp_path / f"page_{page_idx}_img_{img_idx}{suffix}"
+                                img_path.write_bytes(img.data)
+                                image_paths.append(img_path)
+
+                        if image_paths:
+                            if not self._vision_service:
+                                raise RuntimeError("VisionService is not configured but PDF contains images to caption.")
+                            logger.info("Job %s: extracting and captioning %d image(s)", job_id, len(image_paths))
+                            captions = self._vision_service.caption_images(image_paths)
+
+                    formatted_captions = [f"[Image]: {caption}" for caption in captions]
+                    all_chunks = chunks + formatted_captions
+                finally:
+                    if temp_pdf is not None and owns_temp_file:
+                        temp_pdf.unlink(missing_ok=True)
+            else:
+                logger.info("Job %s: fetching text %s", job_id, file_record.filename)
+                raw_text = self._fetch_text(file_record.storage_path, file_record.filename)
+                all_chunks = chunk_text(
+                    raw_text,
+                    chunk_size=self._settings.text_chunk_size,
+                    overlap=self._settings.text_chunk_overlap,
+                )
+
+            if not all_chunks:
+                raise ValueError("Text/PDF file has no text content or images after parsing")
+
+            logger.info("Job %s: embedding %d chunk(s)", job_id, len(all_chunks))
+            vectors = self._embedding_service.embed_texts(all_chunks)
             vector_segments: list[VectorSegment] = []
 
-            for chunk, vector in zip(chunks, vectors, strict=True):
+            for chunk, vector in zip(all_chunks, vectors, strict=True):
                 segment_id = uuid4()
                 self._orchestrator.create_segment(
                     file_id=file_record.id,
@@ -113,15 +168,23 @@ class TextProcessor:
                     )
                 )
 
+            logger.info(
+                "Job %s: upserting %d segment(s) to Qdrant at %s",
+                job_id,
+                len(vector_segments),
+                self._settings.qdrant_url,
+            )
             self._vector_store.upsert_segments(vector_segments)
             self._orchestrator.update_job_status(job_id, JobStatus.DONE)
             self._orchestrator.mark_file_status(file_record.id, FileStatus.INDEXED)
             return len(vector_segments)
         except Exception as exc:
+            error_message = describe_worker_error(exc)
+            logger.exception("Job %s failed: %s", job_id, error_message)
             self._orchestrator.update_job_status(
                 job_id,
                 JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=error_message,
             )
             self._orchestrator.mark_file_status(file_record.id, FileStatus.FAILED)
             raise

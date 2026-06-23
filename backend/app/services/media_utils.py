@@ -2,6 +2,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 import httpx
 
@@ -16,7 +17,7 @@ def resolve_media_source(source: str, *, suffix: str) -> Path:
     """Return a local filesystem path, downloading remote URLs when needed."""
     parsed = urlparse(source)
     if parsed.scheme == "file":
-        local = Path(unquote(parsed.path))
+        local = Path(url2pathname(parsed.path))
         if local.is_file():
             return local
 

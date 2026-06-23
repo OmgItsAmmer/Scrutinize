@@ -1,3 +1,4 @@
+import { getSearchApiPath } from "../api/client";
 import { useApp } from "../context/AppContext";
 import { ChatInput } from "./ChatInput";
 import { ModalityChips } from "./ModalityChips";
@@ -7,6 +8,7 @@ export function SearchView() {
   const { state, setSearchQuery, setModalityFilter, runSearch } = useApp();
   const { search, apiConnected } = state;
   const isEmptyState = !search.result && !search.loading && !search.error;
+  const isV2Search = getSearchApiPath() === "/v2/search";
   function handleSubmit() {
     void runSearch();
   }
@@ -43,9 +45,13 @@ export function SearchView() {
 
         {search.loading && (
           <div className="flex flex-1 items-center justify-center">
-            <div className="flex items-center gap-3 rounded-full border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-5 py-3 text-sm text-[var(--chatly-text-secondary)] shadow-sm">
+            <div className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-5 py-4 text-center text-sm text-[var(--chatly-text-secondary)] shadow-sm">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900" />
-              Searching your index…
+              <span>
+                {isV2Search
+                  ? "Running local AI pipeline… Generic replies are quick; library search may take longer."
+                  : "Searching your index…"}
+              </span>
             </div>
           </div>
         )}
@@ -58,11 +64,7 @@ export function SearchView() {
 
         {search.result && !search.loading && (
           <div className="mx-auto mb-8 w-full max-w-3xl flex-1">
-            <SearchResults
-              answer={search.result.answer}
-              sources={search.result.sources}
-              searchQuery={search.result.search_query}
-            />
+            <SearchResults result={search.result} />
           </div>
         )}
       </div>

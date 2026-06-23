@@ -10,6 +10,7 @@ ALLOWED_TEXT_CONTENT_TYPES = {
     "text/markdown",
     "text/x-markdown",
     "application/octet-stream",
+    "application/pdf",
 }
 
 ALLOWED_AUDIO_CONTENT_TYPES = {

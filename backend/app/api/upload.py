@@ -61,7 +61,7 @@ async def upload_file(
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(status_code=413, detail="File exceeds maximum upload size")
 
-    if modality.value == "text":
+    if modality.value == "text" and not safe_filename.lower().endswith(".pdf"):
         try:
             data.decode("utf-8")
         except UnicodeDecodeError as exc:

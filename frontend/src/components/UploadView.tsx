@@ -4,7 +4,7 @@ import type { JobStatus } from "../types/api";
 import { IconUpload } from "./icons";
 
 const ACCEPT =
-  ".txt,.md,.mp3,.wav,.m4a,.mp4,.mov,text/plain,text/markdown,audio/mpeg,audio/wav,audio/mp4,video/mp4,video/quicktime";
+  ".txt,.md,.pdf,.mp3,.wav,.m4a,.mp4,.mov,text/plain,text/markdown,application/pdf,audio/mpeg,audio/wav,audio/mp4,video/mp4,video/quicktime";
 
 function statusLabel(status: JobStatus): string {
   switch (status) {
@@ -49,7 +49,7 @@ export function UploadView() {
       <div className="mx-auto w-full max-w-2xl">
         <h1 className="text-xl font-semibold text-zinc-900 sm:text-2xl">Upload content</h1>
         <p className="mt-2 text-sm text-zinc-500">
-          Add text, audio, or video files. Scrutinize will index them in the background.
+          Add text, PDF, audio, or video files. Scrutinize will index them in the background.
         </p>
 
         {!apiConnected && (
@@ -80,7 +80,7 @@ export function UploadView() {
           </div>
           <p className="text-base font-medium text-zinc-900">Drag and drop files here</p>
           <p className="mt-2 text-sm text-zinc-500">
-            .txt, .md, .mp3, .wav, .m4a, .mp4, .mov
+            .txt, .md, .pdf, .mp3, .wav, .m4a, .mp4, .mov
           </p>
           <button
             type="button"

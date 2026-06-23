@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
-import { formatTimestampSeconds } from "../lib/format";
-import type { SearchSource } from "../types/api";
+import {
+  displayV2Answer,
+  formatConfidencePercent,
+  formatTimestampSeconds,
+  V2_LOW_CONFIDENCE_DISCLAIMER,
+} from "../lib/format";
+import type { SearchSource, SearchV2Response } from "../types/api";
 
 function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
   const styles = {
@@ -112,24 +117,61 @@ export function SourceCard({ source }: { source: SearchSource }) {
 }
 
 type SearchResultsProps = {
-  answer: string;
-  sources: SearchSource[];
-  searchQuery: string;
+  result: SearchV2Response;
 };
 
-export function SearchResults({ answer, sources, searchQuery }: SearchResultsProps) {
+function RouteChip({ route }: { route: SearchResultsProps["result"]["route"] }) {
+  const label = route === "rag" ? "Library search" : "Generic";
+  const styles =
+    route === "rag"
+      ? "bg-emerald-100 text-emerald-800"
+      : "bg-zinc-100 text-zinc-700";
+
+  return (
+    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${styles}`}>
+      {label}
+    </span>
+  );
+}
+
+function ConfidenceBadge({ confidence }: { confidence: number | null }) {
+  const label = formatConfidencePercent(confidence);
+  if (!label) {
+    return null;
+  }
+
+  return (
+    <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
+      {label}
+    </span>
+  );
+}
+
+export function SearchResults({ result }: SearchResultsProps) {
+  const answerText = displayV2Answer(result.answer, result.disclaimer_appended);
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Answer</p>
-        <p className="text-base leading-relaxed text-zinc-900">{answer}</p>
-        <p className="mt-3 text-xs text-zinc-500">Searched for: {searchQuery}</p>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Answer</p>
+          <RouteChip route={result.route} />
+          <ConfidenceBadge confidence={result.confidence} />
+          {result.attempts > 1 && (
+            <span className="text-xs text-zinc-500">{result.attempts} attempts</span>
+          )}
+        </div>
+        <p className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">{answerText}</p>
+        {result.disclaimer_appended && (
+          <p className="mt-3 text-xs italic text-amber-700/90">{V2_LOW_CONFIDENCE_DISCLAIMER}</p>
+        )}
+        <p className="mt-3 text-xs text-zinc-500">Searched for: {result.rewritten_query}</p>
       </section>
 
-      {sources.length > 0 && (
+      {result.sources.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-zinc-900">Sources</h2>
-          {sources.map((source) => (
+          {result.sources.map((source) => (
             <SourceCard key={source.segment_id} source={source} />
           ))}
         </section>

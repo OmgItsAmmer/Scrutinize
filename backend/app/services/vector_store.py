@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.http.exceptions import ApiException, UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -17,6 +17,7 @@ from qdrant_client.models import (
 )
 
 from app.core.config import Settings
+from app.services.qdrant_errors import format_qdrant_error
 
 
 @dataclass(frozen=True)
@@ -84,8 +85,11 @@ class VectorStore:
                     raise
 
     def ensure_collection(self) -> None:
-        self.create_collection()
-        self._ensure_payload_indexes()
+        try:
+            self.create_collection()
+            self._ensure_payload_indexes()
+        except (UnexpectedResponse, ApiException) as exc:
+            raise RuntimeError(format_qdrant_error(exc)) from exc
 
     def upsert_segments(self, segments: list[VectorSegment]) -> None:
         if not segments:

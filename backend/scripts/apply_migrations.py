@@ -37,7 +37,7 @@ def _to_psycopg_dsn(url: str) -> str:
 def apply_migration(path: Path, dsn: str) -> None:
     sql = path.read_text(encoding="utf-8")
     with psycopg.connect(_to_psycopg_dsn(dsn)) as conn:
-        conn.run(sql)
+        conn.execute(sql)
     print(f"Applied {path.name}")
 
 

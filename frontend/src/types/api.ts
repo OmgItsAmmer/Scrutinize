@@ -53,6 +53,32 @@ export type SearchResponse = {
   sources: SearchSource[];
 };
 
+export type SearchV2Route = "generic" | "rag";
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  timestamp?: string | null;
+};
+
+export type ConversationState = {
+  messages: ChatMessage[];
+};
+
+export type SearchV2Response = {
+  query: string;
+  rewritten_query: string;
+  route: SearchV2Route;
+  gate_reason: string;
+  modality_filter: FileModality | null;
+  answer: string;
+  sources: SearchSource[];
+  attempts: number;
+  confidence: number | null;
+  disclaimer_appended: boolean;
+  conversation: ConversationState;
+};
+
 export type LibraryFileItem = {
   id: string;
   filename: string;

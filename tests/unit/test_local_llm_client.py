@@ -3,8 +3,26 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.services.v2.local_llm_client import LocalLlmClient, LocalLlmError
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_local_llm_client_generate_url_host_only():
+    settings = Settings(local_llm_base_url="https://example.ngrok-free.app")
+    client = LocalLlmClient(settings)
+    assert client.generate_url == "https://example.ngrok-free.app/api/generate"
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_local_llm_client_generate_url_with_path():
+    settings = Settings(
+        local_llm_base_url="https://example.ngrok-free.app/api/generate"
+    )
+    client = LocalLlmClient(settings)
+    assert client.generate_url == "https://example.ngrok-free.app/api/generate"
 
 
 @pytest.mark.unit
@@ -82,6 +100,25 @@ def test_local_llm_client_http_error():
         pytest.raises(LocalLlmError, match="HTTP 502"),
     ):
         client.generate("qwen3.5:0.8b", "", "ping")
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_local_llm_client_falls_back_to_thinking_field():
+    settings = Settings(local_llm_base_url="http://local-llm.test")
+    client = LocalLlmClient(settings)
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {
+        "response": "",
+        "thinking": '{"route":"rag"}',
+    }
+
+    with patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response):
+        text = client.generate("qwen3.5:0.8b", "", "ping")
+
+    assert text == '{"route":"rag"}'
 
 
 @pytest.mark.unit

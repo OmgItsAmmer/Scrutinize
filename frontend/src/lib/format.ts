@@ -33,3 +33,28 @@ export function formatDurationSeconds(seconds: number | null): string {
   }
   return formatTimestampSeconds(seconds) || "—";
 }
+
+export const V2_LOW_CONFIDENCE_DISCLAIMER =
+  "Note: answer may vary — retrieval confidence was low.";
+
+export function formatConfidencePercent(confidence: number | null): string | null {
+  if (confidence == null) {
+    return null;
+  }
+  return `${Math.round(confidence * 100)}% confidence`;
+}
+
+/** Strip backend disclaimer from answer body when shown as a separate footnote. */
+export function displayV2Answer(answer: string, disclaimerAppended: boolean): string {
+  if (!disclaimerAppended) {
+    return answer;
+  }
+  const suffix = `\n\n${V2_LOW_CONFIDENCE_DISCLAIMER}`;
+  if (answer.endsWith(suffix)) {
+    return answer.slice(0, -suffix.length).trimEnd();
+  }
+  if (answer.includes(V2_LOW_CONFIDENCE_DISCLAIMER)) {
+    return answer.replace(V2_LOW_CONFIDENCE_DISCLAIMER, "").trim();
+  }
+  return answer;
+}

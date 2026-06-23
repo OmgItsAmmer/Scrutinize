@@ -1,14 +1,16 @@
 import type {
+  ConversationState,
   DeleteFileResponse,
   HealthResponse,
   JobStatusResponse,
   LibraryResponse,
   ModalityFilter,
-  SearchResponse,
+  SearchV2Response,
   UploadResponse,
 } from "../types/api";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const SEARCH_API_PATH = import.meta.env.VITE_SEARCH_API ?? "/v2/search";
 
 export class ApiError extends Error {
   status: number;
@@ -46,6 +48,15 @@ export function getApiUrl(): string {
   return API_URL;
 }
 
+export function isLocalDevApi(): boolean {
+  try {
+    const host = new URL(API_URL).hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 export function fetchHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");
 }
@@ -55,13 +66,22 @@ export function fetchHealthWake(): Promise<HealthResponse> {
   return request<HealthResponse>("/health/wake");
 }
 
-export function searchContent(query: string, modalityFilter: ModalityFilter): Promise<SearchResponse> {
-  return request<SearchResponse>("/search", {
+export function getSearchApiPath(): string {
+  return SEARCH_API_PATH;
+}
+
+export function searchContent(
+  query: string,
+  modalityFilter: ModalityFilter,
+  conversation?: ConversationState,
+): Promise<SearchV2Response> {
+  return request<SearchV2Response>(SEARCH_API_PATH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
       modality_filter: modalityFilter === "all" ? null : modalityFilter,
+      conversation: conversation ?? { messages: [] },
     }),
   });
 }

@@ -9,21 +9,24 @@ import {
 } from "react";
 import {
   ApiError,
+  fetchHealth,
   fetchHealthWake,
   fetchJobStatus,
   fetchLibrary,
   deleteLibraryFile as deleteLibraryFileRequest,
   getApiUrl,
+  isLocalDevApi,
   searchContent,
   uploadFile,
 } from "../api/client";
 import type {
   AppView,
+  ConversationState,
   HealthResponse,
   JobStatus,
   LibraryFileItem,
   ModalityFilter,
-  SearchResponse,
+  SearchV2Response,
   UploadJobState,
 } from "../types/api";
 
@@ -32,8 +35,11 @@ type SearchState = {
   modalityFilter: ModalityFilter;
   loading: boolean;
   error: string | null;
-  result: SearchResponse | null;
+  result: SearchV2Response | null;
+  conversation: ConversationState;
 };
+
+const emptyConversation = (): ConversationState => ({ messages: [] });
 
 type UploadState = {
   uploading: boolean;
@@ -64,7 +70,7 @@ type Action =
   | { type: "SET_SEARCH_QUERY"; query: string }
   | { type: "SET_MODALITY_FILTER"; filter: ModalityFilter }
   | { type: "SEARCH_START" }
-  | { type: "SEARCH_SUCCESS"; result: SearchResponse }
+  | { type: "SEARCH_SUCCESS"; result: SearchV2Response }
   | { type: "SEARCH_ERROR"; error: string }
   | { type: "CLEAR_SEARCH" }
   | { type: "UPLOAD_START" }
@@ -89,6 +95,7 @@ const initialState: AppState = {
     loading: false,
     error: null,
     result: null,
+    conversation: emptyConversation(),
   },
   upload: {
     uploading: false,
@@ -131,6 +138,7 @@ function reducer(state: AppState, action: Action): AppState {
           loading: false,
           error: null,
           result: action.result,
+          conversation: action.result.conversation,
         },
       };
     case "SEARCH_ERROR":
@@ -148,6 +156,7 @@ function reducer(state: AppState, action: Action): AppState {
           error: null,
           result: null,
           loading: false,
+          conversation: emptyConversation(),
         },
       };
     case "UPLOAD_START":
@@ -258,10 +267,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let retries = 0;
     const MAX_WAKE_RETRIES = 12;
+    const localDev = isLocalDevApi();
 
-    async function wakeApi() {
+    async function checkHealth() {
       try {
-        const health = await fetchHealthWake();
+        const health = localDev ? await fetchHealth() : await fetchHealthWake();
         if (!cancelled) {
           dispatch({ type: "SET_HEALTH", health, error: null });
         }
@@ -273,22 +283,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
             health: null,
             error: formatError(error),
           });
-          if (retries < MAX_WAKE_RETRIES) {
+          if (!localDev && retries < MAX_WAKE_RETRIES) {
             retries += 1;
-            retryTimer = setTimeout(() => void wakeApi(), 5_000);
+            retryTimer = setTimeout(() => void checkHealth(), 5_000);
           }
         }
       }
     }
 
     function onVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        void wakeApi();
+      if (localDev || document.visibilityState !== "visible") {
+        return;
       }
+      void checkHealth();
     }
 
-    // One-shot wake on landing — no recurring polls (lets Fly machines sleep).
-    void wakeApi();
+    void checkHealth();
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
@@ -370,12 +380,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     dispatch({ type: "SEARCH_START" });
     try {
-      const result = await searchContent(query, state.search.modalityFilter);
+      const result = await searchContent(
+        query,
+        state.search.modalityFilter,
+        state.search.conversation,
+      );
       dispatch({ type: "SEARCH_SUCCESS", result });
     } catch (error) {
       dispatch({ type: "SEARCH_ERROR", error: formatError(error) });
     }
-  }, [state.apiConnected, state.search.modalityFilter, state.search.query]);
+  }, [state.apiConnected, state.search.conversation, state.search.modalityFilter, state.search.query]);
 
   const uploadFilesHandler = useCallback(async (files: FileList | File[]) => {
     if (!state.apiConnected) {

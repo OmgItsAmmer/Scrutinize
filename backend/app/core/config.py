@@ -84,9 +84,8 @@ class Settings(BaseSettings):
     # v2 pipeline tuning
     v2_max_pipeline_attempts: int = 2
     v2_confidence_threshold: float = 0.7
-    v2_rrf_k: int = 60
-    v2_rrf_num_lists: int = 2
     v2_rrf_top_k: int = 5
+    v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
 
     # Cloudinary — raw file uploads (text, audio, video); relational data lives in Neon.
     cloudinary_cloud_name: str = ""
@@ -139,6 +138,8 @@ class Settings(BaseSettings):
 
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
+    # Run tasks inline (no Redis broker/worker). Default on in development.
+    celery_task_always_eager: bool | None = None
 
     @property
     def broker_url(self) -> str:
@@ -147,6 +148,12 @@ class Settings(BaseSettings):
     @property
     def result_backend(self) -> str:
         return self.celery_result_backend or self.redis_url
+
+    @property
+    def task_always_eager(self) -> bool:
+        if self.celery_task_always_eager is not None:
+            return self.celery_task_always_eager
+        return self.environment == "development"
 
     @property
     def cloudinary_configured(self) -> bool:
@@ -164,3 +171,9 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def reload_settings() -> Settings:
+    """Clear cached settings — call after .env changes (especially Celery workers)."""
+    get_settings.cache_clear()
+    return get_settings()

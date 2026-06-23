@@ -18,17 +18,27 @@ class LocalLlmError(Exception):
 class LocalLlmClient:
     """HTTP client for Ollama-style POST /api/generate (local models via ngrok)."""
 
+    GENERATE_PATH = "/api/generate"
+
     def __init__(self, settings: Settings) -> None:
         if not settings.local_llm_configured:
             raise RuntimeError(
                 "LOCAL_LLM_BASE_URL is required for the v2 query pipeline."
             )
-        self._base_url = settings.local_llm_base_url.rstrip("/")
+        self._generate_url = self._normalize_generate_url(settings.local_llm_base_url)
         self._timeout = settings.local_llm_timeout_s
+
+    @staticmethod
+    def _normalize_generate_url(base_url: str) -> str:
+        """Accept host-only or full /api/generate URL (common ngrok setups)."""
+        trimmed = base_url.strip().rstrip("/")
+        if trimmed.endswith("/api/generate"):
+            return trimmed
+        return f"{trimmed}{LocalLlmClient.GENERATE_PATH}"
 
     @property
     def generate_url(self) -> str:
-        return f"{self._base_url}/api/generate"
+        return self._generate_url
 
     def generate(
         self,
@@ -79,6 +89,9 @@ class LocalLlmClient:
             raise LocalLlmError("Local LLM returned non-JSON response") from exc
 
         text = str(body.get("response", "")).strip()
+        if not text:
+            # Some thinking models (e.g. qwen3.5 via Ollama) leave response empty.
+            text = str(body.get("thinking", "")).strip()
         if not text:
             raise LocalLlmError("Local LLM returned an empty response")
         return text
