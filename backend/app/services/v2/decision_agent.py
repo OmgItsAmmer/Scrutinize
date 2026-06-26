@@ -6,7 +6,7 @@ from app.core.config import Settings
 from app.schemas.search import SearchSource
 from app.services.v2.conversation_format import append_conversation_context
 from app.services.v2.json_utils import parse_json_object
-from app.services.v2.local_llm_client import LocalLlmClient
+from app.services.v2.local_llm_client import LocalLlmClient, LlmResponse
 from app.services.v2.prompts import load_prompt
 from app.services.v2.rag_gate import Route
 
@@ -32,6 +32,7 @@ class DecisionResult:
     confidence: float
     feedback: str
     correct_route: Route | None = None
+    llm_call: LlmResponse | None = None
 
 
 class DecisionAgent:
@@ -54,9 +55,10 @@ class DecisionAgent:
         ]
         append_conversation_context(user_lines, context.conversation_context)
 
-        raw = self._client.generate(self._model, self._system, "\n".join(user_lines))
-
+        llm_response = None
         try:
+            llm_response = self._client.generate(self._model, self._system, "\n".join(user_lines))
+            raw = llm_response.content
             data = parse_json_object(raw)
             verdict_raw = str(data.get("verdict", "retry")).strip().lower()
             verdict: Verdict = "good" if verdict_raw == "good" else "retry"
@@ -71,13 +73,15 @@ class DecisionAgent:
                 confidence=confidence,
                 feedback=feedback,
                 correct_route=correct_route,
+                llm_call=llm_response,
             )
-        except (ValueError, TypeError) as exc:
-            logger.warning("Decision agent JSON parse failed; defaulting to retry: %s", exc)
+        except Exception as exc:
+            logger.warning("Decision agent generation/parse failed; defaulting to retry: %s", exc)
             return DecisionResult(
                 verdict="retry",
                 confidence=0.0,
-                feedback="Decision JSON parse failed; broaden query keywords.",
+                feedback=f"Decision failed; defaulting to retry: {exc}",
+                llm_call=llm_response,
             )
 
 

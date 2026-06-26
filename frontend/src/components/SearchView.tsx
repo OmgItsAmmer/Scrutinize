@@ -63,7 +63,7 @@ export function SearchView() {
         )}
 
         {search.result && !search.loading && (
-          <div className="mx-auto mb-8 w-full max-w-3xl flex-1">
+          <div className="mx-auto my-auto mb-8 w-full max-w-3xl flex-1">
             <SearchResults result={search.result} />
           </div>
         )}

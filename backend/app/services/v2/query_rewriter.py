@@ -3,20 +3,20 @@ from dataclasses import dataclass
 from app.core.config import Settings
 from app.services.v2.conversation_format import (
     append_conversation_context,
-    is_contextual_follow_up,
     is_standalone_message,
 )
-from app.services.v2.local_llm_client import LocalLlmClient
+from app.services.v2.local_llm_client import LocalLlmClient, LlmResponse
 from app.services.v2.prompts import load_prompt
 
 
 @dataclass(frozen=True)
 class RewrittenQuery:
     text: str
+    llm_call: LlmResponse | None = None
 
 
 class QueryRewriter:
-    """qwen3.5:2b — rewrite user queries for better retrieval keywords."""
+    """Rewrite user queries for better retrieval keywords (RAG path only)."""
 
     def __init__(self, client: LocalLlmClient, settings: Settings) -> None:
         self._client = client
@@ -32,20 +32,17 @@ class QueryRewriter:
     ) -> RewrittenQuery:
         stripped = query.strip()
         if is_standalone_message(stripped):
-            return RewrittenQuery(text=stripped)
+            return RewrittenQuery(text=stripped, llm_call=None)
 
         user_lines = [f"User query: {stripped}"]
         if feedback and feedback.strip():
             user_lines.append(f"Revision feedback: {feedback.strip()}")
+        append_conversation_context(user_lines, conversation_context)
 
-        use_context = bool(feedback and feedback.strip()) or is_contextual_follow_up(stripped)
-        if use_context:
-            append_conversation_context(user_lines, conversation_context)
-
-        raw = self._client.generate(
+        llm_response = self._client.generate(
             self._model,
             self._system,
             "\n".join(user_lines),
         )
-        rewritten = raw.strip() or stripped
-        return RewrittenQuery(text=rewritten)
+        rewritten = llm_response.content.strip() or stripped
+        return RewrittenQuery(text=rewritten, llm_call=llm_response)

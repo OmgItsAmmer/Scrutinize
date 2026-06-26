@@ -7,6 +7,7 @@ import pytest
 from app.core.config import Settings
 from app.models.file import FileModality
 from app.schemas.search import SearchSource
+from app.services.v2.local_llm_client import LlmResponse
 from app.services.v2.decision_agent import DecisionAgent, DecisionContext
 
 
@@ -15,8 +16,13 @@ from app.services.v2.decision_agent import DecisionAgent, DecisionContext
 def test_decision_agent_parses_json():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = json.dumps(
-        {"verdict": "good", "confidence": 0.92, "feedback": "Well grounded."}
+    client.generate.return_value = LlmResponse(
+        content=json.dumps(
+            {"verdict": "good", "confidence": 0.92, "feedback": "Well grounded."}
+        ),
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
     )
     agent = DecisionAgent(client, settings)
 
@@ -42,13 +48,18 @@ def test_decision_agent_parses_json():
 def test_decision_agent_includes_chunk_summaries():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = json.dumps(
-        {
-            "verdict": "retry",
-            "confidence": 0.2,
-            "feedback": "Cooking question — search library.",
-            "correct_route": "rag",
-        }
+    client.generate.return_value = LlmResponse(
+        content=json.dumps(
+            {
+                "verdict": "retry",
+                "confidence": 0.2,
+                "feedback": "Cooking question — search library.",
+                "correct_route": "rag",
+            }
+        ),
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
     )
     agent = DecisionAgent(client, settings)
     source = SearchSource(
@@ -82,13 +93,18 @@ def test_decision_agent_includes_chunk_summaries():
 def test_decision_agent_parses_correct_route():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = json.dumps(
-        {
-            "verdict": "retry",
-            "confidence": 0.3,
-            "feedback": "Needs RAG.",
-            "correct_route": "rag",
-        }
+    client.generate.return_value = LlmResponse(
+        content=json.dumps(
+            {
+                "verdict": "retry",
+                "confidence": 0.3,
+                "feedback": "Needs RAG.",
+                "correct_route": "rag",
+            }
+        ),
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
     )
     agent = DecisionAgent(client, settings)
 
@@ -111,7 +127,12 @@ def test_decision_agent_parses_correct_route():
 def test_decision_agent_parse_failure_defaults_to_retry():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = "not-json"
+    client.generate.return_value = LlmResponse(
+        content="not-json",
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     agent = DecisionAgent(client, settings)
 
     result = agent.evaluate(

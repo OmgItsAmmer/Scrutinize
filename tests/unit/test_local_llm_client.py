@@ -4,25 +4,23 @@ import httpx
 import pytest
 
 from app.core.config import Settings, get_settings
-from app.services.v2.local_llm_client import LocalLlmClient, LocalLlmError
+from app.services.v2.local_llm_client import LocalLlmClient, LocalLlmError, LlmResponse
 
 
 @pytest.mark.unit
 @pytest.mark.v2
-def test_local_llm_client_generate_url_host_only():
-    settings = Settings(local_llm_base_url="https://example.ngrok-free.app")
+def test_local_llm_client_endpoint_resolution():
+    settings = Settings()
+    settings.local_llm_base_url = "https://example.ngrok-free.app"
+    settings.local_llm_gate_url = "https://gate.ngrok-free.app/v1/chat/completions"
+    settings.local_llm_gate_model = "my-gate-model"
+    
     client = LocalLlmClient(settings)
-    assert client.generate_url == "https://example.ngrok-free.app/api/generate"
-
-
-@pytest.mark.unit
-@pytest.mark.v2
-def test_local_llm_client_generate_url_with_path():
-    settings = Settings(
-        local_llm_base_url="https://example.ngrok-free.app/api/generate"
-    )
-    client = LocalLlmClient(settings)
-    assert client.generate_url == "https://example.ngrok-free.app/api/generate"
+    
+    # Custom gate model URL mapping
+    assert client._get_url("my-gate-model") == "https://gate.ngrok-free.app/v1/chat/completions"
+    # Fallback default URL mapping
+    assert client._get_url("other-model") == "https://example.ngrok-free.app/v1/chat/completions"
 
 
 @pytest.mark.unit
@@ -33,20 +31,38 @@ def test_local_llm_client_generate_success():
 
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {"response": "hello from qwen"}
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello user!",
+                    "reasoning_content": "Thinking process details...",
+                }
+            }
+        ]
+    }
 
     with patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response) as post:
-        text = client.generate("qwen3.5:0.8b", "You are helpful.", "Hi")
+        resp = client.generate("qwen3.5:0.8b", "You are helpful.", "Hi")
 
-    assert text == "hello from qwen"
+    assert isinstance(resp, LlmResponse)
+    assert resp.content == "Hello user!"
+    assert resp.model_name == "qwen3.5:0.8b"
+    assert resp.prompt_system == "You are helpful."
+    assert resp.prompt_user == "Hi"
+    assert resp.raw_thinking == "Thinking process details..."
+    assert resp.latency_ms >= 0
+
     post.assert_called_once()
     call_kwargs = post.call_args.kwargs
     assert call_kwargs["json"]["model"] == "qwen3.5:0.8b"
-    assert call_kwargs["json"]["prompt"] == "Hi"
-    assert call_kwargs["json"]["system"] == "You are helpful."
+    assert call_kwargs["json"]["messages"] == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Hi"},
+    ]
     assert call_kwargs["json"]["stream"] is False
     assert call_kwargs["headers"]["ngrok-skip-browser-warning"] == "true"
-    assert client.generate_url == "http://local-llm.test/api/generate"
 
 
 @pytest.mark.unit
@@ -57,13 +73,22 @@ def test_local_llm_client_json_mode():
 
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {"response": '{"route":"rag"}'}
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": '{"route":"rag"}',
+                }
+            }
+        ]
+    }
 
     with patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response) as post:
-        text = client.generate("qwen3.5:0.8b", "Return JSON.", "classify", json_mode=True)
+        resp = client.generate("qwen3.5:0.8b", "Return JSON.", "classify", json_mode=True)
 
-    assert text == '{"route":"rag"}'
-    assert post.call_args.kwargs["json"]["format"] == "json"
+    assert resp.content == '{"route":"rag"}'
+    assert post.call_args.kwargs["json"]["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.unit
@@ -74,7 +99,16 @@ def test_local_llm_client_empty_response_raises():
 
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {"response": "  "}
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "   ",
+                }
+            }
+        ]
+    }
 
     with (
         patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response),
@@ -88,8 +122,9 @@ def test_local_llm_client_empty_response_raises():
 def test_local_llm_client_http_error():
     settings = get_settings()
     client = LocalLlmClient(settings)
+    url = client._get_url("qwen3.5:0.8b")
 
-    request = httpx.Request("POST", client.generate_url)
+    request = httpx.Request("POST", url)
     response = httpx.Response(502, request=request)
 
     with (
@@ -104,31 +139,16 @@ def test_local_llm_client_http_error():
 
 @pytest.mark.unit
 @pytest.mark.v2
-def test_local_llm_client_falls_back_to_thinking_field():
-    settings = Settings(local_llm_base_url="http://local-llm.test")
-    client = LocalLlmClient(settings)
-
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {
-        "response": "",
-        "thinking": '{"route":"rag"}',
-    }
-
-    with patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response):
-        text = client.generate("qwen3.5:0.8b", "", "ping")
-
-    assert text == '{"route":"rag"}'
-
-
-@pytest.mark.unit
-@pytest.mark.v2
 def test_local_llm_client_requires_base_url(monkeypatch):
     monkeypatch.setenv("LOCAL_LLM_BASE_URL", "")
+    monkeypatch.setenv("LOCAL_LLM_GATE_URL", "")
+    monkeypatch.setenv("LOCAL_LLM_REWRITER_URL", "")
+    monkeypatch.setenv("LOCAL_LLM_DECISION_URL", "")
     get_settings.cache_clear()
 
     settings = get_settings()
-    with pytest.raises(RuntimeError, match="LOCAL_LLM_BASE_URL"):
+    # Explicitly verify configuration check
+    with pytest.raises(RuntimeError, match="local LLM URL is required"):
         LocalLlmClient(settings)
 
     get_settings.cache_clear()

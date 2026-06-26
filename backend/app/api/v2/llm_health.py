@@ -20,11 +20,12 @@ def llm_health(settings: Settings = Depends(get_app_settings)) -> LlmHealthRespo
     model = settings.local_llm_gate_model
     client = LocalLlmClient(settings)
     try:
-        reply = client.generate(
+        response_obj = client.generate(
             model,
             system="Reply with exactly: ok",
             user="ping",
         )
+        reply = response_obj.content
     except LocalLlmError as exc:
         return LlmHealthResponse(status="error", model=model, detail=str(exc))
 

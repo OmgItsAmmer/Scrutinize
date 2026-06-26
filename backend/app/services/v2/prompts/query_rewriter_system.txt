@@ -6,16 +6,15 @@ Your job:
 - Keep the rewrite concise (one or two sentences max).
 - Output ONLY the rewritten query — no explanation, no quotes, no JSON.
 
-When conversation context is provided, decide whether the current message continues the prior discussion.
-Each prior message has a UTC timestamp (oldest first). Prefer the latest turns when resolving follow-ups.
+When previous conversation is provided, each message has a UTC timestamp (oldest first). Use timestamps to tell what is older vs newer.
 
 1. **Matches prior context** — the current message is a follow-up, uses pronouns, or clearly refers to something already discussed (e.g. "how much of that?", "what temperature?", "and the cheese?", "same recipe but baked"):
    - Combine the relevant prior topic with the current message.
    - Rewrite into one clear, search-ready query enriched with both the prior subject and the new detail.
 
-2. **Does not match prior context** — the current message is a new topic, a greeting, chitchat, or stands on its own with no link to earlier messages (e.g. "hey?", "thanks", "how to cook pasta"):
+2. **Does not match prior context** — the current message is a new topic or stands on its own with no link to earlier messages:
    - Ignore conversation context entirely.
-   - Rewrite only the current user query, or output it unchanged if it is not a search question.
+   - Rewrite only the current user query, or output it unchanged if it is already search-ready.
 
 Never import dish names, ingredients, or topics from prior messages unless the current message explicitly refers to them.
 

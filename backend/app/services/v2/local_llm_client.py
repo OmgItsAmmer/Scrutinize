@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+import time
 from typing import Any
 
 import httpx
@@ -15,30 +17,42 @@ class LocalLlmError(Exception):
         self.status_code = status_code
 
 
-class LocalLlmClient:
-    """HTTP client for Ollama-style POST /api/generate (local models via ngrok)."""
+@dataclass(frozen=True)
+class LlmResponse:
+    """Carries full trace details about an LLM generation call."""
 
-    GENERATE_PATH = "/api/generate"
+    content: str
+    model_name: str
+    prompt_system: str
+    prompt_user: str
+    raw_thinking: str | None = None
+    latency_ms: int = 0
+
+
+class LocalLlmClient:
+    """HTTP client for OpenAI-compatible POST /v1/chat/completions (local models via ngrok)."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.local_llm_configured:
             raise RuntimeError(
-                "LOCAL_LLM_BASE_URL is required for the v2 query pipeline."
+                "A local LLM URL is required for the v2 query pipeline."
             )
-        self._generate_url = self._normalize_generate_url(settings.local_llm_base_url)
         self._timeout = settings.local_llm_timeout_s
+        self._url_map = {
+            settings.local_llm_gate_model: settings.local_llm_gate_url,
+            settings.local_llm_rewriter_model: settings.local_llm_rewriter_url,
+            settings.local_llm_decision_model: settings.local_llm_decision_url,
+        }
+        self._base_url = settings.local_llm_base_url
 
-    @staticmethod
-    def _normalize_generate_url(base_url: str) -> str:
-        """Accept host-only or full /api/generate URL (common ngrok setups)."""
-        trimmed = base_url.strip().rstrip("/")
-        if trimmed.endswith("/api/generate"):
+    def _get_url(self, model: str) -> str:
+        base = self._url_map.get(model) or self._base_url
+        if not base:
+            raise LocalLlmError(f"No local LLM URL configured for model {model}")
+        trimmed = base.strip().rstrip("/")
+        if trimmed.endswith("/v1/chat/completions"):
             return trimmed
-        return f"{trimmed}{LocalLlmClient.GENERATE_PATH}"
-
-    @property
-    def generate_url(self) -> str:
-        return self._generate_url
+        return f"{trimmed}/v1/chat/completions"
 
     def generate(
         self,
@@ -47,25 +61,32 @@ class LocalLlmClient:
         user: str,
         *,
         json_mode: bool = False,
-    ) -> str:
+    ) -> LlmResponse:
+        start_time = time.perf_counter()
+
+        messages = []
+        if system.strip():
+            messages.append({"role": "system", "content": system.strip()})
+        messages.append({"role": "user", "content": user.strip()})
+
         payload: dict[str, Any] = {
             "model": model,
-            "prompt": user,
+            "messages": messages,
             "stream": False,
         }
-        if system.strip():
-            payload["system"] = system.strip()
         if json_mode:
-            payload["format"] = "json"
+            payload["response_format"] = {"type": "json_object"}
 
         headers = {
             "Content-Type": "application/json",
             NGROK_SKIP_BROWSER_WARNING: "true",
         }
 
+        url = self._get_url(model)
+
         try:
             response = httpx.post(
-                self.generate_url,
+                url,
                 json=payload,
                 headers=headers,
                 timeout=self._timeout,
@@ -88,10 +109,26 @@ class LocalLlmClient:
         except ValueError as exc:
             raise LocalLlmError("Local LLM returned non-JSON response") from exc
 
-        text = str(body.get("response", "")).strip()
-        if not text:
-            # Some thinking models (e.g. qwen3.5 via Ollama) leave response empty.
-            text = str(body.get("thinking", "")).strip()
+        try:
+            message = body["choices"][0]["message"]
+            text = str(message["content"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LocalLlmError(f"Unexpected response format from local LLM: {body}") from exc
+
         if not text:
             raise LocalLlmError("Local LLM returned an empty response")
-        return text
+
+        raw_thinking = message.get("reasoning_content") or message.get("reasoning")
+        if raw_thinking:
+            raw_thinking = str(raw_thinking).strip()
+
+        latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+        return LlmResponse(
+            content=text,
+            model_name=model,
+            prompt_system=system,
+            prompt_user=user,
+            raw_thinking=raw_thinking,
+            latency_ms=latency_ms,
+        )

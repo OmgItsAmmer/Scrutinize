@@ -14,12 +14,6 @@ from app.models.file import File  # noqa: F401
 from app.models.pipeline_log import (  # noqa: F401
     PipelineRun,
     PipelineStep,
-    StepRewrite,
-    StepGate,
-    StepRetrieval,
-    RetrievedSource,
-    StepSynthesis,
-    StepEvaluation,
 )
 from app.models.processing_job import ProcessingJob  # noqa: F401
 from app.models.segment import Segment  # noqa: F401

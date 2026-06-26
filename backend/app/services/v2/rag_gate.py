@@ -4,7 +4,7 @@ from typing import Literal
 
 from app.core.config import Settings
 from app.services.v2.json_utils import parse_json_object
-from app.services.v2.local_llm_client import LocalLlmClient
+from app.services.v2.local_llm_client import LocalLlmClient, LlmResponse
 from app.services.v2.prompts import load_prompt
 from app.services.v2.conversation_format import append_conversation_context
 
@@ -18,10 +18,11 @@ class GateResult:
     route: Route
     reason: str
     reply: str | None = None
+    llm_call: LlmResponse | None = None
 
 
 class RagGate:
-    """qwen3.5:0.8b — route generic vs RAG; includes direct reply for generic."""
+    """Route generic vs RAG using the current query and full conversation snapshot."""
 
     def __init__(self, client: LocalLlmClient, settings: Settings) -> None:
         self._client = client
@@ -32,33 +33,32 @@ class RagGate:
         self,
         original: str,
         *,
-        rewritten: str = "",
         conversation_context: str = "",
     ) -> GateResult:
-        user_lines = [f"Original query: {original.strip()}"]
-        if rewritten.strip():
-            user_lines.append(f"Rewritten query: {rewritten.strip()}")
+        user_lines = [f"Current user query: {original.strip()}"]
         append_conversation_context(user_lines, conversation_context)
 
-        raw = self._client.generate(
-            self._model,
-            self._system,
-            "\n".join(user_lines),
-        )
-
+        llm_response = None
         try:
+            llm_response = self._client.generate(
+                self._model,
+                self._system,
+                "\n".join(user_lines),
+            )
+            raw = llm_response.content
             data = parse_json_object(raw)
-            route_raw = str(data.get("route", "rag")).strip().lower()
+            route_raw = str(data.get("route", "generic")).strip().lower()
             route: Route = "rag" if route_raw == "rag" else "generic"
             reason = str(data.get("reason", "")).strip() or "No reason provided"
             reply_raw = data.get("reply")
             reply = str(reply_raw).strip() if reply_raw not in (None, "", "null") else None
             if route == "generic" and not reply:
                 reply = None
-            return GateResult(route=route, reason=reason, reply=reply)
-        except (ValueError, TypeError) as exc:
-            logger.warning("RAG gate JSON parse failed; defaulting to rag: %s", exc)
+            return GateResult(route=route, reason=reason, reply=reply, llm_call=llm_response)
+        except Exception as exc:
+            logger.warning("RAG gate generation/parse failed; defaulting to generic: %s", exc)
             return GateResult(
-                route="rag",
-                reason="Gate JSON parse failed; defaulting to RAG",
+                route="generic",
+                reason=f"Gate failed; defaulting to generic: {exc}",
+                llm_call=llm_response,
             )

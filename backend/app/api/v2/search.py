@@ -22,5 +22,5 @@ def search_v2(
     except LocalLlmError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Local LLM is unavailable. Check the ngrok tunnel and model host.",
+            detail=f"Local LLM is unavailable: {exc}",
         ) from exc

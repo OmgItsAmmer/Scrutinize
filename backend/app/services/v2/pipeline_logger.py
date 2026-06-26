@@ -5,23 +5,19 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 from app.models.file import FileModality
-from app.models.pipeline_log import (
-    PipelineRun,
-    PipelineStep,
-    RetrievedSource,
-    StepEvaluation,
-    StepGate,
-    StepRetrieval,
-    StepRewrite,
-    StepSynthesis,
-)
+from app.models.pipeline_log import PipelineRun, PipelineStep
 from app.schemas.search import SearchSource
+from app.services.v2.rag_gate import GateResult
+from app.services.v2.query_rewriter import RewrittenQuery
+from app.services.v2.generic_agent import GenericReplyResult
+from app.services.v2.rag_synthesis_agent import SynthesisResult
+from app.services.v2.decision_agent import DecisionResult
 
 logger = logging.getLogger(__name__)
 
 
 class PipelineLogger:
-    """Helper class to log v2 search pipeline execution steps to a relational DB."""
+    """Helper class to log v2 search pipeline execution steps to a relational DB using unified tables."""
 
     def __init__(self, session: Session | None = None) -> None:
         self._session = session
@@ -37,7 +33,7 @@ class PipelineLogger:
 
         try:
             run = PipelineRun(
-                query=query,
+                original_query=query,
                 modality_filter=modality_filter,
                 conversation_context=conversation_context,
                 start_time=datetime.now(UTC),
@@ -54,31 +50,28 @@ class PipelineLogger:
         self,
         run_id: UUID | None,
         attempt: int,
-        input_query: str,
-        prev_feedback: str | None,
-        rewritten_query: str,
+        rewritten: RewrittenQuery,
     ) -> None:
         if not self._session or not run_id:
             return
 
         try:
+            llm = rewritten.llm_call
+            model_input = {"system": llm.prompt_system, "user": llm.prompt_user} if llm else None
             step = PipelineStep(
                 run_id=run_id,
                 step_type="rewrite",
                 attempt=attempt,
+                model_name=llm.model_name if llm else None,
+                model_input=model_input,
+                raw_thinking=llm.raw_thinking if llm else None,
+                model_output=llm.content if llm else None,
+                structured_output={"rewritten_query": rewritten.text},
+                latency_ms=llm.latency_ms if llm else 0,
+                status="success",
                 created_at=datetime.now(UTC),
             )
             self._session.add(step)
-            self._session.commit()
-            self._session.refresh(step)
-
-            rewrite = StepRewrite(
-                step_id=step.id,
-                input_query=input_query,
-                prev_feedback=prev_feedback,
-                rewritten_query=rewritten_query,
-            )
-            self._session.add(rewrite)
             self._session.commit()
         except Exception:
             logger.exception("Failed to log query rewrite step to database.")
@@ -86,9 +79,7 @@ class PipelineLogger:
     def log_gate(
         self,
         run_id: UUID | None,
-        route: str,
-        reason: str | None,
-        reply: str | None,
+        gate_result: GateResult,
     ) -> None:
         if not self._session or not run_id:
             return
@@ -101,23 +92,26 @@ class PipelineLogger:
             existing_gates = self._session.exec(statement).all()
             attempt = len(existing_gates) + 1
 
+            llm = gate_result.llm_call
+            model_input = {"system": llm.prompt_system, "user": llm.prompt_user} if llm else None
             step = PipelineStep(
                 run_id=run_id,
                 step_type="gate",
                 attempt=attempt,
+                model_name=llm.model_name if llm else None,
+                model_input=model_input,
+                raw_thinking=llm.raw_thinking if llm else None,
+                model_output=llm.content if llm else None,
+                structured_output={
+                    "route": gate_result.route,
+                    "reason": gate_result.reason,
+                    "reply": gate_result.reply,
+                },
+                latency_ms=llm.latency_ms if llm else 0,
+                status="success",
                 created_at=datetime.now(UTC),
             )
             self._session.add(step)
-            self._session.commit()
-            self._session.refresh(step)
-
-            gate = StepGate(
-                step_id=step.id,
-                route=route,
-                reason=reason,
-                reply=reply,
-            )
-            self._session.add(gate)
             self._session.commit()
         except Exception:
             logger.exception("Failed to log RAG gate step to database.")
@@ -134,39 +128,39 @@ class PipelineLogger:
             return
 
         try:
+            serialized_sources = []
+            for rank, source in enumerate(sources, start=1):
+                serialized_sources.append({
+                    "segment_id": str(source.segment_id) if source.segment_id else None,
+                    "file_id": str(source.file_id) if source.file_id else None,
+                    "modality": str(source.modality),
+                    "title": source.title,
+                    "content": source.content,
+                    "source_path": source.source_path,
+                    "start_time": source.start_time,
+                    "end_time": source.end_time,
+                    "score": float(source.score),
+                    "rank": rank,
+                })
+
             step = PipelineStep(
                 run_id=run_id,
                 step_type="retrieval",
                 attempt=attempt,
+                model_name=None,
+                model_input=None,
+                raw_thinking=None,
+                model_output=None,
+                structured_output={
+                    "query": query,
+                    "rewritten_query": rewritten_query,
+                },
+                retrieved_sources=serialized_sources,
+                latency_ms=0,
+                status="success",
                 created_at=datetime.now(UTC),
             )
             self._session.add(step)
-            self._session.commit()
-            self._session.refresh(step)
-
-            retrieval = StepRetrieval(
-                step_id=step.id,
-                query=query,
-                rewritten_query=rewritten_query,
-            )
-            self._session.add(retrieval)
-            self._session.commit()
-
-            for rank, source in enumerate(sources, start=1):
-                db_source = RetrievedSource(
-                    step_id=step.id,
-                    segment_id=source.segment_id,
-                    file_id=source.file_id,
-                    modality=source.modality,
-                    title=source.title,
-                    content=source.content,
-                    source_path=source.source_path,
-                    start_time=source.start_time,
-                    end_time=source.end_time,
-                    score=source.score,
-                    rank=rank,
-                )
-                self._session.add(db_source)
             self._session.commit()
         except Exception:
             logger.exception("Failed to log retrieval step and sources to database.")
@@ -175,27 +169,33 @@ class PipelineLogger:
         self,
         run_id: UUID | None,
         attempt: int,
-        answer: str,
+        synthesis_result: SynthesisResult | GenericReplyResult,
     ) -> None:
         if not self._session or not run_id:
             return
 
         try:
+            llm = synthesis_result.llm_call
+            model_input = {"system": llm.prompt_system, "user": llm.prompt_user} if llm else None
+            answer = (
+                synthesis_result.answer
+                if isinstance(synthesis_result, SynthesisResult)
+                else synthesis_result.answer
+            )
             step = PipelineStep(
                 run_id=run_id,
                 step_type="synthesis",
                 attempt=attempt,
+                model_name=llm.model_name if llm else None,
+                model_input=model_input,
+                raw_thinking=llm.raw_thinking if llm else None,
+                model_output=llm.content if llm else None,
+                structured_output={"answer": answer},
+                latency_ms=llm.latency_ms if llm else 0,
+                status="success",
                 created_at=datetime.now(UTC),
             )
             self._session.add(step)
-            self._session.commit()
-            self._session.refresh(step)
-
-            synthesis = StepSynthesis(
-                step_id=step.id,
-                answer=answer,
-            )
-            self._session.add(synthesis)
             self._session.commit()
         except Exception:
             logger.exception("Failed to log synthesis step to database.")
@@ -204,35 +204,33 @@ class PipelineLogger:
         self,
         run_id: UUID | None,
         attempt: int,
-        route: str,
-        draft_answer: str,
-        verdict: str,
-        confidence: float,
-        correct_route: str | None,
-        feedback: str | None,
+        decision: DecisionResult,
     ) -> None:
         if not self._session or not run_id:
             return
 
         try:
+            llm = decision.llm_call
+            model_input = {"system": llm.prompt_system, "user": llm.prompt_user} if llm else None
             step = PipelineStep(
                 run_id=run_id,
                 step_type="evaluation",
                 attempt=attempt,
+                model_name=llm.model_name if llm else None,
+                model_input=model_input,
+                raw_thinking=llm.raw_thinking if llm else None,
+                model_output=llm.content if llm else None,
+                structured_output={
+                    "verdict": decision.verdict,
+                    "confidence": decision.confidence,
+                    "correct_route": decision.correct_route,
+                    "feedback": decision.feedback,
+                },
+                latency_ms=llm.latency_ms if llm else 0,
+                status="success",
                 created_at=datetime.now(UTC),
             )
             self._session.add(step)
-            self._session.commit()
-            self._session.refresh(step)
-
-            eval_step = StepEvaluation(
-                step_id=step.id,
-                verdict=verdict,
-                confidence=confidence,
-                correct_route=correct_route,
-                feedback=feedback,
-            )
-            self._session.add(eval_step)
             self._session.commit()
         except Exception:
             logger.exception("Failed to log evaluation step to database.")

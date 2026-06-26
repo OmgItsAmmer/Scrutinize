@@ -1,8 +1,16 @@
+from dataclasses import dataclass
+
 from app.core.config import Settings
 from app.schemas.search import SearchSource
 from app.services.v2.conversation_format import append_conversation_context
-from app.services.v2.local_llm_client import LocalLlmClient
+from app.services.v2.local_llm_client import LocalLlmClient, LlmResponse
 from app.services.v2.prompts import load_prompt
+
+
+@dataclass(frozen=True)
+class SynthesisResult:
+    answer: str
+    llm_call: LlmResponse | None = None
 
 
 class RagSynthesisAgent:
@@ -19,7 +27,7 @@ class RagSynthesisAgent:
         sources: list[SearchSource],
         *,
         conversation_context: str = "",
-    ) -> str:
+    ) -> SynthesisResult:
         lines: list[str] = []
         for index, source in enumerate(sources, start=1):
             time_label = _format_time_range(source.start_time, source.end_time)
@@ -30,7 +38,12 @@ class RagSynthesisAgent:
 
         user_lines = [f"Question: {query.strip()}", "", "Sources:", *lines]
         append_conversation_context(user_lines, conversation_context)
-        return self._client.generate(self._model, self._system, "\n".join(user_lines))
+
+        llm_response = self._client.generate(self._model, self._system, "\n".join(user_lines))
+        return SynthesisResult(
+            answer=llm_response.content,
+            llm_call=llm_response,
+        )
 
 
 def _seconds_to_timestamp(seconds: float) -> str:

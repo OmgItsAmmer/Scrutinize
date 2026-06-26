@@ -76,8 +76,11 @@ class Settings(BaseSettings):
 
     # Local LLM pipeline (v2 — M6)
     local_llm_base_url: str = ""
-    local_llm_rewriter_model: str = "qwen3.5:2b"
-    local_llm_gate_model: str = "qwen3.5:0.8b"
+    local_llm_gate_url: str = ""
+    local_llm_rewriter_url: str = ""
+    local_llm_decision_url: str = ""
+    local_llm_rewriter_model: str = "Qwen/Qwen3.5-2B"
+    local_llm_gate_model: str = "Qwen/Qwen3.5-2B"
     local_llm_decision_model: str = "qwen3.5:4b"
     local_llm_timeout_s: float = 120.0
 
@@ -165,7 +168,12 @@ class Settings(BaseSettings):
 
     @property
     def local_llm_configured(self) -> bool:
-        return bool(self.local_llm_base_url.strip())
+        return bool(
+            self.local_llm_base_url.strip() or 
+            self.local_llm_gate_url.strip() or 
+            self.local_llm_rewriter_url.strip() or 
+            self.local_llm_decision_url.strip()
+        )
 
 
 @lru_cache

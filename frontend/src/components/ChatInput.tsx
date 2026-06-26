@@ -1,6 +1,7 @@
 import { AnimatedPlaceholder } from "./AnimatedPlaceholder";
 import { IconSend } from "./icons";
 import { ModelSelector } from "./ModelSelector";
+import { useApp } from "../context/AppContext";
 
 type ChatInputProps = {
   value: string;
@@ -11,6 +12,7 @@ type ChatInputProps = {
 };
 
 export function ChatInput({ value, onChange, onSubmit, disabled, loading }: ChatInputProps) {
+  const { clearSearch } = useApp();
   const showAnimatedPlaceholder = !value && !disabled;
 
   function handleSubmit(event: React.FormEvent) {
@@ -19,9 +21,17 @@ export function ChatInput({ value, onChange, onSubmit, disabled, loading }: Chat
   }
 
   return (
-    <div className="w-full rounded-[20px] border border-[var(--chatly-border)] bg-[var(--chatly-panel)] transition focus-within:border-zinc-300"
+    <div className="relative w-full rounded-[20px] border border-[var(--chatly-border)] bg-[var(--chatly-panel)] transition focus-within:border-zinc-300"
       style={{ boxShadow: "var(--chatly-input-shadow)" }}
     >
+      <button
+        type="button"
+        onClick={clearSearch}
+        className="absolute -top-10 right-3 z-20 flex items-center gap-1.5 rounded-full border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-3.5 py-1 text-xs font-semibold text-[var(--chatly-text-primary)] shadow-sm transition hover:bg-[var(--chatly-bg)] active:scale-95 cursor-pointer"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+        New Session
+      </button>
       <form onSubmit={handleSubmit} className="relative px-3 pt-3 pb-2.5 sm:px-5 sm:pt-4 sm:pb-3">
         <div className="flex items-start gap-3">
           <div className="relative min-h-[44px] min-w-0 flex-1">

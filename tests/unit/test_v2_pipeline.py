@@ -15,6 +15,8 @@ from app.services.v2.pipeline_orchestrator import (
 )
 from app.services.v2.query_rewriter import RewrittenQuery
 from app.services.v2.rag_gate import GateResult
+from app.services.v2.generic_agent import GenericReplyResult
+from app.services.v2.rag_synthesis_agent import SynthesisResult
 
 
 def _settings(**overrides: object) -> Settings:
@@ -59,9 +61,8 @@ def _orchestrator(rewriter, gate, generic, rrf, synthesis, decision, memory, **s
 
 @pytest.mark.unit
 @pytest.mark.v2
-def test_pipeline_rewrites_before_gate():
+def test_pipeline_gate_runs_before_rewrite():
     rewriter = MagicMock()
-    rewriter.rewrite.return_value = RewrittenQuery(text="hello greeting assistant")
     gate = MagicMock()
     gate.classify.return_value = GateResult(
         route="generic",
@@ -83,17 +84,16 @@ def test_pipeline_rewrites_before_gate():
     orchestrator = _orchestrator(rewriter, gate, generic, rrf, synthesis, decision, memory)
     orchestrator.search("Hi there")
 
-    rewriter.rewrite.assert_called_once()
     gate.classify.assert_called_once()
+    rewriter.rewrite.assert_not_called()
     _, gate_kwargs = gate.classify.call_args
-    assert gate_kwargs.get("rewritten") == "hello greeting assistant"
+    assert gate_kwargs.get("conversation_context") == ""
 
 
 @pytest.mark.unit
 @pytest.mark.v2
 def test_pipeline_generic_uses_decision_confidence():
     rewriter = MagicMock()
-    rewriter.rewrite.return_value = RewrittenQuery(text="joke request humor")
     gate = MagicMock()
     gate.classify.return_value = GateResult(
         route="generic",
@@ -147,7 +147,7 @@ def test_pipeline_generic_escalates_to_rag_when_decision_says_so():
     )
     rrf.retrieve.return_value = [source]
     synthesis = MagicMock()
-    synthesis.synthesize.return_value = "The recipe uses two cloves of garlic."
+    synthesis.synthesize.return_value = SynthesisResult(answer="The recipe uses two cloves of garlic.")
     decision = MagicMock()
     decision.evaluate.side_effect = [
         DecisionResult(
@@ -173,11 +173,10 @@ def test_pipeline_generic_escalates_to_rag_when_decision_says_so():
 @pytest.mark.v2
 def test_pipeline_generic_fallback_calls_generic_agent():
     rewriter = MagicMock()
-    rewriter.rewrite.return_value = RewrittenQuery(text="weather today")
     gate = MagicMock()
     gate.classify.return_value = GateResult(route="generic", reason="Chitchat", reply=None)
     generic = MagicMock()
-    generic.reply.return_value = "Sure, I can help with that."
+    generic.reply.return_value = GenericReplyResult(answer="Sure, I can help with that.")
     rrf = MagicMock()
     synthesis = MagicMock()
     decision = MagicMock()
@@ -217,7 +216,7 @@ def test_pipeline_orchestrator_rag_with_synthesis():
     )
     rrf.retrieve.return_value = [source]
     synthesis = MagicMock()
-    synthesis.synthesize.return_value = "The recipe uses two cloves of garlic."
+    synthesis.synthesize.return_value = SynthesisResult(answer="The recipe uses two cloves of garlic.")
     decision = MagicMock()
     decision.evaluate.return_value = DecisionResult(
         verdict="good", confidence=0.88, feedback="", correct_route="rag"

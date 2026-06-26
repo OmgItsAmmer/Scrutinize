@@ -8,7 +8,7 @@ const NAV_ITEMS: {
   icon: typeof IconPlus;
   clearSearch?: boolean;
 }[] = [
-  { id: "search", label: "New Chat", icon: IconPlus, clearSearch: true },
+  { id: "search", label: "Chat", icon: IconPlus },
   { id: "upload", label: "Upload", icon: IconUpload },
   { id: "library", label: "My Library", icon: IconLibrary },
 ];

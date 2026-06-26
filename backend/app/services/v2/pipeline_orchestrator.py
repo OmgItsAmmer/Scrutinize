@@ -8,7 +8,6 @@ from app.core.config import Settings
 from app.models.file import FileModality
 from app.schemas.search import SearchSource
 from app.schemas.v2.search import ConversationState, SearchV2Response, SearchV2Route
-from app.services.v2.conversation_format import is_contextual_follow_up, is_standalone_message
 from app.services.v2.conversation_memory import ConversationMemory
 from app.services.v2.decision_agent import DecisionAgent, DecisionContext
 from app.services.v2.generic_agent import GenericAgent
@@ -25,7 +24,7 @@ LOW_CONFIDENCE_DISCLAIMER = "Note: answer may vary — retrieval confidence was 
 
 
 class PipelineOrchestrator:
-    """v2 query pipeline: rewrite → gate → generic+decision or RAG+decision loop."""
+    """v2 query pipeline: gate → generic+decision or RAG (rewrite → retrieve → synthesize → decision)."""
 
     def __init__(
         self,
@@ -59,58 +58,29 @@ class PipelineOrchestrator:
         stripped = query.strip()
         conv_state, conversation_context = self._memory.prepare(conversation)
 
-        # Only expose conversation history to routing/rewriting when the current
-        # message actually refers to it. Standalone greetings/chitchat get an
-        # empty context so the gate cannot misroute them as cooking follow-ups.
-        routing_context = (
-            conversation_context
-            if is_contextual_follow_up(stripped)
-            else ""
-        )
-
         run_id = self._db_logger.start_run(
             query=stripped,
             modality_filter=modality_filter,
             conversation_context=conversation_context,
         )
 
-        rewritten = self._rewriter.rewrite(
-            stripped,
-            None,
-            conversation_context=routing_context,
-        )
-        rewritten_text = rewritten.text
-
-        self._db_logger.log_rewrite(
-            run_id=run_id,
-            attempt=1,
-            input_query=stripped,
-            prev_feedback=None,
-            rewritten_query=rewritten_text,
-        )
-
         gate_result = self._gate.classify(
             stripped,
-            rewritten=rewritten_text,
-            conversation_context=routing_context,
+            conversation_context=conversation_context,
         )
         self._db_logger.log_gate(
             run_id=run_id,
-            route=gate_result.route,
-            reason=gate_result.reason,
-            reply=gate_result.reply,
+            gate_result=gate_result,
         )
 
         if gate_result.route == "generic":
             response = self._handle_generic_path(
                 run_id=run_id,
                 query=stripped,
-                rewritten_text=rewritten_text,
                 gate_result=gate_result,
                 conv_state=conv_state,
                 modality_filter=modality_filter,
-                conversation_context=routing_context,
-                full_conversation_context=conversation_context,
+                conversation_context=conversation_context,
             )
         else:
             response = self._run_rag_pipeline(
@@ -120,7 +90,6 @@ class PipelineOrchestrator:
                 conv_state=conv_state,
                 conversation_context=conversation_context,
                 modality_filter=modality_filter,
-                initial_rewritten=rewritten_text,
             )
 
         self._db_logger.end_run(
@@ -138,27 +107,26 @@ class PipelineOrchestrator:
         *,
         run_id: UUID | None,
         query: str,
-        rewritten_text: str,
         gate_result: GateResult,
         conv_state: ConversationState,
         modality_filter: FileModality | None,
         conversation_context: str,
-        full_conversation_context: str = "",
     ) -> SearchV2Response:
         if gate_result.reply:
             answer = gate_result.reply
         else:
-            answer = self._generic.reply(query, conversation_context=conversation_context)
+            generic_result = self._generic.reply(query, conversation_context=conversation_context)
+            answer = generic_result.answer
             self._db_logger.log_synthesis(
                 run_id=run_id,
                 attempt=1,
-                answer=answer,
+                synthesis_result=generic_result,
             )
 
         decision = self._decision.evaluate(
             DecisionContext(
                 original_query=query,
-                rewritten_query=rewritten_text,
+                rewritten_query=query,
                 route="generic",
                 draft_answer=answer,
                 sources=[],
@@ -169,12 +137,7 @@ class PipelineOrchestrator:
         self._db_logger.log_evaluation(
             run_id=run_id,
             attempt=1,
-            route="generic",
-            draft_answer=answer,
-            verdict=decision.verdict,
-            confidence=decision.confidence,
-            correct_route=decision.correct_route,
-            feedback=decision.feedback,
+            decision=decision,
         )
 
         logger.info(
@@ -195,27 +158,25 @@ class PipelineOrchestrator:
                 reason=(
                     f"Escalated from generic gate: {decision.feedback or gate_result.reason}"
                 ),
+                llm_call=None,
             )
             self._db_logger.log_gate(
                 run_id=run_id,
-                route="rag",
-                reason=escalated.reason,
-                reply=None,
+                gate_result=escalated,
             )
             return self._run_rag_pipeline(
                 run_id=run_id,
                 stripped=query,
                 gate_result=escalated,
                 conv_state=conv_state,
-                conversation_context=full_conversation_context or conversation_context,
+                conversation_context=conversation_context,
                 modality_filter=modality_filter,
-                initial_rewritten=rewritten_text,
             )
 
         updated_conversation = self._memory.record_exchange(conv_state, query, answer)
         return self._build_response(
             query=query,
-            rewritten_query=rewritten_text,
+            rewritten_query=query,
             gate_result=gate_result,
             modality_filter=modality_filter,
             answer=answer,
@@ -235,34 +196,28 @@ class PipelineOrchestrator:
         conv_state: ConversationState,
         conversation_context: str,
         modality_filter: FileModality | None,
-        initial_rewritten: str | None = None,
     ) -> SearchV2Response:
         max_attempts = max(1, self._settings.v2_max_pipeline_attempts)
         threshold = self._settings.v2_confidence_threshold
 
         prev_feedback: str | None = None
-        rewritten_text = initial_rewritten or stripped
+        rewritten_text = stripped
         answer = ""
         sources: list[SearchSource] = []
         confidence: float | None = None
 
         for attempt in range(1, max_attempts + 1):
-            if attempt == 1 and initial_rewritten:
-                rewritten_text = initial_rewritten
-            else:
-                rewritten = self._rewriter.rewrite(
-                    stripped,
-                    prev_feedback,
-                    conversation_context=conversation_context,
-                )
-                rewritten_text = rewritten.text
-                self._db_logger.log_rewrite(
-                    run_id=run_id,
-                    attempt=attempt,
-                    input_query=stripped,
-                    prev_feedback=prev_feedback,
-                    rewritten_query=rewritten_text,
-                )
+            rewritten = self._rewriter.rewrite(
+                stripped,
+                prev_feedback,
+                conversation_context=conversation_context,
+            )
+            rewritten_text = rewritten.text
+            self._db_logger.log_rewrite(
+                run_id=run_id,
+                attempt=attempt,
+                rewritten=rewritten,
+            )
 
             sources = self._rrf.retrieve(
                 rewritten_text,
@@ -278,21 +233,24 @@ class PipelineOrchestrator:
 
             if not sources:
                 answer = NO_INDEXED_CONTENT
+                from app.services.v2.rag_synthesis_agent import SynthesisResult
+                mock_result = SynthesisResult(answer=answer, llm_call=None)
                 self._db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=attempt,
-                    answer=answer,
+                    synthesis_result=mock_result,
                 )
             else:
-                answer = self._rag_synthesis.synthesize(
+                synthesis_result = self._rag_synthesis.synthesize(
                     stripped,
                     sources,
                     conversation_context=conversation_context,
                 )
+                answer = synthesis_result.answer
                 self._db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=attempt,
-                    answer=answer,
+                    synthesis_result=synthesis_result,
                 )
 
             decision = self._decision.evaluate(
@@ -310,12 +268,7 @@ class PipelineOrchestrator:
             self._db_logger.log_evaluation(
                 run_id=run_id,
                 attempt=attempt,
-                route="rag",
-                draft_answer=answer,
-                verdict=decision.verdict,
-                confidence=confidence,
-                correct_route=decision.correct_route,
-                feedback=decision.feedback,
+                decision=decision,
             )
 
             logger.info(

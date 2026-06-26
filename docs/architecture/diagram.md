@@ -9,32 +9,28 @@ flowchart TD
     end
 
     subgraph Memory["ConversationMemory"]
-        PREP["prepare()<br/>trim to last 10 chat exchanges<br/>not an LLM call"]
+        PREP["prepare()<br/>trim to last 10 chat exchanges<br/>UTC timestamps per message<br/>not an LLM call"]
     end
 
-    subgraph Stage1["Stage 1 — Rewrite"]
-        RW1["QueryRewriter.rewrite()<br/>LLM: qwen3.5:2b"]
-    end
-
-    subgraph Stage2["Stage 2 — Route"]
-        GATE{"RagGate.classify()<br/>LLM: qwen3.5:0.8b<br/>JSON: route + reason + optional reply"}
+    subgraph Stage1["Stage 1 — Route"]
+        GATE{"RagGate.classify()<br/>current query + full conversation snapshot<br/>LLM: Qwen3.5-2B<br/>JSON: route + reason + reply"}
     end
 
     subgraph GenericPath["Generic path"]
-        GREPLY["Gate direct reply<br/>or GenericAgent.reply()<br/>LLM: qwen3.5:0.8b"]
-        GDEC{"DecisionAgent.evaluate()<br/>LLM: qwen3.5:4b<br/>verdict + confidence + correct_route"}
+        GREPLY["Gate direct reply<br/>or GenericAgent.reply()<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
+        GDEC{"DecisionAgent.evaluate()<br/>original query + conversation context<br/>LLM: qwen3.5:4b<br/>verdict + confidence + correct_route"}
         GESCALATE["Escalate to RAG path<br/>if correct_route = rag"]
     end
 
     subgraph RAGPath["RAG path (retry loop, max 2 attempts)"]
-        RW2["QueryRewriter.rewrite()<br/>attempt 1: reuse Stage 1 rewrite<br/>retries: feedback from DecisionAgent<br/>LLM: qwen3.5:2b"]
+        RW["QueryRewriter.rewrite()<br/>first step of RAG — keyword rewrite<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
         RRF["RrfRetriever.retrieve()<br/>not an LLM call"]
         EMB["Embed rewritten query"]
         QDRANT["Qdrant vector search<br/>top 5 chunks"]
         EMPTY{"Any chunks<br/>retrieved?"}
-        SYN["RagSynthesisAgent.synthesize()<br/>LLM: qwen3.5:2b"]
+        SYN["RagSynthesisAgent.synthesize()<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
         NOIDX["Fixed message:<br/>No matching indexed content found"]
-        RDEC{"DecisionAgent.evaluate()<br/>LLM: qwen3.5:4b"}
+        RDEC{"DecisionAgent.evaluate()<br/>uses full conversation_context<br/>LLM: qwen3.5:4b"}
         OK{"confidence ≥ 0.7<br/>and verdict = good?"}
         RETRY{"Attempts<br/>remaining?"}
         DISCLAIM["Append low-confidence disclaimer"]
@@ -46,33 +42,32 @@ flowchart TD
     end
 
     subgraph Observability["Observability (optional DB session)"]
-        LOG["PipelineLogger<br/>rewrite, gate, retrieval,<br/>synthesis, evaluation, run"]
+        LOG["PipelineLogger<br/>gate, rewrite, retrieval,<br/>synthesis, evaluation, run"]
     end
 
     REQ --> PREP
-    PREP --> RW1
-    RW1 --> GATE
+    PREP --> GATE
     GATE -->|"route = generic"| GREPLY
     GREPLY --> GDEC
     GDEC -->|"correct_route ≠ rag"| RECORD
     GDEC -->|"correct_route = rag"| GESCALATE
-    GESCALATE --> RW2
+    GESCALATE --> RW
 
-    GATE -->|"route = rag"| RW2
-    RW2 --> RRF
+    GATE -->|"route = rag"| RW
+    RW --> RRF
     RRF --> EMB --> QDRANT --> EMPTY
     EMPTY -->|"no"| NOIDX --> RDEC
     EMPTY -->|"yes"| SYN --> RDEC
     RDEC --> OK
     OK -->|"yes"| RECORD
     OK -->|"no"| RETRY
-    RETRY -->|"yes"| RW2
+    RETRY -->|"yes"| RW
     RETRY -->|"no"| DISCLAIM --> RECORD
 
     RECORD --> RESP
 
-    RW1 -.-> LOG
     GATE -.-> LOG
+    RW -.-> LOG
     RRF -.-> LOG
     SYN -.-> LOG
     NOIDX -.-> LOG
@@ -86,12 +81,12 @@ flowchart TD
 | Module | Role | LLM / external |
 |--------|------|----------------|
 | `conversation_memory.py` | Rolling snapshot of last 10 chat exchanges with UTC timestamps | — |
-| `query_rewriter.py` | Keyword-focused rewrite; uses feedback on RAG retry | qwen3.5:2b |
-| `rag_gate.py` | Route `generic` vs `rag`; optional generic reply | qwen3.5:0.8b |
-| `generic_agent.py` | Fallback reply when gate routes generic without reply | qwen3.5:0.8b |
+| `rag_gate.py` | Route `generic` vs `rag` using current query + full conversation; optional generic reply | Qwen3.5-2B |
+| `query_rewriter.py` | Keyword-focused rewrite (RAG path only); uses feedback on retry | Qwen3.5-2B |
+| `generic_agent.py` | Fallback reply when gate routes generic without reply | Qwen3.5-2B |
 | `rrf_retriever.py` | Qdrant dense search on rewritten query | Qdrant (no LLM) |
 | `retrieval_utils.py` | Qdrant hit → `SearchSource` | — |
-| `rag_synthesis_agent.py` | Grounded answer from top-5 chunks | qwen3.5:2b |
+| `rag_synthesis_agent.py` | Grounded answer from top-5 chunks | Qwen3.5-2B |
 | `decision_agent.py` | Score draft answer; trigger retry or RAG escalation | qwen3.5:4b |
 | `pipeline_orchestrator.py` | Wires stages, retry loop, escalation | — |
 | `pipeline_logger.py` | Persists run steps when DB session present | — |

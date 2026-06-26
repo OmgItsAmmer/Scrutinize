@@ -5,6 +5,7 @@ import pytest
 
 from app.core.config import Settings
 from app.services.v2.json_utils import parse_json_object
+from app.services.v2.local_llm_client import LlmResponse
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import RagGate
 
@@ -29,12 +30,19 @@ def test_parse_json_object_fenced():
 def test_query_rewriter_returns_rewritten_text():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = "project plan milestones and deadlines"
+    client.generate.return_value = LlmResponse(
+        content="project plan milestones and deadlines",
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     rewriter = QueryRewriter(client, settings)
 
     result = rewriter.rewrite("What does the plan say?")
 
     assert result.text == "project plan milestones and deadlines"
+    assert result.llm_call is not None
+    assert result.llm_call.content == "project plan milestones and deadlines"
     client.generate.assert_called_once()
     assert settings.local_llm_rewriter_model in client.generate.call_args.args
 
@@ -44,7 +52,12 @@ def test_query_rewriter_returns_rewritten_text():
 def test_query_rewriter_includes_feedback():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = "video person drinking milk glass"
+    client.generate.return_value = LlmResponse(
+        content="video person drinking milk glass",
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     rewriter = QueryRewriter(client, settings)
 
     rewriter.rewrite("Find milk video", feedback="Focus on video modality")
@@ -59,7 +72,12 @@ def test_query_rewriter_includes_feedback():
 def test_query_rewriter_falls_back_to_original_on_empty():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = "   "
+    client.generate.return_value = LlmResponse(
+        content="   ",
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     rewriter = QueryRewriter(client, settings)
 
     result = rewriter.rewrite("hello")
@@ -72,16 +90,21 @@ def test_query_rewriter_falls_back_to_original_on_empty():
 def test_rag_gate_parses_json_route():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = json.dumps(
-        {
-            "route": "generic",
-            "reason": "General knowledge question",
-            "reply": "Python is a programming language.",
-        }
+    client.generate.return_value = LlmResponse(
+        content=json.dumps(
+            {
+                "route": "generic",
+                "reason": "General knowledge question",
+                "reply": "Python is a programming language.",
+            }
+        ),
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
     )
     gate = RagGate(client, settings)
 
-    result = gate.classify("What is Python?", rewritten="Python programming language definition")
+    result = gate.classify("What is Python?")
 
     assert result.route == "generic"
     assert result.reply == "Python is a programming language."
@@ -93,12 +116,17 @@ def test_rag_gate_parses_json_route():
 def test_rag_gate_routes_cooking_to_rag():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = json.dumps(
-        {
-            "route": "rag",
-            "reason": "Question about recipe ingredients",
-            "reply": None,
-        }
+    client.generate.return_value = LlmResponse(
+        content=json.dumps(
+            {
+                "route": "rag",
+                "reason": "Question about recipe ingredients",
+                "reply": None,
+            }
+        ),
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
     )
     gate = RagGate(client, settings)
 
@@ -110,16 +138,21 @@ def test_rag_gate_routes_cooking_to_rag():
 
 @pytest.mark.unit
 @pytest.mark.v2
-def test_rag_gate_defaults_to_rag_on_bad_json():
+def test_rag_gate_defaults_to_generic_on_bad_json():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = "not json at all"
+    client.generate.return_value = LlmResponse(
+        content="not json at all",
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     gate = RagGate(client, settings)
 
-    result = gate.classify("Find my video", rewritten="video search milk")
+    result = gate.classify("Find my video")
 
-    assert result.route == "rag"
-    assert "defaulting" in result.reason.lower()
+    assert result.route == "generic"
+    assert "failed" in result.reason.lower()
 
 
 @pytest.mark.unit
@@ -127,9 +160,14 @@ def test_rag_gate_defaults_to_rag_on_bad_json():
 def test_rag_gate_unknown_route_defaults_to_generic():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = json.dumps({"route": "maybe", "reason": "unclear"})
+    client.generate.return_value = LlmResponse(
+        content=json.dumps({"route": "maybe", "reason": "unclear"}),
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     gate = RagGate(client, settings)
 
-    result = gate.classify("hello", rewritten="hello greeting")
+    result = gate.classify("hello")
 
     assert result.route == "generic"

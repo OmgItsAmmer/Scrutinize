@@ -1,181 +1,160 @@
 # Architecture — Scrutinize
 
-Multi-modal AI embedding & retrieval system.
+Multi-modal AI embedding & retrieval system with an agentic local RAG pipeline.
 
 ## 1. Overview
 
-**Scrutinize** is a unified ingestion + retrieval system that lets a user drop in **text, audio, and video**, and later ask **one natural-language question** that can match content from *any* of those modalities. The system is split into four layers:
+**Scrutinize** is a unified ingestion and retrieval system that allows users to upload **text, audio, and video**, and subsequently perform natural-language search across all modalities. The system is split into four layers:
 
-1. **Client** — React chat-style UI (upload + search in one surface)
-2. **API layer** — FastAPI, the single entry point for the frontend
-3. **Processing layer** — async workers that turn raw files into embeddings + metadata
-4. **Data layer** — a native vector database (Qdrant) for similarity search + **Neon Postgres** for metadata/jobs + **Cloudinary** for raw files
+1. **Client** — React chat-style UI (upload + search in one surface).
+2. **API Layer** — FastAPI, the single entry point for the frontend, routing queries to V1 or V2 services.
+3. **Processing Layer** — Async Celery workers that process raw files, extract transcriptions/captions, and generate embeddings.
+4. **Data Layer** — **Qdrant** (native vector database) for similarity search, **Neon Postgres** for metadata/jobs/logs, and **Cloudinary** for raw file storage.
 
-A thin **agent layer** sits on top of the data layer at query time to turn "raw nearest-neighbor hits" into a useful, cited answer.
+A local **Agentic RAG pipeline (V2)** sits on top of the data layer at query time, orchestrating query understanding, routing, multi-stage retrieval, confidence evaluation, and synthesis.
 
 ---
 
 ## 2. High-Level Architecture
 
+The query flow is orchestrated by the `PipelineOrchestrator` (`POST /v2/search`), using local LLMs for agentic routing, rewriting, and validation:
+
 ```mermaid
-flowchart TB
-    subgraph CLIENT["Client"]
-        FE["React Frontend<br/>(chat + upload UI)"]
+flowchart TD
+    subgraph API["API Layer (FastAPI)"]
+        REQ["POST /v2/search<br/>SearchV2Request"]
     end
 
-    subgraph API["API Layer — FastAPI"]
-        UP["/upload"]
-        SR["/search"]
-        ST["/status/{job_id}"]
-        LIB["/library"]
+    subgraph Memory["Conversation Memory"]
+        PREP["prepare()<br/>trim to last 10 chat exchanges<br/>UTC timestamps per message<br/>not an LLM call"]
     end
 
-    subgraph QUEUE["Async Processing — Redis + Celery"]
-        TXTW["Text Worker"]
-        AUDW["Audio Worker"]
-        VIDW["Video Worker"]
+    subgraph Stage1["Stage 1 — Route"]
+        GATE{"RagGate.classify()<br/>current query + full conversation snapshot<br/>LLM: Qwen3.5-2B<br/>JSON: route + reason + reply"}
     end
 
-    subgraph AI["OpenAI API"]
-        EMB["text-embedding-3-small"]
-        WSP["Whisper (whisper-1)"]
-        VIS["GPT-4o-mini (vision captioning)"]
-        ROUTE["GPT-4o-mini (router agent)"]
-        SYN["GPT-4o-mini (synthesis agent)"]
+    subgraph GenericPath["Generic Path"]
+        GREPLY["Gate direct reply<br/>or GenericAgent.reply()<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
+        GDEC{"DecisionAgent.evaluate()<br/>original query + conversation context<br/>LLM: qwen3.5:4b<br/>verdict + confidence + correct_route"}
+        GESCALATE["Escalate to RAG path<br/>if correct_route = rag"]
     end
 
-    subgraph DATA["Data Layer"]
-        QD[("Qdrant<br/>Vector DB")]
-        PG[("Neon Postgres<br/>metadata + jobs")]
-        CL[("Cloudinary<br/>raw files")]
+    subgraph RAGPath["RAG Path (Retry loop, max 2 attempts)"]
+        RW["QueryRewriter.rewrite()<br/>first step of RAG — keyword rewrite<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
+        RRF["RrfRetriever.retrieve()<br/>not an LLM call"]
+        EMB["Embed rewritten query"]
+        QDRANT["Qdrant vector search<br/>top 5 chunks"]
+        EMPTY{"Any chunks<br/>retrieved?"}
+        SYN["RagSynthesisAgent.synthesize()<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
+        NOIDX["Fixed message:<br/>No matching indexed content found"]
+        RDEC{"DecisionAgent.evaluate()<br/>uses full conversation_context<br/>LLM: qwen3.5:4b"}
+        OK{"confidence ≥ 0.7<br/>and verdict = good?"}
+        RETRY{"Attempts<br/>remaining?"}
+        DISCLAIM["Append low-confidence disclaimer"]
     end
 
-    FE -- "1. upload file" --> UP
-    UP -- "store raw file" --> CL
-    UP -- "create file + job row" --> PG
-    UP -- "enqueue job" --> QUEUE
+    subgraph Output["Response & Recording"]
+        RESP["SearchV2Response<br/>answer, sources, route,<br/>confidence, attempts, conversation"]
+        RECORD["ConversationMemory.record_exchange()<br/>append user + assistant turns"]
+    end
 
-    TXTW & AUDW & VIDW -- "transcribe / caption / chunk" --> AI
-    TXTW & AUDW & VIDW -- "embed segments" --> EMB
-    TXTW & AUDW & VIDW -- "upsert vectors + payload" --> QD
-    TXTW & AUDW & VIDW -- "write segments + update job status" --> PG
+    subgraph Observability["Observability"]
+        LOG["PipelineLogger<br/>Persists run steps to Postgres"]
+    end
 
-    FE -- "2. natural language query" --> SR
-    SR --> ROUTE
-    ROUTE -- "modality filter + rewritten query" --> EMB
-    EMB -- "query vector" --> QD
-    QD -- "top-k segments" --> SYN
-    SYN -- "cited answer + source segments" --> SR
-    SR --> FE
+    REQ --> PREP
+    PREP --> GATE
+    GATE -->|"route = generic"| GREPLY
+    GREPLY --> GDEC
+    GDEC -->|"correct_route ≠ rag"| RECORD
+    GDEC -->|"correct_route = rag"| GESCALATE
+    GESCALATE --> RW
 
-    FE -- "browse indexed content" --> LIB
-    LIB --> PG
-    ST --> PG
+    GATE -->|"route = rag"| RW
+    RW --> RRF
+    RRF --> EMB --> QDRANT --> EMPTY
+    EMPTY -->|"no"| NOIDX --> RDEC
+    EMPTY -->|"yes"| SYN --> RDEC
+    RDEC --> OK
+    OK -->|"yes"| RECORD
+    OK -->|"no"| RETRY
+    RETRY -->|"yes"| RW
+    RETRY -->|"no"| DISCLAIM --> RECORD
+
+    RECORD --> RESP
+
+    GATE -.-> LOG
+    RW -.-> LOG
+    RRF -.-> LOG
+    SYN -.-> LOG
+    NOIDX -.-> LOG
+    GDEC -.-> LOG
+    RDEC -.-> LOG
+    RESP -.-> LOG
 ```
 
 ---
 
 ## 3. Component Breakdown
 
-| Layer | Component | Responsibility |
+| Module | Role | LLM / External dependency |
 |---|---|---|
-| Client | React + Tailwind SPA | Upload UI, chat-style search box, results renderer (text snippet / audio player / video player with seek), library/index browser |
-| API | FastAPI app | Auth, validation (Pydantic), file intake → Storage, job creation, search endpoint, library endpoint |
-| Queue | Redis + Celery | Decouples slow media processing (video especially) from the request/response cycle |
-| Processing | Text / Audio / Video workers | Modality-specific pipelines that produce **segments** (text + timestamps + metadata) ready for embedding |
-| AI Services | OpenAI API | Embeddings, transcription (Whisper), vision captioning (GPT-4o-mini), and the two retrieval agents |
-| Vector DB | Qdrant | Stores embeddings + payload, runs the nearest-neighbor search |
-| Relational DB | Neon Postgres | Source of truth for files, jobs, segments, users |
-| Object Storage | Cloudinary | Raw uploaded files (HTTPS URLs for playback / seek) |
-| Agents | Router + Synthesis (GPT-4o-mini) | Turn a raw query into a filtered vector search, and turn raw hits into a cited natural-language answer |
+| `pipeline_orchestrator.py` | Coordinates the v2 gate → generic/decision or RAG (rewrite → retrieve → synthesis → decision) loop, error handling, and pipeline logging. | — |
+| `conversation_memory.py` | Prepares and maintains a rolling snapshot of the last 10 chat exchanges with UTC timestamps. | — |
+| `rag_gate.py` | Routes queries to `generic` or `rag` using the current query and full conversation snapshot; may return a direct generic reply. | Local LLM (`Qwen/Qwen3.5-2B`) |
+| `query_rewriter.py` | Enhances user query for keyword/dense search (RAG path only); incorporates correction feedback during RAG retries. | Local LLM (`Qwen/Qwen3.5-2B`) |
+| `generic_agent.py` | Generates a fallback conversational reply when the gate routes to `generic` without providing a reply. | Local LLM (`Qwen/Qwen3.5-2B`) |
+| `rrf_retriever.py` | Orchestrates query embedding and retrieves top-k matching documents from Qdrant. | Qdrant + Embedding Service |
+| `rag_synthesis_agent.py` | Produces a cited, grounded, context-aware answer from retrieved segments. | Local LLM (`Qwen/Qwen3.5-2B`) |
+| `decision_agent.py` | Evaluates drafts for confidence and alignment; triggers retry feedback or escalates generic routes to RAG. | Local LLM (`qwen3.5:4b`) |
+| `pipeline_logger.py` | Writes steps (gate, rewrite, retrieval, synthesis, evaluation) to Neon Postgres for traceability. | Neon Postgres |
+| `local_llm_client.py` | Low-level client managing POST requests to OpenAI-compatible Ollama endpoints via ngrok. | External Local Host |
 
 ---
 
 ## 4. Tech Stack & Rationale
 
-### 4.1 Backend — **FastAPI (Python)**
+Here is how each technology operates within the pipeline and why it was selected:
 
-- The entire ML/media stack (Whisper, FFmpeg bindings, OpenAI SDK, embedding libs) is Python-first — staying in one language avoids a Python-microservice + Node-gateway split for a solo/small-team POC.
-- Native `async def` support matches the I/O-heavy nature of this app (waiting on OpenAI, Qdrant, Storage).
-- Pydantic gives free request/response validation and auto-generated OpenAPI docs — useful when the React frontend and backend are built somewhat independently.
-- This is the de-facto standard for AI-product backends in 2024-2026 (most reference RAG architectures, LangChain/LlamaIndex templates, etc. ship FastAPI examples first).
+### 4.1 FastAPI (Backend App)
+* **How it works**: FastAPI hosts the `/v2/search` endpoints and orchestrates dependency injection (e.g., database sessions, clients, and pipeline components).
+* **Why it's used**: Native asynchronous programming allows high-throughput handling of non-blocking I/O tasks (waiting on LLMs, database queries, and external APIs). It provides automated Pydantic verification and instant OpenAPI docs.
 
-### 4.2 Vector Database — **Qdrant** (native vector DB)
+### 4.2 Qdrant (Vector Database)
+* **How it works**: Holds text and media embeddings (1536 dimensions) mapped to payloads containing document IDs, modality types (`text`, `audio`, `video`), text contents, and timestamps.
+* **Why it's used**: Purpose-built vector databases like Qdrant offer rapid approximate nearest neighbor (ANN) search, payload-based metadata filtering (e.g., modality filters), and support for multiple named vectors per point—allowing expansion into visual/audio embeddings without migration.
 
-You said you're open to exploring a *real* native vector database rather than a Postgres extension — Qdrant is the best fit here:
+### 4.3 Neon Postgres (Relational DB & Observability)
+* **How it works**: Serves as the database for relational schemas (files, processing jobs, segments) and houses `PipelineLogger` tables to track the multi-stage execution logs.
+* **Why it's used**: Serverless Postgres provides full relational features (indexes, joins, and transactions) needed to correlate files and jobs. Storing detailed pipeline execution logs in SQL allows rich observability and debugging of agentic decisions.
 
-- **Open-source, self-hostable via a single Docker container** — perfect for a POC, with a managed **Qdrant Cloud** path if it needs to go further.
-- **Named vectors per point** — a single point (= one segment) can later carry *both* a text-embedding vector and a CLIP visual-embedding vector without a schema migration. This directly supports the "Phase 2" embedding upgrade described in §6.
-- **Rich payload filtering combined with vector search** — e.g. "search only `modality == video`" or "only this `file_id`" in the same query, which is exactly what the brief's example queries need (Text→Video, Text→Audio, etc.).
-- Mature Python client, good docs, fast (Rust core), and is genuinely used in production (not just demo-ware) — so this satisfies "industry standard" without the operational weight of Milvus or the GraphQL learning curve of Weaviate.
+### 4.4 Cloudinary (Object Storage)
+* **How it works**: Holds the raw media files (source PDFs, MP3s, MP4s) and returns CDN-backed HTTPS URLs.
+* **Why it's used**: Decouples binary assets from vector databases and Postgres. Playback in the UI requires byte-range seek support, which Cloudinary delivers out of the box.
 
-**Alternatives considered:**
-- *Pinecone* — fully managed, great DX, but it's a black box (less to "explore"), and adds a paid dependency for a POC.
-- *Weaviate* — equally capable, built-in multimodal modules, but heavier to self-host and its GraphQL-first API is more ceremony than this project needs.
-- *ChromaDB* — great for a 1-day prototype, but it's not what most teams consider "production" — weaker filtering/scaling story than Qdrant.
-- *pgvector* — would let us drop Qdrant entirely and keep everything in Postgres. Rejected because the brief specifically asks for a dedicated vector DB, and pgvector's ANN performance/feature set (no native multi-vector points, weaker payload-filter + vector hybrid story) is behind purpose-built engines at this scale.
+### 4.5 Redis + Celery (Task Queue)
+* **How it works**: Decouples slow files upload processing tasks (such as keyframe extraction, Whisper transcribing, and embedding generation) from request-response cycles.
+* **Why it's used**: Media processing is CPU and time-intensive. Celery ensures reliability by allowing workers to process ingestion pipelines asynchronously.
 
-### 4.3 Relational DB — **Neon** + Object Storage — **Cloudinary**
-
-- **Neon** (serverless Postgres) hosts *structured* state: files, processing jobs, segments, users. Branching, connection pooling, and scale-to-zero suit a POC that still needs real SQL (`JOIN`, pagination, transactions) without running Postgres in Docker.
-- **Cloudinary** holds the *original* audio/video/text files with CDN-backed HTTPS URLs, because search results need a playable link with timestamps — the vector DB only stores embeddings + small payload, not binaries.
-- Splitting relational (Neon) from media storage (Cloudinary) keeps each service focused and lets Cloudinary handle transcoding/delivery optimizations for audio and video later if needed.
-- **Why not just Qdrant for everything?** Qdrant payload is JSON and not meant for relational queries/joins/transactions — e.g. "show me all jobs that failed in the last hour" is a Neon SQL query, not a vector query.
-
-**Neon connection notes:**
-- Use the **pooled** connection string (`-pooler` host) for the API and Celery workers.
-- Append `sslmode=require` (handled automatically when the host contains `neon.tech`).
-- Set `DATABASE_URL` in `.env`; it is not bundled in Docker Compose.
-
-### 4.4 LLM / AI — **OpenAI API**, multi-agent retrieval
-
-| Use case | Model | Why |
-|---|---|---|
-| Text embeddings (all modalities, after transcription/captioning) | `text-embedding-3-small` (1536-dim) | Cheap, fast, strong general semantic quality; one consistent embedding space simplifies Qdrant schema |
-| Audio transcription | Whisper (`whisper-1`) | Industry-standard ASR, handles noisy real-world audio, returns word/segment timestamps |
-| Video frame captioning | `gpt-4o-mini` (vision) | Cost-effective vision model, good at descriptive captions ("a person drinking milk from a glass") which is exactly what Text→Video search needs |
-| Query routing | `gpt-4o-mini` + function calling | Cheap classification/rewrite step, doesn't need a frontier model |
-| Answer synthesis | `gpt-4o-mini` (upgrade to `gpt-4o` if quality demands it) | Turns top-k segments into a cited, readable answer |
-
-**Is multi-agent worth it here? Yes — as a 2-agent "Agentic RAG" pattern, not a sprawling agent swarm:**
-
-1. **Router Agent** — looks at the raw query and decides: *is this query about a specific modality?* (e.g. "find the **video** where...", "find the **song**...") and *does the query need rewriting* for better recall (e.g. expanding "XYZ's song" → richer search terms). Outputs a structured filter + a (possibly rewritten) query string via function calling.
-2. **Synthesis Agent** — takes the top-k Qdrant hits (transcripts/captions + metadata) and the original question, and produces a short natural-language answer that **cites which file/segment/timestamp** the answer came from.
-
-This two-agent split is the same shape used by most production RAG systems (query understanding → retrieval → answer generation), and it's the right amount of "multi-agent" for this scope — anything more (planner agents, tool-using sub-agents, etc.) would be scope creep relative to the brief.
-
-### 4.5 Media Processing
-
-| Tool | Used for |
-|---|---|
-| **FFmpeg** | Extract audio track from video; extract keyframes at fixed intervals (e.g. every 2–5s, or scene-change based) |
-| **Whisper API** | Transcribe extracted audio (from both standalone audio files and video audio tracks) with timestamps |
-| **GPT-4o-mini (vision)** | Caption extracted keyframes ("a person pouring milk into a glass at 00:14") |
-| **tiktoken / LangChain text splitter** | Chunk long text documents and transcripts into embedding-friendly segments (~300–500 tokens, with overlap) |
-
-### 4.6 Async Processing — **Redis + Celery**
-
-- Video processing (frame extraction + multiple Whisper/GPT-4o-mini calls) can take well beyond an HTTP request's reasonable timeout.
-- Celery + Redis is the standard Python pattern: the `/upload` endpoint returns immediately with a `job_id`, a worker processes the file in the background, and the frontend polls `/status/{job_id}` (or subscribes via a lightweight websocket/SSE if you want it to feel snappier).
-- For a strict "weekend POC" you *could* substitute FastAPI `BackgroundTasks` — call this out in the report as a deliberate scope tradeoff if time is tight, with Celery as the documented "how this would run in production" path.
+### 4.6 Local LLM Client via Ngrok / Ollama (Agent Intelligence)
+* **How it works**: Routes API completion payloads via `local_llm_client.py` to OpenAI-compatible local model servers.
+* **Why it's used**: Allows offline/private model hosting. Using distinct model sizes (`0.8B` for fast routing, `2B` for query rewriting and synthesis, and `4B` for evaluation) minimizes hosting resource footprints while maintaining specialized accuracy.
 
 ---
 
 ## 5. Data Flows
 
 ### 5.1 Ingestion — Text
-
 ```mermaid
 flowchart LR
     A[Upload .txt/.md/.pdf] --> B[Store raw file in Cloudinary]
-    B --> C[Extract + chunk text<br/>~300-500 token chunks, overlap]
+    B --> C[Extract + chunk text<br/>tiktoken 400-token windows, 50 overlap]
     C --> D["Embed each chunk<br/>(text-embedding-3-small)"]
-    D --> E["Upsert to Qdrant<br/>payload: modality=text, chunk text, file_id, chunk_index"]
+    D --> E["Upsert to Qdrant<br/>payload: modality=text, content, file_id"]
     E --> F["Write segment rows to Neon<br/>+ mark job 'indexed'"]
 ```
 
 ### 5.2 Ingestion — Audio
-
 ```mermaid
 flowchart LR
     A[Upload audio file] --> B[Store raw file in Cloudinary]
@@ -187,7 +166,6 @@ flowchart LR
 ```
 
 ### 5.3 Ingestion — Video
-
 ```mermaid
 flowchart LR
     A[Upload video file] --> B[Store raw file in Cloudinary]
@@ -202,27 +180,38 @@ flowchart LR
     I --> J["Write segment rows to Neon<br/>+ mark job 'indexed'"]
 ```
 
-### 5.4 Query / Search
-
+### 5.4 Query / Search (v2 Pipeline)
 ```mermaid
 sequenceDiagram
     participant U as User (Frontend)
-    participant API as FastAPI /search
-    participant R as Router Agent (gpt-4o-mini)
-    participant E as Embeddings (text-embedding-3-small)
-    participant Q as Qdrant
-    participant S as Synthesis Agent (gpt-4o-mini)
+    participant API as FastAPI /v2/search
+    participant MEM as Conversation Memory
+    participant RW as Query Rewriter (Qwen3.5-2B)
+    participant G as Rag Gate (Qwen3.5-0.8B)
+    participant R as Retriever (Qdrant)
+    participant S as Synthesis (Qwen3.5-2B)
+    participant D as Decision Agent (qwen3.5:4b)
 
-    U->>API: "Find the video where someone drinks milk"
-    API->>R: raw query
-    R-->>API: {modality_filter: "video", search_query: "person drinking milk from a glass"}
-    API->>E: embed(search_query)
-    E-->>API: query_vector
-    API->>Q: search(query_vector, filter={modality: "video"}, top_k=5)
-    Q-->>API: top-5 segments (transcript/caption, file_id, timestamps, scores)
-    API->>S: original query + top-5 segments
-    S-->>API: "Here's the segment that matches... [Video: bbq-day.mp4, 00:42–00:51]"
-    API-->>U: answer + structured results (for media player rendering)
+    U->>API: "Find the video of someone drinking milk"
+    API->>MEM: prepare(conversation)
+    MEM-->>API: conversation snapshot (UTC timestamps)
+    API->>G: classify(query, conversation_context)
+    G-->>API: route="rag"
+    
+    rect rgb(240, 240, 240)
+        Note over API, D: Attempt Loop (Max 2 Attempts)
+        API->>RW: rewrite(query, conversation_context)
+        RW-->>API: rewritten_text
+        API->>R: retrieve(rewritten_text, modality_filter)
+        R-->>API: top-5 source segments
+        API->>S: synthesize(query, sources, full_context)
+        S-->>API: draft_answer
+        API->>D: evaluate(draft_answer, sources)
+        D-->>API: verdict="good", confidence=0.85
+    end
+
+    API->>MEM: record_exchange(query, final_answer)
+    API-->>U: SearchV2Response
 ```
 
 ---
@@ -230,23 +219,16 @@ sequenceDiagram
 ## 6. Embedding Strategy (and how it scales up)
 
 ### Phase A — MVP: **single embedding space (caption-then-embed)**
-
-Every piece of content — raw text, audio transcripts, *and* video (transcript + frame captions) — is converted to **text** and embedded with `text-embedding-3-small`. This is a deliberate simplification:
-
-- One Qdrant collection, one vector field, one dimensionality (1536) — minimal schema complexity.
-- Cross-modal search "just works" because everything lives in the same vector space — the brief's Text→Video and Text→Audio examples are answered by this alone, *if* captioning/transcription is descriptive enough (GPT-4o-mini is generally strong at this).
-- This is the same pattern used by many production multimodal search systems (e.g., caption-and-embed for image/video search) — it's pragmatic, not a shortcut that looks bad in a report.
-
-**Known limitation to document in the report:** purely *acoustic* similarity (e.g. "find a song that sounds like X" based on melody, not lyrics/metadata) isn't captured by transcription alone.
+Every piece of content — raw text, audio transcripts, and video (transcript + frame captions) — is converted to **text** and embedded with `text-embedding-3-small`.
+* One Qdrant collection, one vector field, one dimensionality (1536) — minimal schema complexity.
+* Cross-modal search works seamlessly because everything lives in the same vector space.
 
 ### Phase B — Enhancement: **native multi-vector points**
-
 Once Phase A works end-to-end, add a **second named vector** per Qdrant point:
+* `visual_vector` — CLIP image embedding of representative video keyframes, for true visual similarity search (independent of caption quality).
+* `audio_vector` — CLAP (Contrastive Language-Audio Pretraining) embedding for content-based audio similarity.
 
-- `visual_vector` — CLIP image embedding of representative video keyframes, for true visual similarity search (independent of caption quality).
-- (Optional) `audio_vector` — CLAP (Contrastive Language-Audio Pretraining) embedding for content-based audio similarity, addressing the "song that sounds like X" gap.
-
-Qdrant's named-vector support means this is an **additive** schema change — no migration of existing `text_vector` data, and the search API can query either or both spaces and merge results. This is the "Phase 2" story for the project report's "future work" section, demonstrating awareness of the gap without over-scoping the MVP.
+Qdrant's named-vector support allows this to be an **additive** schema change without migrating existing `text_vector` data.
 
 ---
 
@@ -256,9 +238,8 @@ Qdrant's named-vector support means this is an **additive** schema change — no
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` (point id) | UUID | matches `segments.id` in Neon |
+| `id` (point id) | UUID | matches `segments.id` in Neon Postgres |
 | vector: `text_vector` | float[1536] | `text-embedding-3-small`, cosine distance |
-| *(Phase B)* vector: `visual_vector` | float[512] | CLIP ViT-B/32 image embedding |
 | payload.`file_id` | UUID | FK to Neon `files.id` |
 | payload.`modality` | enum: `text` \| `audio` \| `video` | used for filtered search |
 | payload.`content` | string | the transcript / caption / text chunk that was embedded |
@@ -317,29 +298,25 @@ create index on processing_jobs (file_id, status);
 
 ## 9. Non-Functional Considerations
 
-- **Security**: API keys (OpenAI, Qdrant, Neon, Cloudinary) stay server-side only; frontend never talks to OpenAI/Qdrant/Neon/Cloudinary directly. Add auth on `/upload` and `/search` if multi-user.
-- **File limits**: enforce max upload size and allowed MIME types at the API layer before enqueueing work.
-- **Cost control**: cache embeddings by content hash (don't re-embed identical chunks); batch Whisper/embedding calls where possible; keep `gpt-4o-mini` as default and only escalate to `gpt-4o` for captioning if quality testing shows it's needed.
-- **Scalability path**: Celery workers scale horizontally; Qdrant can move from single-node Docker → Qdrant Cloud; Neon scales as managed Postgres with pooling.
+* **Security**: API keys stay server-side only. File size validation is enforced at the API layer.
+* **Cost Control**: Cache embeddings by content hash to prevent duplicate embedding requests; batch calls where possible.
+* **Observability**: `PipelineLogger` stores step details in Postgres, making it simple to inspect why a specific query took a generic or RAG path, or why it failed evaluation.
 
 ---
 
 ## 10. Testing & CI/CD
 
-Scrutinize uses **pytest** with marker-based test tiers. Ruff is used locally for formatting/linting but is **not** part of CI.
+Scrutinize uses **pytest** with marker-based test tiers:
 
 | Tier | Location | Scope | CI job |
 |---|---|---|---|
-| **Unit** | `tests/unit/` | Pure logic — chunking, embedding wrapper (mocked OpenAI), Qdrant client (mocked), agent prompts (mocked) | `unit-tests` |
-| **Integration** | `tests/integration/` | Real Qdrant + Redis + Neon (`DATABASE_URL` secret); mocked OpenAI/Whisper where billing/rate limits apply | `integration-tests` |
-| **System** | `tests/system/` | Full stack via `docker compose` — upload → worker → index → search end-to-end | `system-tests` |
-| **Security** | `tests/security/` + static analysis | Auth boundary checks, path traversal on upload, secret-leak scans (`bandit`), dependency audit (`pip-audit`) | `security-tests` |
-
-**GitHub Actions** (`.github/workflows/ci.yml`) runs all four tiers on every push/PR to `main`. Integration and system jobs start Redis + Qdrant locally and connect to Neon via the `DATABASE_URL` secret. Other secrets (`OPENAI_API_KEY`, `CLOUDINARY_*`) are injected for jobs that hit external APIs.
+| **Unit** | `tests/unit/` | Pure logic — chunking, local LLM client parsing, memory formatting, utility checks. | `unit-tests` |
+| **Integration** | `tests/integration/` | Real database connections, Redis, and Qdrant queries. Mocked LLMs where billing/network limits apply. | `integration-tests` |
+| **System** | `tests/system/` | End-to-end flow from upload -> Celery worker -> Qdrant index -> V2 search query. | `system-tests` |
 
 ---
 
-## 11. Local Dev / Deployment (Docker Compose sketch)
+## 11. Dev / Deployment (Docker Compose)
 
 ```yaml
 services:
@@ -348,7 +325,6 @@ services:
     ports: ["8000:8000"]
     env_file: .env
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/0
     depends_on: [qdrant, redis]
@@ -358,7 +334,6 @@ services:
     command: celery -A app.workers.celery_app worker --loglevel=info
     env_file: .env
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/0
     depends_on: [redis, qdrant]
@@ -374,5 +349,3 @@ services:
 volumes:
   qdrant_data:
 ```
-
-Neon (Postgres) and Cloudinary (media storage) are hosted services — configure `DATABASE_URL` and `CLOUDINARY_*` in `.env`. Docker Compose runs Redis, Qdrant, backend, and worker; the React frontend runs locally via `npm run dev` in `frontend/` for Vite HMR. See [Cloudinary runbook](../runbooks/cloudinary-setup.md).

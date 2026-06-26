@@ -6,6 +6,7 @@ import pytest
 from app.core.config import Settings
 from app.models.file import FileModality
 from app.schemas.search import SearchSource
+from app.services.v2.local_llm_client import LlmResponse
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 
 
@@ -14,7 +15,12 @@ from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 def test_rag_synthesis_agent_calls_local_llm():
     settings = Settings(local_llm_base_url="http://llm.test")
     client = MagicMock()
-    client.generate.return_value = "The recipe uses two cloves of garlic."
+    client.generate.return_value = LlmResponse(
+        content="The recipe uses two cloves of garlic.",
+        model_name="model",
+        prompt_system="sys",
+        prompt_user="usr",
+    )
     agent = RagSynthesisAgent(client, settings)
 
     sources = [
@@ -29,9 +35,11 @@ def test_rag_synthesis_agent_calls_local_llm():
         )
     ]
 
-    answer = agent.synthesize("How much garlic?", sources)
+    result = agent.synthesize("How much garlic?", sources)
 
-    assert answer == "The recipe uses two cloves of garlic."
+    assert result.answer == "The recipe uses two cloves of garlic."
+    assert result.llm_call is not None
+    assert result.llm_call.content == "The recipe uses two cloves of garlic."
     client.generate.assert_called_once()
     user_prompt = client.generate.call_args.args[2]
     assert "How much garlic?" in user_prompt
