@@ -6,7 +6,7 @@ from app.core.config import Settings
 from app.schemas.search import SearchSource
 from app.services.v2.conversation_format import append_conversation_context
 from app.services.v2.json_utils import parse_json_object
-from app.services.v2.local_llm_client import LocalLlmClient, LlmResponse
+from app.services.v2.llm_clients import BaseLlmClient, LlmResponse
 from app.services.v2.prompts import load_prompt
 from app.services.v2.rag_gate import Route
 
@@ -38,7 +38,7 @@ class DecisionResult:
 class DecisionAgent:
     """qwen3.5:4b — score draft answer quality and suggest retries."""
 
-    def __init__(self, client: LocalLlmClient, settings: Settings) -> None:
+    def __init__(self, client: BaseLlmClient, settings: Settings) -> None:
         self._client = client
         self._model = settings.local_llm_decision_model
         self._system = load_prompt("decision_agent_system.txt")

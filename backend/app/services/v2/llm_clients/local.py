@@ -1,41 +1,27 @@
-from dataclasses import dataclass
 import time
 from typing import Any
-
 import httpx
 
 from app.core.config import Settings
+from app.services.v2.llm_clients.base import BaseLlmClient, LlmResponse
 
 NGROK_SKIP_BROWSER_WARNING = "ngrok-skip-browser-warning"
 
 
 class LocalLlmError(Exception):
     """Raised when the local Ollama-compatible LLM endpoint fails."""
-
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
 
 
-@dataclass(frozen=True)
-class LlmResponse:
-    """Carries full trace details about an LLM generation call."""
-
-    content: str
-    model_name: str
-    prompt_system: str
-    prompt_user: str
-    raw_thinking: str | None = None
-    latency_ms: int = 0
-
-
-class LocalLlmClient:
+class LocalLlmClient(BaseLlmClient):
     """HTTP client for OpenAI-compatible POST /v1/chat/completions (local models via ngrok)."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.local_llm_configured:
             raise RuntimeError(
-                "A local LLM URL is required for the v2 query pipeline."
+                "A local LLM URL is required for the v2 query pipeline when using LocalLlmClient."
             )
         self._timeout = settings.local_llm_timeout_s
         self._url_map = {

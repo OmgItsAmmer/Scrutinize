@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from app.core.config import get_settings
-from app.services.v2.local_llm_client import LlmResponse
+from app.services.v2.llm_clients.base import LlmResponse
 
 
 @pytest.mark.unit
@@ -33,7 +33,7 @@ def test_v2_llm_health_ok(client):
 @pytest.mark.unit
 @pytest.mark.v2
 def test_v2_llm_health_error(client):
-    from app.services.v2.local_llm_client import LocalLlmError
+    from app.services.v2.llm_clients.local import LocalLlmError
 
     with patch(
         "app.api.v2.llm_health.LocalLlmClient.generate",

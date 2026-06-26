@@ -7,7 +7,7 @@ import pytest
 from app.core.config import Settings
 from app.models.file import FileModality
 from app.schemas.search import SearchSource
-from app.services.v2.local_llm_client import LlmResponse
+from app.services.v2.llm_clients.base import LlmResponse
 from app.services.v2.decision_agent import DecisionAgent, DecisionContext
 
 

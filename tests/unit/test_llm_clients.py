@@ -4,7 +4,8 @@ import httpx
 import pytest
 
 from app.core.config import Settings, get_settings
-from app.services.v2.local_llm_client import LocalLlmClient, LocalLlmError, LlmResponse
+from app.services.v2.llm_clients.base import LlmResponse
+from app.services.v2.llm_clients.local import LocalLlmClient, LocalLlmError
 
 
 @pytest.mark.unit
@@ -43,7 +44,7 @@ def test_local_llm_client_generate_success():
         ]
     }
 
-    with patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response) as post:
+    with patch("app.services.v2.llm_clients.local.httpx.post", return_value=mock_response) as post:
         resp = client.generate("qwen3.5:0.8b", "You are helpful.", "Hi")
 
     assert isinstance(resp, LlmResponse)
@@ -84,7 +85,7 @@ def test_local_llm_client_json_mode():
         ]
     }
 
-    with patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response) as post:
+    with patch("app.services.v2.llm_clients.local.httpx.post", return_value=mock_response) as post:
         resp = client.generate("qwen3.5:0.8b", "Return JSON.", "classify", json_mode=True)
 
     assert resp.content == '{"route":"rag"}'
@@ -111,7 +112,7 @@ def test_local_llm_client_empty_response_raises():
     }
 
     with (
-        patch("app.services.v2.local_llm_client.httpx.post", return_value=mock_response),
+        patch("app.services.v2.llm_clients.local.httpx.post", return_value=mock_response),
         pytest.raises(LocalLlmError, match="empty response"),
     ):
         client.generate("qwen3.5:0.8b", "", "ping")
@@ -129,7 +130,7 @@ def test_local_llm_client_http_error():
 
     with (
         patch(
-            "app.services.v2.local_llm_client.httpx.post",
+            "app.services.v2.llm_clients.local.httpx.post",
             side_effect=httpx.HTTPStatusError("bad gateway", request=request, response=response),
         ),
         pytest.raises(LocalLlmError, match="HTTP 502"),

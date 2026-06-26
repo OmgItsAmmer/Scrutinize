@@ -4,7 +4,7 @@ import pytest
 
 from app.core.deps import get_pipeline_orchestrator
 from app.schemas.v2.search import SearchV2Response, SearchV2Route
-from app.services.v2.local_llm_client import LocalLlmError
+from app.services.v2.llm_clients.local import LocalLlmError
 
 
 @pytest.mark.unit

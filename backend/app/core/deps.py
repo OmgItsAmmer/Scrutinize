@@ -14,7 +14,7 @@ from app.services.search_service import SearchService
 from app.services.v2.conversation_memory import ConversationMemory
 from app.services.v2.decision_agent import DecisionAgent
 from app.services.v2.generic_agent import GenericAgent
-from app.services.v2.local_llm_client import LocalLlmClient
+from app.services.v2.llm_clients import BaseLlmClient, LocalLlmClient, CloudLlmClient
 from app.services.v2.pipeline_orchestrator import PipelineOrchestrator
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import RagGate
@@ -55,29 +55,31 @@ def get_synthesis_agent(settings: Settings = Depends(get_app_settings)) -> Synth
     return SynthesisAgent(settings)
 
 
-def get_local_llm_client(settings: Settings = Depends(get_app_settings)) -> LocalLlmClient:
+def get_v2_llm_client(settings: Settings = Depends(get_app_settings)) -> BaseLlmClient:
+    if settings.use_cloud_llm:
+        return CloudLlmClient(settings)
     return LocalLlmClient(settings)
 
 
 def get_query_rewriter(
-    local_llm: LocalLlmClient = Depends(get_local_llm_client),
+    llm_client: BaseLlmClient = Depends(get_v2_llm_client),
     settings: Settings = Depends(get_app_settings),
 ) -> QueryRewriter:
-    return QueryRewriter(local_llm, settings)
+    return QueryRewriter(llm_client, settings)
 
 
 def get_rag_gate(
-    local_llm: LocalLlmClient = Depends(get_local_llm_client),
+    llm_client: BaseLlmClient = Depends(get_v2_llm_client),
     settings: Settings = Depends(get_app_settings),
 ) -> RagGate:
-    return RagGate(local_llm, settings)
+    return RagGate(llm_client, settings)
 
 
 def get_generic_agent(
-    local_llm: LocalLlmClient = Depends(get_local_llm_client),
+    llm_client: BaseLlmClient = Depends(get_v2_llm_client),
     settings: Settings = Depends(get_app_settings),
 ) -> GenericAgent:
-    return GenericAgent(local_llm, settings)
+    return GenericAgent(llm_client, settings)
 
 
 def get_rrf_retriever(
@@ -89,17 +91,17 @@ def get_rrf_retriever(
 
 
 def get_rag_synthesis_agent(
-    local_llm: LocalLlmClient = Depends(get_local_llm_client),
+    llm_client: BaseLlmClient = Depends(get_v2_llm_client),
     settings: Settings = Depends(get_app_settings),
 ) -> RagSynthesisAgent:
-    return RagSynthesisAgent(local_llm, settings)
+    return RagSynthesisAgent(llm_client, settings)
 
 
 def get_decision_agent(
-    local_llm: LocalLlmClient = Depends(get_local_llm_client),
+    llm_client: BaseLlmClient = Depends(get_v2_llm_client),
     settings: Settings = Depends(get_app_settings),
 ) -> DecisionAgent:
-    return DecisionAgent(local_llm, settings)
+    return DecisionAgent(llm_client, settings)
 
 
 def get_conversation_memory(

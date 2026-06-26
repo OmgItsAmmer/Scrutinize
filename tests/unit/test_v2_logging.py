@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from app.models.file import FileModality
 from app.models.pipeline_log import PipelineRun, PipelineStep
 from app.schemas.search import SearchSource
-from app.services.v2.local_llm_client import LlmResponse
+from app.services.v2.llm_clients.base import LlmResponse
 from app.services.v2.query_rewriter import RewrittenQuery
 from app.services.v2.rag_gate import GateResult
 from app.services.v2.rag_synthesis_agent import SynthesisResult

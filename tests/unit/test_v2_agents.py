@@ -5,7 +5,7 @@ import pytest
 
 from app.core.config import Settings
 from app.services.v2.json_utils import parse_json_object
-from app.services.v2.local_llm_client import LlmResponse
+from app.services.v2.llm_clients.base import LlmResponse
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import RagGate
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from app.core.config import Settings
 from app.core.deps import get_app_settings
 from app.schemas.v2.llm_health import LlmHealthResponse
-from app.services.v2.local_llm_client import LocalLlmClient, LocalLlmError
+from app.services.v2.llm_clients.local import LocalLlmClient, LocalLlmError
 
 router = APIRouter()
 

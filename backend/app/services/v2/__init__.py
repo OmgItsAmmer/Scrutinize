@@ -1,6 +1,6 @@
 from app.services.v2.decision_agent import DecisionAgent, DecisionContext, DecisionResult
 from app.services.v2.generic_agent import GenericAgent
-from app.services.v2.local_llm_client import LocalLlmClient, LocalLlmError
+from app.services.v2.llm_clients.local import LocalLlmClient, LocalLlmError
 from app.services.v2.pipeline_orchestrator import (
     LOW_CONFIDENCE_DISCLAIMER,
     NO_INDEXED_CONTENT,

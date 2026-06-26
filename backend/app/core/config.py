@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     local_llm_timeout_s: float = 120.0
 
     # v2 pipeline tuning
+    use_cloud_llm: bool = False
     v2_max_pipeline_attempts: int = 2
     v2_confidence_threshold: float = 0.7
     v2_rrf_top_k: int = 5
