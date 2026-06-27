@@ -17,7 +17,7 @@ A local **Agentic RAG pipeline (V2)** sits on top of the data layer at query tim
 
 ## 2. High-Level Architecture
 
-The query flow is orchestrated by the `PipelineOrchestrator` (`POST /v2/search`), using local LLMs for agentic routing, rewriting, and validation:
+The query flow is orchestrated by the `PipelineOrchestrator` (`POST /v2/search`), using local LLMs (or cloud LLMs) for agentic routing, rewriting, and validation:
 
 ```mermaid
 flowchart TD
@@ -30,25 +30,25 @@ flowchart TD
     end
 
     subgraph Stage1["Stage 1 — Route"]
-        GATE{"RagGate.classify()<br/>current query + full conversation snapshot<br/>LLM: Qwen3.5-2B<br/>JSON: route + reason + reply"}
+        GATE{"RagGate.classify()<br/>current query + full conversation snapshot<br/>LLM: Gate Model"}
     end
 
     subgraph GenericPath["Generic Path"]
-        GREPLY["Gate direct reply<br/>or GenericAgent.reply()<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
-        GDEC{"DecisionAgent.evaluate()<br/>original query + conversation context<br/>LLM: qwen3.5:4b<br/>verdict + confidence + correct_route"}
-        GESCALATE["Escalate to RAG path<br/>if correct_route = rag"]
+        GREPLY["Gate direct reply<br/>or GenericAgent.reply()<br/>uses full conversation_context<br/>LLM: Gate Model (if reply empty)"]
+        GDEC{"DecisionAgent.evaluate()<br/>original query + conversation context<br/>LLM: Decision Model<br/>verdict + confidence + correct_route"}
+        GESCALATE["Escalate to RAG path<br/>if correct_route = RAG"]
     end
 
-    subgraph RAGPath["RAG Path (Retry loop, max 2 attempts)"]
-        RW["QueryRewriter.rewrite()<br/>first step of RAG — keyword rewrite<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
+    subgraph RAGPath["RAG Path (Retry loop, max attempts)"]
+        RW["QueryRewriter.rewrite()<br/>first step of RAG — keyword rewrite<br/>uses full conversation_context<br/>LLM: Rewriter Model (skipped if standalone)"]
         RRF["RrfRetriever.retrieve()<br/>not an LLM call"]
-        EMB["Embed rewritten query"]
-        QDRANT["Qdrant vector search<br/>top 5 chunks"]
+        EMB["Embed rewritten query<br/>(EmbeddingService API call)"]
+        QDRANT["Qdrant vector search<br/>top-k chunks"]
         EMPTY{"Any chunks<br/>retrieved?"}
-        SYN["RagSynthesisAgent.synthesize()<br/>uses full conversation_context<br/>LLM: Qwen3.5-2B"]
+        SYN["RagSynthesisAgent.synthesize()<br/>uses full conversation_context<br/>LLM: Rewriter Model"]
         NOIDX["Fixed message:<br/>No matching indexed content found"]
-        RDEC{"DecisionAgent.evaluate()<br/>uses full conversation_context<br/>LLM: qwen3.5:4b"}
-        OK{"confidence ≥ 0.7<br/>and verdict = good?"}
+        RDEC{"DecisionAgent.evaluate()<br/>uses full conversation_context<br/>LLM: Decision Model"}
+        OK{"confidence ≥ threshold<br/>and verdict = good?"}
         RETRY{"Attempts<br/>remaining?"}
         DISCLAIM["Append low-confidence disclaimer"]
     end
@@ -93,6 +93,50 @@ flowchart TD
     RESP -.-> LOG
 ```
 
+### LLM Running Placements & Client Routing Layer
+
+Depending on the `USE_CLOUD_LLM` flag, all LLM calls are routed either locally (e.g. Qwen via Ollama) or to OpenAI:
+
+```mermaid
+flowchart TD
+    subgraph AgentLayer["Agent Layer"]
+        GATE_A["RagGate.classify()"]
+        GEN_A["GenericAgent.reply()"]
+        RW_A["QueryRewriter.rewrite()"]
+        SYN_A["RagSynthesisAgent.synthesize()"]
+        DEC_A["DecisionAgent.evaluate()"]
+    end
+
+    subgraph ClientRouting["LLM Client Routing Layer"]
+        CLIENT{"get_v2_llm_client()<br/>use_cloud_llm?"}
+        LOCAL["LocalLlmClient<br/>(Local Ollama via ngrok)"]
+        CLOUD["CloudLlmClient<br/>(Cloud OpenAI API)"]
+    end
+
+    subgraph Models["Model Targets"]
+        M_GATE["Gate Model<br/>Local: Qwen/Qwen3.5-2B<br/>Cloud: gpt-4o-mini"]
+        M_REWRITE["Rewriter Model<br/>Local: Qwen/Qwen3.5-2B<br/>Cloud: gpt-4o-mini"]
+        M_DECISION["Decision Model<br/>Local: qwen3.5:4b<br/>Cloud: gpt-4o-mini"]
+    end
+
+    GATE_A --> CLIENT
+    GEN_A --> CLIENT
+    RW_A --> CLIENT
+    SYN_A --> CLIENT
+    DEC_A --> CLIENT
+
+    CLIENT -->|"False"| LOCAL
+    CLIENT -->|"True"| CLOUD
+
+    LOCAL -->|"Gate/Generic"| M_GATE
+    LOCAL -->|"Rewriter/Synthesis"| M_REWRITE
+    LOCAL -->|"Decision"| M_DECISION
+
+    CLOUD --> M_GATE
+    CLOUD --> M_REWRITE
+    CLOUD --> M_DECISION
+```
+
 ---
 
 ## 3. Component Breakdown
@@ -101,14 +145,16 @@ flowchart TD
 |---|---|---|
 | `pipeline_orchestrator.py` | Coordinates the v2 gate → generic/decision or RAG (rewrite → retrieve → synthesis → decision) loop, error handling, and pipeline logging. | — |
 | `conversation_memory.py` | Prepares and maintains a rolling snapshot of the last 10 chat exchanges with UTC timestamps. | — |
-| `rag_gate.py` | Routes queries to `generic` or `rag` using the current query and full conversation snapshot; may return a direct generic reply. | Local LLM (`Qwen/Qwen3.5-2B`) |
-| `query_rewriter.py` | Enhances user query for keyword/dense search (RAG path only); incorporates correction feedback during RAG retries. | Local LLM (`Qwen/Qwen3.5-2B`) |
-| `generic_agent.py` | Generates a fallback conversational reply when the gate routes to `generic` without providing a reply. | Local LLM (`Qwen/Qwen3.5-2B`) |
+| `rag_gate.py` | Routes queries to `generic` or `rag` using the current query and full conversation snapshot; may return a direct generic reply. | Gate Model |
+| `query_rewriter.py` | Enhances user query for keyword/dense search (RAG path only); incorporates correction feedback during RAG retries. | Rewriter Model |
+| `generic_agent.py` | Generates a fallback conversational reply when the gate routes to `generic` without providing a reply. | Gate Model |
 | `rrf_retriever.py` | Orchestrates query embedding and retrieves top-k matching documents from Qdrant. | Qdrant + Embedding Service |
-| `rag_synthesis_agent.py` | Produces a cited, grounded, context-aware answer from retrieved segments. | Local LLM (`Qwen/Qwen3.5-2B`) |
-| `decision_agent.py` | Evaluates drafts for confidence and alignment; triggers retry feedback or escalates generic routes to RAG. | Local LLM (`qwen3.5:4b`) |
+| `rag_synthesis_agent.py` | Produces a cited, grounded, context-aware answer from retrieved segments. | Rewriter Model |
+| `decision_agent.py` | Evaluates drafts for confidence and alignment; triggers retry feedback or escalates generic routes to RAG. | Decision Model |
 | `pipeline_logger.py` | Writes steps (gate, rewrite, retrieval, synthesis, evaluation) to Neon Postgres for traceability. | Neon Postgres |
-| `local_llm_client.py` | Low-level client managing POST requests to OpenAI-compatible Ollama endpoints via ngrok. | External Local Host |
+| `llm_clients/base.py` | Abstract base class for the LLM execution client | — |
+| `llm_clients/local.py` | OpenAI-compatible HTTP client for local model host (ngrok/Ollama) | Local Ollama |
+| `llm_clients/cloud.py` | OpenAI API client for cloud model host | OpenAI |
 
 ---
 
@@ -186,11 +232,11 @@ sequenceDiagram
     participant U as User (Frontend)
     participant API as FastAPI /v2/search
     participant MEM as Conversation Memory
-    participant RW as Query Rewriter (Qwen3.5-2B)
-    participant G as Rag Gate (Qwen3.5-0.8B)
+    participant G as Rag Gate (Gate Model)
+    participant RW as Query Rewriter (Rewriter Model)
     participant R as Retriever (Qdrant)
-    participant S as Synthesis (Qwen3.5-2B)
-    participant D as Decision Agent (qwen3.5:4b)
+    participant S as Synthesis (Rewriter Model)
+    participant D as Decision Agent (Decision Model)
 
     U->>API: "Find the video of someone drinking milk"
     API->>MEM: prepare(conversation)
@@ -199,11 +245,11 @@ sequenceDiagram
     G-->>API: route="rag"
     
     rect rgb(240, 240, 240)
-        Note over API, D: Attempt Loop (Max 2 Attempts)
+        Note over API, D: Attempt Loop (Max Attempts)
         API->>RW: rewrite(query, conversation_context)
         RW-->>API: rewritten_text
         API->>R: retrieve(rewritten_text, modality_filter)
-        R-->>API: top-5 source segments
+        R-->>API: top-k source segments
         API->>S: synthesize(query, sources, full_context)
         S-->>API: draft_answer
         API->>D: evaluate(draft_answer, sources)

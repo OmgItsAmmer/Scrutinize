@@ -44,6 +44,7 @@ class RagGate:
                 self._model,
                 self._system,
                 "\n".join(user_lines),
+                json_mode=True,
             )
             raw = llm_response.content
             data = parse_json_object(raw)

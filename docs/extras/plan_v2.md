@@ -44,24 +44,23 @@ The current app on `main` (OpenAI router + synthesis, Qdrant, Neon) **stays unto
 ```mermaid
 flowchart TB
     USER["User prompt"]
-    REW["Query Rewriter<br/>qwen3.5:2b"]
-    GATE["RAG Gate<br/>qwen3.5:0.8b"]
-    GEN["Generic Reply<br/>qwen3.5:0.8b"]
-    RRF["RRF Retriever<br/>top 5 chunks"]
-    SYN["Answer Synthesis<br/>qwen3.5:2b or 4b"]
-    DEC["Decision Agent<br/>qwen3.5:4b"]
+    GATE["RAG Gate<br/>Gate Model"]
+    GEN["Generic Reply<br/>Gate Model (if reply empty)"]
+    REW["Query Rewriter<br/>Rewriter Model"]
+    RRF["RRF Retriever<br/>top-k chunks"]
+    SYN["Answer Synthesis<br/>Rewriter Model"]
+    DEC["Decision Agent<br/>Decision Model"]
     UI["Frontend"]
 
-    USER --> REW
-    REW --> GATE
+    USER --> GATE
     GATE -->|"generic"| GEN --> DEC
-    GATE -->|"needs RAG"| RRF --> SYN --> DEC
+    GATE -->|"needs RAG"| REW --> RRF --> SYN --> DEC
     DEC -->|"good (confidence ≥ threshold)"| UI
-    DEC -->|"bad + attempt < 2"| REW
-    DEC -->|"bad + attempt = 2"| UI
+    DEC -->|"bad + attempt < max_attempts"| REW
+    DEC -->|"bad + attempt = max_attempts"| UI
 ```
 
-All local models call the same ngrok host:
+All local models call the same ngrok host (or cloud OpenAI endpoint if USE_CLOUD_LLM=True):
 
 ```
 POST https://e7a8-154-192-139-73.ngrok-free.app/api/generate
@@ -73,13 +72,13 @@ POST https://e7a8-154-192-139-73.ngrok-free.app/api/generate
 
 | Stage | Model | Input | Output |
 |---|---|---|---|
-| **1. Query Rewriter** | `qwen3.5:2b` | Raw user query | Rewritten query with clearer keywords, modality hints preserved |
-| **2. RAG Gate** | `qwen3.5:0.8b` | Raw query + rewritten query + system prompt | `{ "route": "rag" \| "generic", "reason": "..." }` |
-| **3a. Generic path** | `qwen3.5:0.8b` | Raw user query | Natural conversational reply (no vector search) |
-| **3b. RAG path — RRF** | (no LLM) | Rewritten query + original query | Top **5** segment/chunk hits fused via RRF |
-| **3b. RAG path — Synthesis** | `qwen3.5:2b` (or shared 4b) | Query + RRF chunks | Draft answer grounded in retrieved content |
-| **4. Decision Agent** | `qwen3.5:4b` | Raw query, rewritten query, draft answer, RAG chunks (if any) | `{ "verdict": "good" \| "retry", "confidence": 0.0–1.0, "feedback": "..." }` |
-| **5. Loop / exit** | — | — | Max **2** full pipeline runs; on 2nd low-confidence exit, append disclaimer |
+| **1. RAG Gate** | Gate Model | Raw query + system prompt | `{ "route": "rag" \| "generic", "reason": "...", "reply": "string or null" }` |
+| **2a. Generic path** | Gate Model | Raw user query (via GenericAgent if Gate reply is null) | Natural conversational reply (no vector search) |
+| **2b. RAG path — Rewriter** | Rewriter Model | Raw user query (+ decision feedback on retry) | Rewritten query with clearer keywords |
+| **3b. RAG path — RRF** | (no LLM) | Rewritten query | Top segment/chunk hits from vector search |
+| **4b. RAG path — Synthesis** | Rewriter Model | Query + RRF chunks | Draft answer grounded in retrieved content |
+| **5. Decision Agent** | Decision Model | Raw query, rewritten query, draft answer, RAG chunks (if any) | `{ "verdict": "good" \| "retry", "confidence": 0.0–1.0, "feedback": "..." }` |
+| **6. Loop / exit** | — | — | Max attempts full pipeline runs; on final low-confidence exit, append disclaimer |
 
 ### 2.2 RAG gate — when to enter RAG
 
@@ -90,7 +89,7 @@ The **0.8b gate** system prompt must classify the query. Enter RAG when the ques
 | **`rag`** | "Find the video where someone drinks milk", "What does my uploaded PDF say about X?", "Which audio mentions project deadline?", "Summarize the file I uploaded yesterday" |
 | **`generic`** | "Hello", "What is Python?", "Write me a poem", "Explain quantum computing", general knowledge with no reference to the user's library |
 
-The gate receives both the **original** and **rewritten** query so keyword expansion does not falsely trigger RAG.
+The gate classifies the original user query and conversation context directly.
 
 ### 2.3 Reciprocal Rank Fusion (RRF)
 

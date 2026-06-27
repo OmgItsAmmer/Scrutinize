@@ -108,7 +108,7 @@ def test_rag_gate_parses_json_route():
 
     assert result.route == "generic"
     assert result.reply == "Python is a programming language."
-    assert client.generate.call_args.kwargs.get("json_mode") is not True
+    assert client.generate.call_args.kwargs.get("json_mode") is True
 
 
 @pytest.mark.unit

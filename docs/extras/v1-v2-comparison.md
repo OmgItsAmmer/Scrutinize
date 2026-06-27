@@ -246,39 +246,41 @@ flowchart LR
 
 ## 6. Workflow — Search v2
 
-Local Qwen pipeline with RAG gate, RRF, decision loop, and retries.
+Pipeline with RAG gate, RRF, decision loop, and retries.
 
 ```mermaid
 flowchart TB
-    Q[User query] --> LOOP{Attempt 1..2}
+    Q[User query] --> GATE[RagGate<br/>Gate Model]
 
-    LOOP --> RW[QueryRewriter<br/>qwen3.5:2b]
-    RW --> GATE[RagGate<br/>qwen3.5:0.8b]
+    GATE -->|generic| GREPLY[Gate direct reply<br/>or GenericAgent.reply()<br/>Gate Model]
+    GATE -->|rag| RW[QueryRewriter<br/>Rewriter Model]
 
-    GATE -->|generic| GEN[GenericAgent<br/>qwen3.5:0.8b]
-    GATE -->|rag| RRF[RrfRetriever<br/>RRF top 5]
-    RRF --> SYN[RagSynthesisAgent<br/>qwen3.5:2b]
+    GREPLY --> DEC[DecisionAgent<br/>Decision Model]
+    
+    subgraph RAGLoop["RAG Loop (Max Attempts)"]
+        RW --> RRF[RrfRetriever<br/>RRF top-k]
+        RRF --> SYN[RagSynthesisAgent<br/>Rewriter Model]
+        SYN --> DEC
+    end
 
-    GEN --> DEC[DecisionAgent<br/>qwen3.5:4b]
-    SYN --> DEC
-
-    DEC -->|confidence ≥ 0.7| OUT[Return answer]
-    DEC -->|low + attempt left| LOOP
+    DEC -->|confidence ≥ threshold| OUT[Return answer]
+    DEC -->|low + attempts left| RW
     DEC -->|low + final attempt| OUT2[Answer + disclaimer]
 ```
 
-### Generic path (fast — ~1 LLM call)
+### Generic path (fast — ~1-2 LLM calls)
 
 1. **Conversation memory** — prepare summaries + last 10 messages
-2. **RAG gate (0.8b)** — classifies and returns a direct `reply` for generic questions
-3. **Return immediately** — no rewriter, no second generic agent, no decision agent
+2. **RAG gate** — classifies and returns a direct `reply` for generic questions if possible
+3. **Generic agent** — generates reply if the gate direct reply is null
+4. **Decision agent** — evaluates answer quality and confidence
 
 ### RAG path (library questions)
 
 1. **Conversation memory** — same context preparation
 2. **Gate** — route = `rag`
-3. **Rewriter (2b)** — with conversation context
-4. **RRF retrieve** → **synthesis (2b)** → **decision (4b)** with retry loop
+3. **Rewriter** — with conversation context (+ decision feedback on retry)
+4. **RRF retrieve** → **synthesis** → **decision** with retry loop
 
 **Endpoint:** `POST /v2/search`  
 **Orchestrator:** `backend/app/services/v2/pipeline_orchestrator.py`  

@@ -85,7 +85,9 @@ def test_get_client_ip_prefers_forwarded_header():
 def test_middleware_returns_429_when_limit_exceeded(client, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
     monkeypatch.setenv("RATE_LIMIT_GENERAL_REQUESTS", "1")
-    reset_rate_limit_store()
+    
+    import app.core.rate_limit
+    monkeypatch.setattr(app.core.rate_limit, "_store", app.core.rate_limit.InMemoryRateLimitStore())
 
     from app.core.config import get_settings
 
