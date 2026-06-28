@@ -23,6 +23,7 @@ dependencies = [
     "tiktoken>=0.8",
     "uvicorn[standard]>=0.32",
     "pypdf[image]>=4.0.0",
+    "fastembed>=0.3.0",
 ]
 
 [project.optional-dependencies]

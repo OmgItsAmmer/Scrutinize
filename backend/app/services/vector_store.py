@@ -14,6 +14,12 @@ from qdrant_client.models import (
     PayloadSchemaType,
     PointStruct,
     VectorParams,
+    SparseVector,
+    SparseVectorParams,
+    SparseIndexParams,
+    Prefetch,
+    FusionQuery,
+    Fusion,
 )
 
 from app.core.config import Settings
@@ -32,6 +38,7 @@ class VectorSegment:
     start_time: float | None = None
     end_time: float | None = None
     created_at: datetime | None = None
+    sparse_vector: SparseVector | dict[str, Any] | None = None
 
 
 class VectorStore:
@@ -47,6 +54,14 @@ class VectorStore:
         )
         self._collection = settings.qdrant_collection
         self._vector_size = settings.embedding_dimensions
+        self._sparse_model = None
+
+    @property
+    def sparse_model(self) -> Any:
+        if self._sparse_model is None:
+            from fastembed import SparseTextEmbedding
+            self._sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+        return self._sparse_model
 
     def collection_exists(self) -> bool:
         return self._client.collection_exists(self._collection)
@@ -60,6 +75,13 @@ class VectorStore:
                 self.TEXT_VECTOR_NAME: VectorParams(
                     size=self._vector_size,
                     distance=Distance.COSINE,
+                )
+            },
+            sparse_vectors_config={
+                "sparse_vector": SparseVectorParams(
+                    index=SparseIndexParams(
+                        on_disk=True,
+                    )
                 )
             },
         )
@@ -96,25 +118,53 @@ class VectorStore:
             return
 
         self.ensure_collection()
-        points = [
-            PointStruct(
-                id=str(segment.id),
-                vector={self.TEXT_VECTOR_NAME: segment.vector},
-                payload={
-                    "file_id": str(segment.file_id),
-                    "modality": segment.modality,
-                    "content": segment.content,
-                    "start_time": segment.start_time,
-                    "end_time": segment.end_time,
-                    "source_path": segment.source_path,
-                    "title": segment.title,
-                    "created_at": (
-                        segment.created_at or datetime.now(UTC)
-                    ).isoformat(),
-                },
+
+        # Identify segments that need sparse vectors generated
+        missing_sparse = [s for s in segments if s.sparse_vector is None]
+        sparse_vectors = {}
+        if missing_sparse:
+            texts = [s.content for s in missing_sparse]
+            embeddings = list(self.sparse_model.embed(texts))
+            for segment, emb in zip(missing_sparse, embeddings):
+                sparse_vectors[segment.id] = SparseVector(
+                    indices=list(emb.indices),
+                    values=list(emb.values)
+                )
+
+        points = []
+        for segment in segments:
+            sv = segment.sparse_vector
+            if sv is None:
+                sv = sparse_vectors.get(segment.id)
+            elif not isinstance(sv, SparseVector):
+                if isinstance(sv, dict):
+                    sv = SparseVector(indices=sv["indices"], values=sv["values"])
+
+            vector_dict = {
+                self.TEXT_VECTOR_NAME: segment.vector,
+            }
+            if sv is not None:
+                vector_dict["sparse_vector"] = sv
+
+            points.append(
+                PointStruct(
+                    id=str(segment.id),
+                    vector=vector_dict,
+                    payload={
+                        "file_id": str(segment.file_id),
+                        "modality": segment.modality,
+                        "content": segment.content,
+                        "start_time": segment.start_time,
+                        "end_time": segment.end_time,
+                        "source_path": segment.source_path,
+                        "title": segment.title,
+                        "created_at": (
+                            segment.created_at or datetime.now(UTC)
+                        ).isoformat(),
+                    },
+                )
             )
-            for segment in segments
-        ]
+
         self._client.upsert(collection_name=self._collection, points=points)
 
     def search(
@@ -123,6 +173,7 @@ class VectorStore:
         *,
         top_k: int = 10,
         modality: str | None = None,
+        query_sparse_vector: SparseVector | dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         self.ensure_collection()
         query_filter = None
@@ -131,13 +182,40 @@ class VectorStore:
                 must=[FieldCondition(key="modality", match=MatchValue(value=modality))]
             )
 
-        response = self._client.query_points(
-            collection_name=self._collection,
-            query=query_vector,
-            using=self.TEXT_VECTOR_NAME,
-            limit=top_k,
-            query_filter=query_filter,
-        )
+        if query_sparse_vector is not None:
+            sv = query_sparse_vector
+            if not isinstance(sv, SparseVector):
+                if isinstance(sv, dict):
+                    sv = SparseVector(indices=sv["indices"], values=sv["values"])
+
+            prefetch = [
+                Prefetch(
+                    query=query_vector,
+                    using=self.TEXT_VECTOR_NAME,
+                    limit=top_k,
+                ),
+                Prefetch(
+                    query=sv,
+                    using="sparse_vector",
+                    limit=top_k,
+                ),
+            ]
+            response = self._client.query_points(
+                collection_name=self._collection,
+                prefetch=prefetch,
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=top_k,
+                query_filter=query_filter,
+            )
+        else:
+            response = self._client.query_points(
+                collection_name=self._collection,
+                query=query_vector,
+                using=self.TEXT_VECTOR_NAME,
+                limit=top_k,
+                query_filter=query_filter,
+            )
+
         return [
             {
                 "id": point.id,

@@ -249,19 +249,22 @@ sequenceDiagram
 
 ---
 
-### 6. Embedding Strategy (and how it scales up)
+### 6. Embedding & Search Strategy (and how it scales up)
 
-#### Phase A — MVP: **single embedding space (caption-then-embed)**
-Every piece of content — raw text, audio transcripts, and video (transcript + frame captions) — is converted to **text** and embedded with `text-embedding-3-small`.
-* One Qdrant collection, one vector field, one dimensionality (1536) — minimal schema complexity.
-* Cross-modal search works seamlessly because everything lives in the same vector space.
+#### Phase A — MVP: **Hybrid Search (Dense + Sparse/BM25)**
+Every piece of content — raw text, audio transcripts, and video (transcript + frame captions) — is converted to **text** and indexed using both:
+1. **Dense Vector**: `text-embedding-3-small` (1536 dimensions) for semantic retrieval.
+2. **Sparse Vector**: Local `fastembed` BM25 representation for exact lexical/keyword matching.
+
+Retrieval runs both queries concurrently using Qdrant's `Prefetch` API and merges the rankings natively using **Reciprocal Rank Fusion (RRF)**.
+* Cross-modal search works seamlessly because both modalities live in the same collection.
 
 #### Phase B — Enhancement: **native multi-vector points**
-Once Phase A works end-to-end, add a **second named vector** per Qdrant point:
+Once Phase A works end-to-end, add a **third named vector** per Qdrant point:
 * `visual_vector` — CLIP image embedding of representative video keyframes, for true visual similarity search (independent of caption quality).
 * `audio_vector` — CLAP (Contrastive Language-Audio Pretraining) embedding for content-based audio similarity.
 
-Qdrant's named-vector support allows this to be an **additive** schema change without migrating existing `text_vector` data.
+Qdrant's named-vector support allows this to be an **additive** schema change without migrating existing `text_vector` or `sparse_vector` data.
 
 ---
 
@@ -273,6 +276,7 @@ Qdrant's named-vector support allows this to be an **additive** schema change wi
 |---|---|---|
 | `id` (point id) | UUID | matches `segments.id` in Neon Postgres |
 | vector: `text_vector` | float[1536] | `text-embedding-3-small`, cosine distance |
+| vector: `sparse_vector` | struct | `fastembed` BM25 (indices & values) for lexical search |
 | payload.`file_id` | UUID | FK to Neon `files.id` |
 | payload.`modality` | enum: `text` \| `audio` \| `video` | used for filtered search |
 | payload.`content` | string | the transcript / caption / text chunk that was embedded |

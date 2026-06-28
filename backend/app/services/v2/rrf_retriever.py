@@ -32,10 +32,15 @@ class RrfRetriever:
 
         limit = top_k or self._settings.v2_rrf_top_k
         vector = self._embedding_service.embed_texts([query])[0]
+        
+        # Generate sparse vector for query
+        sparse_emb = list(self._vector_store.sparse_model.embed([query]))[0]
+        
         modality = modality_filter.value if modality_filter else None
         hits = self._vector_store.search(
             vector,
             top_k=limit,
             modality=modality,
+            query_sparse_vector=sparse_emb,
         )
         return [hit_to_source(hit) for hit in hits]

@@ -27,8 +27,9 @@ flowchart TD
     subgraph RAGPath["RAG path (retry loop, max attempts)"]
         RW["QueryRewriter.rewrite()<br/>first step of RAG — keyword rewrite<br/>uses full conversation_context<br/>LLM: Rewriter Model (skipped if standalone)"]
         RRF["RrfRetriever.retrieve()<br/>not an LLM call"]
-        EMB["Embed rewritten query<br/>(EmbeddingService API call)"]
-        QDRANT["Qdrant vector search<br/>top-k chunks"]
+        EMB["Dense Embedding<br/>(EmbeddingService API call)"]
+        SPARSE["Sparse BM25 Embedding<br/>(Local fastembed call)"]
+        QDRANT["Qdrant Hybrid Search<br/>RRF Fusion of top-k chunks"]
         EMPTY{"Any chunks<br/>retrieved?"}
         SYN["RagSynthesisAgent.synthesize()<br/>uses full conversation_context<br/>LLM: Rewriter Model"]
         NOIDX["Fixed message:<br/>No matching indexed content found"]
@@ -57,7 +58,11 @@ flowchart TD
 
     GATE -->|"route = rag"| RW
     RW --> RRF
-    RRF --> EMB --> QDRANT --> EMPTY
+    RRF --> EMB
+    RRF --> SPARSE
+    EMB --> QDRANT
+    SPARSE --> QDRANT
+    QDRANT --> EMPTY
     EMPTY -->|"no"| NOIDX --> RDEC
     EMPTY -->|"yes"| SYN --> RDEC
     RDEC --> OK
@@ -144,9 +149,10 @@ flowchart TD
 
 On each RAG attempt, `RrfRetriever`:
 
-1. Embeds the **rewritten** query via `EmbeddingService`.
-2. Runs one Qdrant dense search with `top_k = v2_rrf_top_k` (default **5**).
-3. Returns those `SearchSource` chunks to synthesis.
+1. Embeds the **rewritten** query via `EmbeddingService` (Dense Vector).
+2. Generates the lexical sparse representation via the local `fastembed` model (Sparse Vector).
+3. Queries both indexes concurrently in Qdrant and combines them natively using **Reciprocal Rank Fusion (RRF)**.
+4. Returns those `SearchSource` chunks to synthesis.
 
 Defaults: `v2_rrf_top_k=5`, `v2_max_pipeline_attempts=2`, `v2_confidence_threshold=0.7`.
 
