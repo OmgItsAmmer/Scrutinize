@@ -20,18 +20,24 @@ class CloudinaryStorage:
     """Server-side Cloudinary upload wrapper for Scrutinize raw files."""
 
     def __init__(self, settings: Settings) -> None:
-        if not settings.cloudinary_configured:
+        self._configured = settings.cloudinary_configured
+        if self._configured:
+            cloudinary.config(
+                cloud_name=settings.cloudinary_cloud_name,
+                api_key=settings.cloudinary_api_key,
+                api_secret=settings.cloudinary_api_secret,
+                secure=True,
+            )
+            self._folder = settings.cloudinary_folder.strip("/")
+        else:
+            self._folder = ""
+
+    def _check_configured(self) -> None:
+        if not self._configured:
             raise RuntimeError(
                 "Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, "
                 "CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in .env."
             )
-        cloudinary.config(
-            cloud_name=settings.cloudinary_cloud_name,
-            api_key=settings.cloudinary_api_key,
-            api_secret=settings.cloudinary_api_secret,
-            secure=True,
-        )
-        self._folder = settings.cloudinary_folder.strip("/")
 
     def _folder_path(self, modality: str) -> str:
         return f"{self._folder}/{modality}" if self._folder else modality
@@ -44,6 +50,7 @@ class CloudinaryStorage:
         modality: str,
         resource_type: str = "auto",
     ) -> StorageUploadResult:
+        self._check_configured()
         result: dict[str, Any] = cloudinary.uploader.upload(
             data,
             folder=self._folder_path(modality),
@@ -63,6 +70,7 @@ class CloudinaryStorage:
         modality: str,
         resource_type: str = "auto",
     ) -> StorageUploadResult:
+        self._check_configured()
         result: dict[str, Any] = cloudinary.uploader.upload(
             path,
             folder=self._folder_path(modality),
@@ -75,6 +83,7 @@ class CloudinaryStorage:
         return _to_upload_result(result)
 
     def delete(self, public_id: str, *, resource_type: str = "image") -> dict[str, Any]:
+        self._check_configured()
         return cloudinary.uploader.destroy(public_id, resource_type=resource_type)
 
 

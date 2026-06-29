@@ -68,7 +68,16 @@ class VectorStore:
 
     def create_collection(self) -> None:
         if self.collection_exists():
-            return
+            try:
+                info = self._client.get_collection(self._collection)
+                params = getattr(info.config, "params", None)
+                sparse_config = getattr(params, "sparse_vectors", None)
+                if not sparse_config or "sparse_vector" not in sparse_config:
+                    self._client.delete_collection(self._collection)
+                else:
+                    return
+            except Exception:
+                return
         self._client.create_collection(
             collection_name=self._collection,
             vectors_config={
