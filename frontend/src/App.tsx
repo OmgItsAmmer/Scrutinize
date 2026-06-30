@@ -5,12 +5,15 @@ import { MobileNav } from "./components/MobileNav";
 import { SearchView } from "./components/SearchView";
 import { Sidebar } from "./components/Sidebar";
 import { UploadView } from "./components/UploadView";
+import { SettingsView } from "./components/SettingsView";
 import { AuthView } from "./components/AuthView";
 
 function MainView() {
   const { state } = useApp();
 
   switch (state.view) {
+    case "settings":
+      return <SettingsView />;
     case "library":
       return <LibraryView />;
     case "upload":

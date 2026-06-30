@@ -104,7 +104,7 @@ export type DeleteFileResponse = {
 
 export type ModalityFilter = FileModality | "all";
 
-export type AppView = "search" | "library" | "upload";
+export type AppView = "search" | "library" | "upload" | "settings";
 
 export type UploadJobState = {
   jobId: string;

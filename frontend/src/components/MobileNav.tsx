@@ -1,6 +1,6 @@
 import { useApp } from "../context/AppContext";
 import type { AppView } from "../types/api";
-import { IconLibrary, IconPlus, IconUpload } from "./icons";
+import { IconLibrary, IconPlus, IconUpload, IconSettings } from "./icons";
 
 const NAV_ITEMS: {
   id: AppView;
@@ -11,6 +11,7 @@ const NAV_ITEMS: {
   { id: "search", label: "Chat", icon: IconPlus },
   { id: "upload", label: "Upload", icon: IconUpload },
   { id: "library", label: "Library", icon: IconLibrary },
+  { id: "settings", label: "Settings", icon: IconSettings },
 ];
 
 export function MobileNav() {
