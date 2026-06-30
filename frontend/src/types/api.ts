@@ -114,3 +114,10 @@ export type UploadJobState = {
   status: JobStatus;
   errorMessage: string | null;
 };
+
+export type ProjectAuthResponse = {
+  project_id: string;
+  api_key: string;
+  client_key: string;
+};
+

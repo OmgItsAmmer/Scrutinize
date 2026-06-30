@@ -13,6 +13,11 @@ def parse_json_object(text: str) -> dict[str, Any]:
     fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped, re.IGNORECASE)
     if fence_match:
         stripped = fence_match.group(1).strip()
+    else:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            stripped = stripped[start:end+1].strip()
 
     parsed = json.loads(stripped)
     if not isinstance(parsed, dict):

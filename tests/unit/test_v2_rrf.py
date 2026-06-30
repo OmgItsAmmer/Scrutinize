@@ -18,18 +18,21 @@ def test_rrf_retriever_searches_rewritten_query_only():
     id_a = str(uuid4())
     id_b = str(uuid4())
     vector_store = MagicMock()
+    vector_store.sparse_model.embed.return_value = [MagicMock()]
     vector_store.search.return_value = [
         {"id": id_a, "score": 0.9, "payload": _payload("first hit")},
         {"id": id_b, "score": 0.8, "payload": _payload("second hit")},
     ]
 
     retriever = RrfRetriever(embedding, vector_store, settings)
-    sources = retriever.retrieve("rewritten query")
+    project_id = uuid4()
+    sources = retriever.retrieve("rewritten query", project_id=project_id)
 
     assert len(sources) == 2
     assert embedding.embed_texts.call_args.args[0] == ["rewritten query"]
     vector_store.search.assert_called_once()
     assert vector_store.search.call_args.kwargs["top_k"] == 2
+    assert vector_store.search.call_args.kwargs["project_id"] == project_id
     assert sources[0].score == 0.9
     assert sources[0].content == "first hit"
 
@@ -38,7 +41,7 @@ def test_rrf_retriever_searches_rewritten_query_only():
 @pytest.mark.v2
 def test_rrf_retriever_returns_empty_for_blank_query():
     retriever = RrfRetriever(MagicMock(), MagicMock(), Settings(local_llm_base_url="http://llm.test"))
-    assert retriever.retrieve("   ") == []
+    assert retriever.retrieve("   ", project_id=uuid4()) == []
 
 
 def _payload(content: str) -> dict:

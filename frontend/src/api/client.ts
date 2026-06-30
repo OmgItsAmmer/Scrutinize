@@ -5,6 +5,7 @@ import type {
   JobStatusResponse,
   LibraryResponse,
   ModalityFilter,
+  ProjectAuthResponse,
   SearchV2Response,
   UploadResponse,
 } from "../types/api";
@@ -36,8 +37,26 @@ async function parseError(response: Response): Promise<string> {
   return `Request failed (${response.status})`;
 }
 
+function getProjectKey(path: string): string | null {
+  if (path.includes("/v2/projects/login") || path.includes("/v2/projects/signup")) {
+    return null;
+  }
+  if (path.includes("/search")) {
+    return localStorage.getItem("scrutinize_client_key");
+  }
+  return localStorage.getItem("scrutinize_admin_key") ?? localStorage.getItem("scrutinize_client_key");
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, init);
+  const key = getProjectKey(path);
+  const headers = new Headers(init?.headers);
+  if (key) {
+    headers.set("X-Project-Key", key);
+  }
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers,
+  });
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
   }
@@ -110,6 +129,30 @@ export function deleteLibraryFile(fileId: string): Promise<DeleteFileResponse> {
 }
 
 export function libraryFileContentUrl(fileId: string, download = false): string {
-  const params = download ? "?download=true" : "";
-  return `${API_URL}/library/${fileId}/content${params}`;
+  const key = localStorage.getItem("scrutinize_admin_key") ?? localStorage.getItem("scrutinize_client_key");
+  const params = new URLSearchParams();
+  if (download) {
+    params.set("download", "true");
+  }
+  if (key) {
+    params.set("project_key", key);
+  }
+  const query = params.toString();
+  return `${API_URL}/library/${fileId}/content${query ? "?" + query : ""}`;
+}
+
+export function loginProject(name: string, password: string): Promise<ProjectAuthResponse> {
+  return request<ProjectAuthResponse>("/v2/projects/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, password }),
+  });
+}
+
+export function signupProject(name: string, password: string, settings: Record<string, any> = {}): Promise<ProjectAuthResponse> {
+  return request<ProjectAuthResponse>("/v2/projects/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, password, settings }),
+  });
 }

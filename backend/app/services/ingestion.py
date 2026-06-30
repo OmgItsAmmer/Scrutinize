@@ -6,6 +6,8 @@ from app.services.embedding_service import EmbeddingService
 from app.services.job_orchestrator import JobOrchestrator
 from app.services.vector_store import VectorSegment, VectorStore
 
+_NULL_UUID = UUID(int=0)  # Sentinel for files without a project_id (pre-multi-tenant legacy data)
+
 
 @dataclass(frozen=True)
 class TimedContent:
@@ -25,6 +27,9 @@ def index_segments(
     if not segments:
         raise ValueError("No segments to index")
 
+    # Resolve the project_id for this file; fall back to null sentinel for legacy rows.
+    project_id = file_record.project_id or _NULL_UUID
+
     texts = [segment.content for segment in segments]
     vectors = embedding_service.embed_texts(texts)
     vector_segments: list[VectorSegment] = []
@@ -38,12 +43,14 @@ def index_segments(
             start_time=segment.start_time,
             end_time=segment.end_time,
             segment_id=segment_id,
+            project_id=file_record.project_id,
         )
         vector_segments.append(
             VectorSegment(
                 id=segment_id,
                 vector=vector,
                 file_id=file_record.id,
+                project_id=project_id,
                 modality=modality.value,
                 content=segment.content,
                 source_path=file_record.storage_path,
@@ -55,3 +62,4 @@ def index_segments(
 
     vector_store.upsert_segments(vector_segments)
     return len(vector_segments)
+

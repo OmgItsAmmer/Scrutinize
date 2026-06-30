@@ -14,7 +14,7 @@ const NAV_ITEMS: {
 ];
 
 export function Sidebar() {
-  const { state, setView, clearSearch, apiUrl } = useApp();
+  const { state, setView, clearSearch, apiUrl, logout } = useApp();
 
   function handleNav(view: AppView, clear?: boolean) {
     if (clear) {
@@ -29,7 +29,14 @@ export function Sidebar() {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 text-sm font-bold text-white">
           S
         </div>
-        <span className="text-lg font-semibold tracking-tight text-zinc-900">Scrutinize</span>
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-semibold tracking-tight text-zinc-900">Scrutinize</span>
+          {state.project && (
+            <span className="text-[11px] text-zinc-500 truncate font-medium max-w-[140px]">
+              {state.project.projectName}
+            </span>
+          )}
+        </div>
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3">
@@ -54,7 +61,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-zinc-200 px-4 py-4">
+      <div className="border-t border-zinc-200 px-4 py-4 space-y-3">
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-medium text-zinc-800">API</span>
@@ -73,6 +80,14 @@ export function Sidebar() {
             <p className="mt-1 text-[11px] text-zinc-500">v{state.health.version}</p>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={logout}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50 hover:text-zinc-950 transition"
+        >
+          Sign Out
+        </button>
       </div>
     </aside>
   );

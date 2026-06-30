@@ -33,16 +33,20 @@ class RagGate:
         self,
         original: str,
         *,
+        model: str | None = None,
+        system_override: str | None = None,
         conversation_context: str = "",
     ) -> GateResult:
+        effective_model = model or self._model
+        effective_system = system_override or self._system
         user_lines = [f"Current user query: {original.strip()}"]
         append_conversation_context(user_lines, conversation_context)
 
         llm_response = None
         try:
             llm_response = self._client.generate(
-                self._model,
-                self._system,
+                effective_model,
+                effective_system,
                 "\n".join(user_lines),
                 json_mode=True,
             )
@@ -63,3 +67,4 @@ class RagGate:
                 reason=f"Gate failed; defaulting to generic: {exc}",
                 llm_call=llm_response,
             )
+

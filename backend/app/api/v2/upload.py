@@ -1,16 +1,22 @@
+"""Project-scoped file upload endpoint (requires admin key)."""
+
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Header
-from sqlmodel import Session
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.core.config import Settings
-from app.core.deps import get_app_settings, get_cloudinary_storage, get_job_orchestrator, get_db_session
+from app.core.deps import (
+    get_app_settings,
+    get_cloudinary_storage,
+    get_db_session,
+    get_project_from_admin_key,
+)
 from app.models.file import FileStatus
 from app.models.processing_job import JobStatus
 from app.schemas.upload import UploadResponse
+from app.schemas.v2.project import ProjectContext
 from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.job_orchestrator import JobOrchestrator
-from app.services.project_service import ProjectService
 from app.services.upload_utils import (
     ALL_ALLOWED_EXTENSIONS,
     cloudinary_resource_type,
@@ -19,8 +25,9 @@ from app.services.upload_utils import (
     validate_content_type,
 )
 from app.workers.tasks import process_audio, process_text, process_video
+from sqlmodel import Session
 
-router = APIRouter()
+router = APIRouter(prefix="/projects", tags=["projects"])
 
 TASK_BY_MODALITY = {
     "text": process_text,
@@ -29,15 +36,19 @@ TASK_BY_MODALITY = {
 }
 
 
-@router.post("/upload", response_model=UploadResponse, tags=["upload"])
-async def upload_file(
+@router.post("/files", response_model=UploadResponse, status_code=202)
+async def upload_project_file(
     file: UploadFile = File(...),
-    orchestrator: JobOrchestrator = Depends(get_job_orchestrator),
+    project_ctx: ProjectContext = Depends(get_project_from_admin_key),
+    session: Session = Depends(get_db_session),
     storage: CloudinaryStorage = Depends(get_cloudinary_storage),
     settings: Settings = Depends(get_app_settings),
-    x_project_key: str | None = Header(None, alias="X-Project-Key"),
-    session: Session = Depends(get_db_session),
 ) -> UploadResponse:
+    """Upload a file to a specific project (requires admin key via X-Project-Key header).
+
+    The file is stored and segmented under the resolved project's namespace.
+    Queries from this project's client_key will only retrieve documents uploaded here.
+    """
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
@@ -74,14 +85,6 @@ async def upload_file(
                 detail="Text files must be UTF-8 encoded",
             ) from exc
 
-    project_id = None
-    if x_project_key:
-        svc = ProjectService(session)
-        project = svc.get_by_admin_key(x_project_key) or svc.get_by_client_key(x_project_key)
-        if not project:
-            raise HTTPException(status_code=401, detail="Invalid X-Project-Key.")
-        project_id = project.id
-
     upload_result = storage.upload_bytes(
         data,
         filename=safe_filename,
@@ -89,12 +92,13 @@ async def upload_file(
         resource_type=cloudinary_resource_type(modality),
     )
 
+    orchestrator = JobOrchestrator(session)
     file_record = orchestrator.create_file(
         filename=safe_filename,
         modality=modality,
         storage_path=upload_result.secure_url,
         size_bytes=len(data),
-        project_id=project_id,
+        project_id=project_ctx.project_id,
     )
     job = orchestrator.create_job(file_id=file_record.id, stage=ingestion_stage(modality))
     orchestrator.mark_file_status(file_record.id, FileStatus.PROCESSING)

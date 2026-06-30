@@ -5,6 +5,9 @@ from uuid import UUID, uuid4
 
 import tiktoken
 
+_NULL_UUID = UUID(int=0)  # Sentinel for files without a project_id (pre-multi-tenant legacy data)
+
+
 from app.core.config import Settings
 from app.models.file import FileModality, FileStatus
 from app.models.processing_job import JobStatus
@@ -155,12 +158,14 @@ class TextProcessor:
                     modality=FileModality.TEXT,
                     content=chunk,
                     segment_id=segment_id,
+                    project_id=file_record.project_id,
                 )
                 vector_segments.append(
                     VectorSegment(
                         id=segment_id,
                         vector=vector,
                         file_id=file_record.id,
+                        project_id=file_record.project_id or _NULL_UUID,
                         modality=FileModality.TEXT.value,
                         content=chunk,
                         source_path=file_record.storage_path,

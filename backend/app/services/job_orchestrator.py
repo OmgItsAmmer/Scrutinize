@@ -22,6 +22,7 @@ class JobOrchestrator:
         storage_path: str,
         size_bytes: int | None = None,
         duration_seconds: float | None = None,
+        project_id: UUID | None = None,
     ) -> File:
         file_record = File(
             filename=filename,
@@ -30,6 +31,7 @@ class JobOrchestrator:
             size_bytes=size_bytes,
             duration_seconds=duration_seconds,
             status=FileStatus.UPLOADED,
+            project_id=project_id,
         )
         self.session.add(file_record)
         self.session.commit()
@@ -79,8 +81,11 @@ class JobOrchestrator:
     def get_file(self, file_id: UUID) -> File | None:
         return self.session.get(File, file_id)
 
-    def list_files(self, *, limit: int = 100, offset: int = 0) -> list[File]:
-        statement = select(File).order_by(File.uploaded_at.desc()).offset(offset).limit(limit)
+    def list_files(self, *, limit: int = 100, offset: int = 0, project_id: UUID | None = None) -> list[File]:
+        statement = select(File)
+        if project_id is not None:
+            statement = statement.where(File.project_id == project_id)
+        statement = statement.order_by(File.uploaded_at.desc()).offset(offset).limit(limit)
         return list(self.session.exec(statement).all())
 
     def list_jobs_for_file(self, file_id: UUID) -> list[ProcessingJob]:
@@ -96,6 +101,7 @@ class JobOrchestrator:
         start_time: float | None = None,
         end_time: float | None = None,
         segment_id: UUID | None = None,
+        project_id: UUID | None = None,
     ) -> Segment:
         segment = Segment(
             id=segment_id or uuid4(),
@@ -104,6 +110,7 @@ class JobOrchestrator:
             content=content,
             start_time=start_time,
             end_time=end_time,
+            project_id=project_id,
         )
         self.session.add(segment)
         self.session.commit()

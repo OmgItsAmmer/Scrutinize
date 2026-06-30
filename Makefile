@@ -21,7 +21,13 @@ help:
 # --- Docker full stack ---
 
 up:
+	docker compose up
+
+up-build:
 	docker compose up --build
+
+build:
+	docker compose build
 
 down:
 	docker compose down -v

@@ -5,6 +5,7 @@ import { MobileNav } from "./components/MobileNav";
 import { SearchView } from "./components/SearchView";
 import { Sidebar } from "./components/Sidebar";
 import { UploadView } from "./components/UploadView";
+import { AuthView } from "./components/AuthView";
 
 function MainView() {
   const { state } = useApp();
@@ -22,6 +23,10 @@ function MainView() {
 
 export default function App() {
   const { state } = useApp();
+
+  if (!state.project) {
+    return <AuthView />;
+  }
 
   return (
     <div className="flex h-[100dvh] bg-[var(--chatly-bg)] text-[var(--chatly-text-primary)]">

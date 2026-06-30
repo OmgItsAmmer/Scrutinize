@@ -31,6 +31,7 @@ class VectorSegment:
     id: UUID
     vector: list[float]
     file_id: UUID
+    project_id: UUID  # Track project ownership for multi-tenant isolation.
     modality: str
     content: str
     source_path: str
@@ -100,7 +101,7 @@ class VectorStore:
         if not self.collection_exists():
             return
 
-        for field_name in ("file_id", "modality"):
+        for field_name in ("file_id", "modality", "project_id"):  # project_id indexed for tenant isolation
             try:
                 self._client.create_payload_index(
                     collection_name=self._collection,
@@ -161,6 +162,7 @@ class VectorStore:
                     vector=vector_dict,
                     payload={
                         "file_id": str(segment.file_id),
+                        "project_id": str(segment.project_id),  # tenant isolation key
                         "modality": segment.modality,
                         "content": segment.content,
                         "start_time": segment.start_time,
@@ -180,22 +182,29 @@ class VectorStore:
         self,
         query_vector: list[float],
         *,
+        project_id: UUID,  # Mandatory — every search is scoped to a single project.
         top_k: int = 10,
         modality: str | None = None,
         query_sparse_vector: SparseVector | dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         self.ensure_collection()
-        query_filter = None
+        # project_id filter is always present to enforce tenant isolation.
+        must_conditions: list[FieldCondition] = [
+            FieldCondition(key="project_id", match=MatchValue(value=str(project_id)))
+        ]
         if modality is not None:
-            query_filter = Filter(
-                must=[FieldCondition(key="modality", match=MatchValue(value=modality))]
+            must_conditions.append(
+                FieldCondition(key="modality", match=MatchValue(value=modality))
             )
+        query_filter = Filter(must=must_conditions)
 
         if query_sparse_vector is not None:
             sv = query_sparse_vector
             if not isinstance(sv, SparseVector):
                 if isinstance(sv, dict):
                     sv = SparseVector(indices=sv["indices"], values=sv["values"])
+                elif hasattr(sv, "indices") and hasattr(sv, "values"):
+                    sv = SparseVector(indices=list(sv.indices), values=list(sv.values))
 
             prefetch = [
                 Prefetch(

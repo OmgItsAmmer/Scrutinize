@@ -4,6 +4,8 @@ from uuid import UUID
 
 from sqlmodel import Session
 
+from app.models.project import Project  # noqa: F401
+
 from app.core.config import Settings, reload_settings
 from app.core.database import get_engine
 from app.services.audio_processor import AudioProcessor

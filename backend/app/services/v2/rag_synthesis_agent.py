@@ -26,8 +26,12 @@ class RagSynthesisAgent:
         query: str,
         sources: list[SearchSource],
         *,
+        model: str | None = None,
+        system_override: str | None = None,
         conversation_context: str = "",
     ) -> SynthesisResult:
+        effective_model = model or self._model
+        effective_system = system_override or self._system
         lines: list[str] = []
         for index, source in enumerate(sources, start=1):
             time_label = _format_time_range(source.start_time, source.end_time)
@@ -39,11 +43,12 @@ class RagSynthesisAgent:
         user_lines = [f"Question: {query.strip()}", "", "Sources:", *lines]
         append_conversation_context(user_lines, conversation_context)
 
-        llm_response = self._client.generate(self._model, self._system, "\n".join(user_lines))
+        llm_response = self._client.generate(effective_model, effective_system, "\n".join(user_lines))
         return SynthesisResult(
             answer=llm_response.content,
             llm_call=llm_response,
         )
+
 
 
 def _seconds_to_timestamp(seconds: float) -> str:

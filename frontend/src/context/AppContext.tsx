@@ -54,6 +54,13 @@ type LibraryState = {
   files: LibraryFileItem[];
 };
 
+type ProjectSessionState = {
+  projectId: string;
+  projectName: string;
+  apiKey: string;
+  clientKey: string;
+} | null;
+
 type AppState = {
   view: AppView;
   apiConnected: boolean;
@@ -62,6 +69,7 @@ type AppState = {
   search: SearchState;
   upload: UploadState;
   library: LibraryState;
+  project: ProjectSessionState;
 };
 
 type Action =
@@ -82,7 +90,9 @@ type Action =
   | { type: "LIBRARY_START" }
   | { type: "LIBRARY_SUCCESS"; files: LibraryFileItem[] }
   | { type: "LIBRARY_ERROR"; error: string }
-  | { type: "LIBRARY_FILE_REMOVED"; fileId: string };
+  | { type: "LIBRARY_FILE_REMOVED"; fileId: string }
+  | { type: "AUTH_SUCCESS"; project: NonNullable<ProjectSessionState> }
+  | { type: "AUTH_LOGOUT" };
 
 const initialState: AppState = {
   view: "search",
@@ -108,10 +118,48 @@ const initialState: AppState = {
     error: null,
     files: [],
   },
+  project: localStorage.getItem("scrutinize_project_id")
+    ? {
+        projectId: localStorage.getItem("scrutinize_project_id")!,
+        projectName: localStorage.getItem("scrutinize_project_name")!,
+        apiKey: localStorage.getItem("scrutinize_admin_key")!,
+        clientKey: localStorage.getItem("scrutinize_client_key")!,
+      }
+    : null,
 };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case "AUTH_SUCCESS":
+      return {
+        ...state,
+        project: action.project,
+        search: {
+          ...initialState.search,
+          conversation: emptyConversation(),
+        },
+        library: {
+          ...initialState.library,
+        },
+        upload: {
+          ...initialState.upload,
+        },
+      };
+    case "AUTH_LOGOUT":
+      return {
+        ...state,
+        project: null,
+        search: {
+          ...initialState.search,
+          conversation: emptyConversation(),
+        },
+        library: {
+          ...initialState.library,
+        },
+        upload: {
+          ...initialState.upload,
+        },
+      };
     case "SET_VIEW":
       return { ...state, view: action.view };
     case "SET_HEALTH":
@@ -245,6 +293,8 @@ type AppContextValue = {
   refreshLibrary: () => Promise<void>;
   deleteLibraryFile: (fileId: string) => Promise<void>;
   dismissUploadJob: (jobId: string) => void;
+  login: (projectName: string, apiKey: string, clientKey: string, projectId: string) => void;
+  logout: () => void;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -426,6 +476,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [state.apiConnected]);
 
+  const login = useCallback((projectName: string, apiKey: string, clientKey: string, projectId: string) => {
+    localStorage.setItem("scrutinize_project_id", projectId);
+    localStorage.setItem("scrutinize_project_name", projectName);
+    localStorage.setItem("scrutinize_admin_key", apiKey);
+    localStorage.setItem("scrutinize_client_key", clientKey);
+    dispatch({
+      type: "AUTH_SUCCESS",
+      project: { projectId, projectName, apiKey, clientKey },
+    });
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem("scrutinize_project_id");
+    localStorage.removeItem("scrutinize_project_name");
+    localStorage.removeItem("scrutinize_admin_key");
+    localStorage.removeItem("scrutinize_client_key");
+    dispatch({ type: "AUTH_LOGOUT" });
+  }, []);
+
   const value = useMemo<AppContextValue>(
     () => ({
       state,
@@ -440,8 +509,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshLibrary,
       deleteLibraryFile,
       dismissUploadJob: (jobId) => dispatch({ type: "UPLOAD_JOB_REMOVE", jobId }),
+      login,
+      logout,
     }),
-    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler],
+    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

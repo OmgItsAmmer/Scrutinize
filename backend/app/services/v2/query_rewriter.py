@@ -28,21 +28,24 @@ class QueryRewriter:
         query: str,
         feedback: str | None = None,
         *,
+        model: str | None = None,
         conversation_context: str = "",
     ) -> RewrittenQuery:
         stripped = query.strip()
         if is_standalone_message(stripped):
             return RewrittenQuery(text=stripped, llm_call=None)
 
+        effective_model = model or self._model
         user_lines = [f"User query: {stripped}"]
         if feedback and feedback.strip():
             user_lines.append(f"Revision feedback: {feedback.strip()}")
         append_conversation_context(user_lines, conversation_context)
 
         llm_response = self._client.generate(
-            self._model,
+            effective_model,
             self._system,
             "\n".join(user_lines),
         )
         rewritten = llm_response.content.strip() or stripped
         return RewrittenQuery(text=rewritten, llm_call=llm_response)
+

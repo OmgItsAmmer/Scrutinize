@@ -2,8 +2,9 @@ from pathlib import Path
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.responses import StreamingResponse
+from sqlmodel import Session
 
 from app.core.config import Settings
 from app.core.deps import (
@@ -11,7 +12,9 @@ from app.core.deps import (
     get_cloudinary_storage,
     get_job_orchestrator,
     get_vector_store,
+    get_db_session,
 )
+from app.services.project_service import ProjectService
 from app.schemas.library import DeleteFileResponse, LibraryFileItem, LibraryResponse
 from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.cloudinary_utils import thumbnail_url_for
@@ -61,8 +64,18 @@ def list_library(
     offset: int = Query(default=0, ge=0),
     orchestrator: JobOrchestrator = Depends(get_job_orchestrator),
     settings: Settings = Depends(get_app_settings),
+    x_project_key: str | None = Header(None, alias="X-Project-Key"),
+    session: Session = Depends(get_db_session),
 ) -> LibraryResponse:
-    files = orchestrator.list_files(limit=limit, offset=offset)
+    project_id = None
+    if x_project_key:
+        svc = ProjectService(session)
+        project = svc.get_by_admin_key(x_project_key) or svc.get_by_client_key(x_project_key)
+        if not project:
+            raise HTTPException(status_code=401, detail="Invalid X-Project-Key.")
+        project_id = project.id
+
+    files = orchestrator.list_files(limit=limit, offset=offset, project_id=project_id)
     items = [
         _to_library_item(
             file_record,
@@ -79,10 +92,25 @@ def stream_library_file_content(
     file_id: UUID,
     download: bool = Query(default=False),
     orchestrator: JobOrchestrator = Depends(get_job_orchestrator),
+    x_project_key: str | None = Header(None, alias="X-Project-Key"),
+    project_key: str | None = Query(None, alias="project_key"),
+    session: Session = Depends(get_db_session),
 ) -> StreamingResponse:
+    project_id = None
+    effective_key = x_project_key or project_key
+    if effective_key:
+        svc = ProjectService(session)
+        project = svc.get_by_admin_key(effective_key) or svc.get_by_client_key(effective_key)
+        if not project:
+            raise HTTPException(status_code=401, detail="Invalid project key.")
+        project_id = project.id
+
     file_record = orchestrator.get_file(file_id)
     if file_record is None:
         raise HTTPException(status_code=404, detail=f"File {file_id} not found")
+
+    if project_id and file_record.project_id != project_id:
+        raise HTTPException(status_code=403, detail="Access denied: File does not belong to your project.")
 
     media_type = content_type_for_filename(file_record.filename)
     disposition = "attachment" if download else "inline"
@@ -123,7 +151,24 @@ def delete_library_file(
     storage: CloudinaryStorage = Depends(get_cloudinary_storage),
     vector_store: VectorStore = Depends(get_vector_store),
     settings: Settings = Depends(get_app_settings),
+    x_project_key: str | None = Header(None, alias="X-Project-Key"),
+    session: Session = Depends(get_db_session),
 ) -> DeleteFileResponse:
+    project_id = None
+    if x_project_key:
+        svc = ProjectService(session)
+        project = svc.get_by_admin_key(x_project_key) or svc.get_by_client_key(x_project_key)
+        if not project:
+            raise HTTPException(status_code=401, detail="Invalid X-Project-Key.")
+        project_id = project.id
+
+    file_record = orchestrator.get_file(file_id)
+    if file_record is None:
+        raise HTTPException(status_code=404, detail=f"File {file_id} not found")
+
+    if project_id and file_record.project_id != project_id:
+        raise HTTPException(status_code=403, detail="Access denied: File does not belong to your project.")
+
     service = FileDeletionService(orchestrator, storage, vector_store, settings)
     try:
         service.delete_file(file_id)

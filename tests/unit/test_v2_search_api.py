@@ -32,6 +32,7 @@ def test_v2_search_endpoint_generic(client):
     assert body["answer"] == "Hi there!"
     mock_orchestrator.search.assert_called_once_with(
         "Hello",
+        project_ctx=None,
         modality_filter=None,
         conversation=None,
     )

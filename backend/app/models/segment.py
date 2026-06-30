@@ -11,8 +11,12 @@ class Segment(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     file_id: UUID = Field(foreign_key="files.id", index=True)
+    # Multi-tenant: denormalized for fast per-project DB queries (avoid join through files).
+    # Nullable for legacy rows that predate multi-tenancy.
+    project_id: UUID | None = Field(default=None, foreign_key="projects.id", index=True)
     modality: FileModality
     content: str
     start_time: float | None = None
     end_time: float | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+

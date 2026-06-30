@@ -7,6 +7,7 @@ from sqlmodel import Session
 from app.core.config import Settings
 from app.models.file import FileModality
 from app.schemas.search import SearchSource
+from app.schemas.v2.project import ProjectContext
 from app.schemas.v2.search import ConversationState, SearchV2Response, SearchV2Route
 from app.services.v2.conversation_memory import ConversationMemory
 from app.services.v2.decision_agent import DecisionAgent, DecisionContext
@@ -52,6 +53,7 @@ class PipelineOrchestrator:
         self,
         query: str,
         *,
+        project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
     ) -> SearchV2Response:
@@ -66,6 +68,10 @@ class PipelineOrchestrator:
 
         gate_result = self._gate.classify(
             stripped,
+            model=project_ctx.gate_model if project_ctx else None,
+            system_override=(
+                project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
+            ),
             conversation_context=conversation_context,
         )
         self._db_logger.log_gate(
@@ -81,6 +87,7 @@ class PipelineOrchestrator:
                 conv_state=conv_state,
                 modality_filter=modality_filter,
                 conversation_context=conversation_context,
+                project_ctx=project_ctx,
             )
         else:
             response = self._run_rag_pipeline(
@@ -90,6 +97,7 @@ class PipelineOrchestrator:
                 conv_state=conv_state,
                 conversation_context=conversation_context,
                 modality_filter=modality_filter,
+                project_ctx=project_ctx,
             )
 
         self._db_logger.end_run(
@@ -111,6 +119,7 @@ class PipelineOrchestrator:
         conv_state: ConversationState,
         modality_filter: FileModality | None,
         conversation_context: str,
+        project_ctx: ProjectContext | None = None,
     ) -> SearchV2Response:
         if gate_result.reply:
             answer = gate_result.reply
@@ -132,7 +141,8 @@ class PipelineOrchestrator:
                 sources=[],
                 attempt=1,
                 conversation_context=conversation_context,
-            )
+            ),
+            model=project_ctx.decision_model if project_ctx else None,
         )
         self._db_logger.log_evaluation(
             run_id=run_id,
@@ -171,6 +181,7 @@ class PipelineOrchestrator:
                 conv_state=conv_state,
                 conversation_context=conversation_context,
                 modality_filter=modality_filter,
+                project_ctx=project_ctx,
             )
 
         updated_conversation = self._memory.record_exchange(conv_state, query, answer)
@@ -196,9 +207,16 @@ class PipelineOrchestrator:
         conv_state: ConversationState,
         conversation_context: str,
         modality_filter: FileModality | None,
+        project_ctx: ProjectContext | None = None,
     ) -> SearchV2Response:
-        max_attempts = max(1, self._settings.v2_max_pipeline_attempts)
-        threshold = self._settings.v2_confidence_threshold
+        max_attempts = (
+            project_ctx.max_attempts if project_ctx else max(1, self._settings.v2_max_pipeline_attempts)
+        )
+        threshold = (
+            project_ctx.confidence_threshold if project_ctx else self._settings.v2_confidence_threshold
+        )
+        # Sentinel project_id when no context provided (legacy / un-tenanted call)
+        project_id = project_ctx.project_id if project_ctx else UUID(int=0)
 
         prev_feedback: str | None = None
         rewritten_text = stripped
@@ -210,6 +228,7 @@ class PipelineOrchestrator:
             rewritten = self._rewriter.rewrite(
                 stripped,
                 prev_feedback,
+                model=project_ctx.rewriter_model if project_ctx else None,
                 conversation_context=conversation_context,
             )
             rewritten_text = rewritten.text
@@ -221,6 +240,7 @@ class PipelineOrchestrator:
 
             sources = self._rrf.retrieve(
                 rewritten_text,
+                project_id=project_id,
                 modality_filter=modality_filter,
             )
             self._db_logger.log_retrieval(
@@ -244,6 +264,10 @@ class PipelineOrchestrator:
                 synthesis_result = self._rag_synthesis.synthesize(
                     stripped,
                     sources,
+                    model=project_ctx.synthesis_model if project_ctx else None,
+                    system_override=(
+                        project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
+                    ),
                     conversation_context=conversation_context,
                 )
                 answer = synthesis_result.answer
@@ -262,7 +286,8 @@ class PipelineOrchestrator:
                     sources=sources,
                     attempt=attempt,
                     conversation_context=conversation_context,
-                )
+                ),
+                model=project_ctx.decision_model if project_ctx else None,
             )
             confidence = decision.confidence
             self._db_logger.log_evaluation(

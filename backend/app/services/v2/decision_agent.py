@@ -43,7 +43,8 @@ class DecisionAgent:
         self._model = settings.local_llm_decision_model
         self._system = load_prompt("decision_agent_system.txt")
 
-    def evaluate(self, context: DecisionContext) -> DecisionResult:
+    def evaluate(self, context: DecisionContext, *, model: str | None = None) -> DecisionResult:
+        effective_model = model or self._model
         chunk_lines = _format_chunk_summaries(context.sources)
         user_lines = [
             f"Attempt: {context.attempt}",
@@ -57,7 +58,12 @@ class DecisionAgent:
 
         llm_response = None
         try:
-            llm_response = self._client.generate(self._model, self._system, "\n".join(user_lines))
+            llm_response = self._client.generate(
+                effective_model,
+                self._system,
+                "\n".join(user_lines),
+                json_mode=True,
+            )
             raw = llm_response.content
             data = parse_json_object(raw)
             verdict_raw = str(data.get("verdict", "retry")).strip().lower()
@@ -83,6 +89,7 @@ class DecisionAgent:
                 feedback=f"Decision failed; defaulting to retry: {exc}",
                 llm_call=llm_response,
             )
+
 
 
 def _format_chunk_summaries(sources: list[SearchSource]) -> str:

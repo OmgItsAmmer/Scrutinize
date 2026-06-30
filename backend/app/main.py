@@ -16,6 +16,7 @@ from app.models.pipeline_log import (  # noqa: F401
     PipelineStep,
 )
 from app.models.processing_job import ProcessingJob  # noqa: F401
+from app.models.project import Project  # noqa: F401
 from app.models.segment import Segment  # noqa: F401
 
 logger = logging.getLogger(__name__)

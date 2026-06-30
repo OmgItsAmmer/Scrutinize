@@ -19,6 +19,7 @@ def test_upsert_segments_creates_collection_when_missing():
         id=uuid4(),
         vector=[0.1, 0.2],
         file_id=uuid4(),
+        project_id=uuid4(),
         modality="text",
         content="hello",
         source_path="https://example.com/a.txt",
@@ -41,7 +42,7 @@ def test_search_applies_modality_filter():
     store._client.query_points.return_value = MagicMock(points=[])
 
     with patch.object(store, "ensure_collection"):
-        store.search([0.1, 0.2], top_k=5, modality="text")
+        store.search([0.1, 0.2], project_id=uuid4(), top_k=5, modality="text")
 
     _, kwargs = store._client.query_points.call_args
     assert kwargs["limit"] == 5
@@ -59,7 +60,7 @@ def test_delete_by_file_id_uses_filter_selector():
 
     store.delete_by_file_id(file_id)
 
-    assert store._client.create_payload_index.call_count == 2
+    assert store._client.create_payload_index.call_count == 3  # file_id, modality, project_id
     store._client.delete.assert_called_once()
     _, kwargs = store._client.delete.call_args
     assert kwargs["collection_name"] == "segments-test"
