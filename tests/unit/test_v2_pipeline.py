@@ -17,6 +17,7 @@ from app.services.v2.query_rewriter import RewrittenQuery
 from app.services.v2.rag_gate import GateResult
 from app.services.v2.generic_agent import GenericReplyResult
 from app.services.v2.rag_synthesis_agent import SynthesisResult
+from app.services.v2.retrieval_utils import RetrieveResult, RetrievalStats
 
 
 def _settings(**overrides: object) -> Settings:
@@ -27,6 +28,10 @@ def _settings(**overrides: object) -> Settings:
     }
     defaults.update(overrides)
     return Settings(**defaults)
+
+
+def _retrieve_result(sources: list[SearchSource]) -> RetrieveResult:
+    return RetrieveResult(sources=sources, stats=RetrievalStats.empty())
 
 
 def _memory_mock() -> MagicMock:
@@ -145,7 +150,7 @@ def test_pipeline_generic_escalates_to_rag_when_decision_says_so():
         source_path="https://example.com/pasta.md",
         score=0.9,
     )
-    rrf.retrieve.return_value = [source]
+    rrf.retrieve.return_value = _retrieve_result([source])
     synthesis = MagicMock()
     synthesis.synthesize.return_value = SynthesisResult(answer="The recipe uses two cloves of garlic.")
     decision = MagicMock()
@@ -214,7 +219,7 @@ def test_pipeline_orchestrator_rag_with_synthesis():
         source_path="https://example.com/pasta.md",
         score=0.9,
     )
-    rrf.retrieve.return_value = [source]
+    rrf.retrieve.return_value = _retrieve_result([source])
     synthesis = MagicMock()
     synthesis.synthesize.return_value = SynthesisResult(answer="The recipe uses two cloves of garlic.")
     decision = MagicMock()
@@ -242,7 +247,7 @@ def test_pipeline_orchestrator_rag_empty_results():
     gate.classify.return_value = GateResult(route="rag", reason="Library query")
     generic = MagicMock()
     rrf = MagicMock()
-    rrf.retrieve.return_value = []
+    rrf.retrieve.return_value = _retrieve_result([])
     synthesis = MagicMock()
     decision = MagicMock()
     decision.evaluate.return_value = DecisionResult(
@@ -269,7 +274,7 @@ def test_pipeline_orchestrator_retries_then_succeeds():
     gate.classify.return_value = GateResult(route="rag", reason="Library query")
     generic = MagicMock()
     rrf = MagicMock()
-    rrf.retrieve.return_value = []
+    rrf.retrieve.return_value = _retrieve_result([])
     synthesis = MagicMock()
     decision = MagicMock()
     decision.evaluate.side_effect = [
@@ -299,7 +304,7 @@ def test_pipeline_orchestrator_fallback_disclaimer_after_max_attempts():
     gate.classify.return_value = GateResult(route="rag", reason="Library query")
     generic = MagicMock()
     rrf = MagicMock()
-    rrf.retrieve.return_value = []
+    rrf.retrieve.return_value = _retrieve_result([])
     synthesis = MagicMock()
     decision = MagicMock()
     decision.evaluate.return_value = DecisionResult(

@@ -12,6 +12,7 @@ from app.schemas.v2.project import (
     ProjectInfoResponse,
     ProjectSignupRequest,
     ProjectLoginRequest,
+    ProjectSettings,
 )
 from app.services.project_service import ProjectService
 
@@ -93,3 +94,39 @@ def get_project_info(
         name=project.name,
         settings=project.settings,
     )
+
+
+@router.patch("/me", response_model=ProjectInfoResponse)
+def update_project_settings(
+    body: ProjectSettings,
+    project_ctx: ProjectContext = Depends(get_project_from_admin_key),
+    session: Session = Depends(get_db_session),
+) -> ProjectInfoResponse:
+    """Update settings (models, thresholds, and system prompt overrides) for the authenticated project."""
+    svc = ProjectService(session)
+    project = svc.get_by_id(project_ctx.project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    current_settings = project.settings or {}
+    body_dict = body.model_dump(exclude_unset=True)
+    if "system_prompt_overrides" in body_dict:
+        existing_overrides = current_settings.get("system_prompt_overrides", {})
+        existing_overrides.update(body_dict["system_prompt_overrides"])
+        body_dict["system_prompt_overrides"] = existing_overrides
+
+    current_settings.update(body_dict)
+    project.settings = current_settings
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(project, "settings")
+
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+
+    return ProjectInfoResponse(
+        project_id=project.id,
+        name=project.name,
+        settings=project.settings,
+    )
+

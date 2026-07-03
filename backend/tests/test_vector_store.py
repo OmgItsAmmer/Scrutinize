@@ -31,24 +31,26 @@ def test_vector_store_initialization(in_memory_vector_store: VectorStore):
 def test_upsert_and_retrieve_dense_only(in_memory_vector_store: VectorStore):
     segment_id = uuid.uuid4()
     file_id = uuid.uuid4()
-    
+    project_id = uuid.uuid4()
+
     segment = VectorSegment(
         id=segment_id,
         vector=[0.1, 0.2, 0.3, 0.4],
         file_id=file_id,
+        project_id=project_id,
         modality="text",
         content="This is a test document about artificial intelligence.",
         source_path="http://cloudinary.com/test",
         title="test_file.txt",
         created_at=datetime.now(UTC),
     )
-    
+
     in_memory_vector_store.upsert_segments([segment])
     assert in_memory_vector_store.count_points() == 1
-    
-    # Retrieve using dense only
+
     hits = in_memory_vector_store.search(
         query_vector=[0.1, 0.2, 0.3, 0.4],
+        project_id=project_id,
         top_k=1,
     )
     assert len(hits) == 1
@@ -59,11 +61,13 @@ def test_upsert_and_retrieve_dense_only(in_memory_vector_store: VectorStore):
 def test_upsert_with_sparse_vector_generation(in_memory_vector_store: VectorStore):
     segment_id = uuid.uuid4()
     file_id = uuid.uuid4()
-    
+    project_id = uuid.uuid4()
+
     segment = VectorSegment(
         id=segment_id,
         vector=[0.5, 0.5, 0.5, 0.5],
         file_id=file_id,
+        project_id=project_id,
         modality="text",
         content="Deep learning and machine learning systems.",
         source_path="http://cloudinary.com/test2",
@@ -91,11 +95,13 @@ def test_upsert_with_sparse_vector_generation(in_memory_vector_store: VectorStor
 def test_hybrid_search_rrf(in_memory_vector_store: VectorStore):
     segment_id = uuid.uuid4()
     file_id = uuid.uuid4()
-    
+    project_id = uuid.uuid4()
+
     segment = VectorSegment(
         id=segment_id,
         vector=[0.1, 0.0, 0.0, 0.9],
         file_id=file_id,
+        project_id=project_id,
         modality="text",
         content="Search index optimization with hybrid search.",
         source_path="http://cloudinary.com/test3",
@@ -109,6 +115,7 @@ def test_hybrid_search_rrf(in_memory_vector_store: VectorStore):
     
     hits = in_memory_vector_store.search(
         query_vector=[0.1, 0.0, 0.0, 0.9],
+        project_id=project_id,
         top_k=5,
         query_sparse_vector=query_sparse,
     )

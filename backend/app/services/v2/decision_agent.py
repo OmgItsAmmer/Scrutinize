@@ -43,8 +43,15 @@ class DecisionAgent:
         self._model = settings.local_llm_decision_model
         self._system = load_prompt("decision_agent_system.txt")
 
-    def evaluate(self, context: DecisionContext, *, model: str | None = None) -> DecisionResult:
+    def evaluate(
+        self,
+        context: DecisionContext,
+        *,
+        model: str | None = None,
+        system_override: str | None = None,
+    ) -> DecisionResult:
         effective_model = model or self._model
+        effective_system = system_override or self._system
         chunk_lines = _format_chunk_summaries(context.sources)
         user_lines = [
             f"Attempt: {context.attempt}",
@@ -60,7 +67,7 @@ class DecisionAgent:
         try:
             llm_response = self._client.generate(
                 effective_model,
-                self._system,
+                effective_system,
                 "\n".join(user_lines),
                 json_mode=True,
             )

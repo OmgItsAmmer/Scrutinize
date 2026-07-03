@@ -15,7 +15,7 @@ class SearchV2Route(StrEnum):
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=4000)
+    content: str = Field(min_length=1, max_length=32000)
     timestamp: datetime | None = None
 
 

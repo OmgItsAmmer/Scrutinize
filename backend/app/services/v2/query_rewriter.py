@@ -29,6 +29,7 @@ class QueryRewriter:
         feedback: str | None = None,
         *,
         model: str | None = None,
+        system_override: str | None = None,
         conversation_context: str = "",
     ) -> RewrittenQuery:
         stripped = query.strip()
@@ -36,6 +37,7 @@ class QueryRewriter:
             return RewrittenQuery(text=stripped, llm_call=None)
 
         effective_model = model or self._model
+        effective_system = system_override or self._system
         user_lines = [f"User query: {stripped}"]
         if feedback and feedback.strip():
             user_lines.append(f"Revision feedback: {feedback.strip()}")
@@ -43,9 +45,10 @@ class QueryRewriter:
 
         llm_response = self._client.generate(
             effective_model,
-            self._system,
+            effective_system,
             "\n".join(user_lines),
         )
         rewritten = llm_response.content.strip() or stripped
         return RewrittenQuery(text=rewritten, llm_call=llm_response)
+
 

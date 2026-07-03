@@ -113,7 +113,69 @@ Here is how the requested pipeline attributes map to the columns of the proposed
 
 ---
 
-## 4. Querying the Whole Pipeline Tracing
+## 4. Retrieval Step Metrics (Hybrid Search Debugging)
+
+For `step_type = 'retrieval'`, `structured_output` includes a `retrieval` object with hybrid-search counts. Terminology:
+
+| Term | Meaning |
+| :--- | :--- |
+| **semantic** | Dense vector prefetch (`text_vector` / embedding similarity) |
+| **keyword** | Sparse vector prefetch (`sparse_vector` / BM25 lexical match) |
+
+> **Note:** This is keyword search over chunk `content`, not file-metadata search (title, path, etc. are not indexed for BM25).
+
+### Run-level counts (`structured_output.retrieval`)
+
+| Field | Description |
+| :--- | :--- |
+| `semantic_prefetch_count` | Chunks returned by the dense prefetch before fusion |
+| `keyword_prefetch_count` | Chunks returned by the sparse/BM25 prefetch before fusion |
+| `qdrant_retrieved_count` | Final fused chunk count returned to the pipeline |
+| `sparse_query_dimensions` | Non-zero sparse dimensions in the query (keyword signal strength) |
+| `rrf.k` | RRF smoothing constant (default `60`, env `V2_RRF_K`) |
+| `rrf.fused_count` | Same as `qdrant_retrieved_count` |
+| `rrf.semantic_only` | Fused results that appeared **only** in the semantic list |
+| `rrf.keyword_only` | Fused results that appeared **only** in the keyword/BM25 list |
+| `rrf.both_lists` | Fused results that appeared in **both** prefetches |
+
+### Per-source fields (`retrieved_sources[]`)
+
+Each retrieved source snapshot also includes:
+
+| Field | Description |
+| :--- | :--- |
+| `semantic_rank` | Rank in dense prefetch (`null` if absent) |
+| `keyword_rank` | Rank in sparse/BM25 prefetch (`null` if absent) |
+| `in_semantic_list` | Whether the chunk was in the dense prefetch |
+| `in_keyword_list` | Whether the chunk was in the sparse prefetch |
+| `score` | Fused RRF score (not raw cosine/BM25) |
+| `rank` | Final fused rank (1-based) |
+
+### Example SQL — keyword vs semantic balance
+
+```sql
+SELECT
+    r.original_query,
+    s.attempt,
+    s.structured_output->'retrieval'->>'semantic_prefetch_count' AS semantic_prefetch,
+    s.structured_output->'retrieval'->>'keyword_prefetch_count' AS keyword_prefetch,
+    s.structured_output->'retrieval'->'rrf'->>'semantic_only' AS rrf_semantic_only,
+    s.structured_output->'retrieval'->'rrf'->>'keyword_only' AS rrf_keyword_only,
+    s.structured_output->'retrieval'->'rrf'->>'both_lists' AS rrf_both,
+    s.structured_output->'retrieval'->>'sparse_query_dimensions' AS sparse_dims,
+    s.latency_ms
+FROM pipeline_runs r
+JOIN pipeline_steps s ON s.run_id = r.id
+WHERE s.step_type = 'retrieval'
+ORDER BY r.created_at DESC
+LIMIT 20;
+```
+
+**Debugging weak keyword search:** if `keyword_prefetch_count = 0` or `sparse_query_dimensions` is very low, the BM25 query signal is weak. If `rrf.keyword_only = 0` consistently, keyword retrieval is not contributing unique hits to fusion.
+
+---
+
+## 5. Querying the Whole Pipeline Tracing
 
 To extract the full pipeline trace from start to finish, you only need a single simple join:
 

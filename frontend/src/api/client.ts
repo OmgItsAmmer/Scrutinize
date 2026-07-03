@@ -156,3 +156,16 @@ export function signupProject(name: string, password: string, settings: Record<s
     body: JSON.stringify({ name, password, settings }),
   });
 }
+
+export function fetchProjectInfo(): Promise<{ project_id: string; name: string; settings: Record<string, any> }> {
+  return request<{ project_id: string; name: string; settings: Record<string, any> }>("/v2/projects/me");
+}
+
+export function updateProjectSettings(settings: Record<string, any>): Promise<{ project_id: string; name: string; settings: Record<string, any> }> {
+  return request<{ project_id: string; name: string; settings: Record<string, any> }>("/v2/projects/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+}
+

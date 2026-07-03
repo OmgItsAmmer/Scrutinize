@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     v2_max_pipeline_attempts: int = 2
     v2_confidence_threshold: float = 0.7
     v2_rrf_top_k: int = 5
+    v2_rrf_k: int = 60
     v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
 
     # Cloudinary — raw file uploads (text, audio, video); relational data lives in Neon.

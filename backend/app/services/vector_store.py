@@ -42,6 +42,16 @@ class VectorSegment:
     sparse_vector: SparseVector | dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class HybridSearchResult:
+    """Dense+sparse prefetch lists and client-side RRF fused hits."""
+
+    hits: list[dict[str, Any]]
+    dense_hits: list[dict[str, Any]]
+    sparse_hits: list[dict[str, Any]]
+    stats: Any  # RetrievalStats — typed lazily to avoid circular import
+
+
 class VectorStore:
     """Qdrant client wrapper for the segments collection."""
 
@@ -178,6 +188,44 @@ class VectorStore:
 
         self._client.upsert(collection_name=self._collection, points=points)
 
+    def _build_query_filter(
+        self,
+        *,
+        project_id: UUID,
+        modality: str | None,
+    ) -> Filter:
+        must_conditions: list[FieldCondition] = [
+            FieldCondition(key="project_id", match=MatchValue(value=str(project_id)))
+        ]
+        if modality is not None:
+            must_conditions.append(
+                FieldCondition(key="modality", match=MatchValue(value=modality))
+            )
+        return Filter(must=must_conditions)
+
+    @staticmethod
+    def _normalize_sparse_vector(
+        query_sparse_vector: SparseVector | dict[str, Any],
+    ) -> SparseVector:
+        sv = query_sparse_vector
+        if not isinstance(sv, SparseVector):
+            if isinstance(sv, dict):
+                return SparseVector(indices=sv["indices"], values=sv["values"])
+            if hasattr(sv, "indices") and hasattr(sv, "values"):
+                return SparseVector(indices=list(sv.indices), values=list(sv.values))
+        return sv
+
+    @staticmethod
+    def _points_to_hits(points: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": point.id,
+                "score": point.score,
+                "payload": point.payload,
+            }
+            for point in points
+        ]
+
     def search(
         self,
         query_vector: list[float],
@@ -188,23 +236,10 @@ class VectorStore:
         query_sparse_vector: SparseVector | dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         self.ensure_collection()
-        # project_id filter is always present to enforce tenant isolation.
-        must_conditions: list[FieldCondition] = [
-            FieldCondition(key="project_id", match=MatchValue(value=str(project_id)))
-        ]
-        if modality is not None:
-            must_conditions.append(
-                FieldCondition(key="modality", match=MatchValue(value=modality))
-            )
-        query_filter = Filter(must=must_conditions)
+        query_filter = self._build_query_filter(project_id=project_id, modality=modality)
 
         if query_sparse_vector is not None:
-            sv = query_sparse_vector
-            if not isinstance(sv, SparseVector):
-                if isinstance(sv, dict):
-                    sv = SparseVector(indices=sv["indices"], values=sv["values"])
-                elif hasattr(sv, "indices") and hasattr(sv, "values"):
-                    sv = SparseVector(indices=list(sv.indices), values=list(sv.values))
+            sv = self._normalize_sparse_vector(query_sparse_vector)
 
             prefetch = [
                 Prefetch(
@@ -234,14 +269,57 @@ class VectorStore:
                 query_filter=query_filter,
             )
 
-        return [
-            {
-                "id": point.id,
-                "score": point.score,
-                "payload": point.payload,
-            }
-            for point in response.points
-        ]
+        return self._points_to_hits(response.points)
+
+    def search_hybrid(
+        self,
+        query_vector: list[float],
+        *,
+        project_id: UUID,
+        top_k: int = 10,
+        modality: str | None = None,
+        query_sparse_vector: SparseVector | dict[str, Any],
+        rrf_k: int = 60,
+    ) -> HybridSearchResult:
+        """Run separate dense and sparse prefetches, fuse with RRF, return all lists."""
+        from app.services.v2.retrieval_utils import fuse_rrf_hits
+
+        self.ensure_collection()
+        query_filter = self._build_query_filter(project_id=project_id, modality=modality)
+        sv = self._normalize_sparse_vector(query_sparse_vector)
+
+        dense_response = self._client.query_points(
+            collection_name=self._collection,
+            query=query_vector,
+            using=self.TEXT_VECTOR_NAME,
+            limit=top_k,
+            query_filter=query_filter,
+        )
+        sparse_response = self._client.query_points(
+            collection_name=self._collection,
+            query=sv,
+            using="sparse_vector",
+            limit=top_k,
+            query_filter=query_filter,
+        )
+
+        dense_hits = self._points_to_hits(dense_response.points)
+        sparse_hits = self._points_to_hits(sparse_response.points)
+        sparse_dims = len(sv.indices) if sv.indices is not None else 0
+
+        fused_hits, stats = fuse_rrf_hits(
+            dense_hits,
+            sparse_hits,
+            k=rrf_k,
+            top_k=top_k,
+            sparse_query_dimensions=sparse_dims,
+        )
+        return HybridSearchResult(
+            hits=fused_hits,
+            dense_hits=dense_hits,
+            sparse_hits=sparse_hits,
+            stats=stats,
+        )
 
     def count_points(self) -> int:
         if not self.collection_exists():

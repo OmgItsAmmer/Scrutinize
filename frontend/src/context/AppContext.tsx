@@ -18,6 +18,8 @@ import {
   isLocalDevApi,
   searchContent,
   uploadFile,
+  fetchProjectInfo as fetchProjectInfoApi,
+  updateProjectSettings as updateProjectSettingsApi,
 } from "../api/client";
 import type {
   AppView,
@@ -59,6 +61,7 @@ type ProjectSessionState = {
   projectName: string;
   apiKey: string;
   clientKey: string;
+  settings?: Record<string, any>;
 } | null;
 
 type AppState = {
@@ -92,7 +95,8 @@ type Action =
   | { type: "LIBRARY_ERROR"; error: string }
   | { type: "LIBRARY_FILE_REMOVED"; fileId: string }
   | { type: "AUTH_SUCCESS"; project: NonNullable<ProjectSessionState> }
-  | { type: "AUTH_LOGOUT" };
+  | { type: "AUTH_LOGOUT" }
+  | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any> };
 
 const initialState: AppState = {
   view: "search",
@@ -275,6 +279,15 @@ function reducer(state: AppState, action: Action): AppState {
           files: state.library.files.filter((file) => file.id !== action.fileId),
         },
       };
+    case "PROJECT_SETTINGS_UPDATED":
+      if (!state.project) return state;
+      return {
+        ...state,
+        project: {
+          ...state.project,
+          settings: action.settings,
+        },
+      };
     default:
       return state;
   }
@@ -293,8 +306,10 @@ type AppContextValue = {
   refreshLibrary: () => Promise<void>;
   deleteLibraryFile: (fileId: string) => Promise<void>;
   dismissUploadJob: (jobId: string) => void;
-  login: (projectName: string, apiKey: string, clientKey: string, projectId: string) => void;
+  login: (projectName: string, apiKey: string, clientKey: string, projectId: string, settings?: Record<string, any>) => void;
   logout: () => void;
+  updateSettings: (settings: Record<string, any>) => Promise<void>;
+  fetchSettings: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -476,16 +491,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [state.apiConnected]);
 
-  const login = useCallback((projectName: string, apiKey: string, clientKey: string, projectId: string) => {
+  const login = useCallback((projectName: string, apiKey: string, clientKey: string, projectId: string, settings?: Record<string, any>) => {
     localStorage.setItem("scrutinize_project_id", projectId);
     localStorage.setItem("scrutinize_project_name", projectName);
     localStorage.setItem("scrutinize_admin_key", apiKey);
     localStorage.setItem("scrutinize_client_key", clientKey);
     dispatch({
       type: "AUTH_SUCCESS",
-      project: { projectId, projectName, apiKey, clientKey },
+      project: { projectId, projectName, apiKey, clientKey, settings },
     });
   }, []);
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const response = await fetchProjectInfoApi();
+      dispatch({ type: "PROJECT_SETTINGS_UPDATED", settings: response.settings });
+    } catch (error) {
+      console.error("Failed to fetch project settings", error);
+    }
+  }, []);
+
+  const updateSettings = useCallback(async (newSettings: Record<string, any>) => {
+    try {
+      const response = await updateProjectSettingsApi(newSettings);
+      dispatch({ type: "PROJECT_SETTINGS_UPDATED", settings: response.settings });
+    } catch (error) {
+      console.error("Failed to update project settings", error);
+      throw error;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (state.project && !state.project.settings && state.apiConnected) {
+      void fetchSettings();
+    }
+  }, [state.project, state.apiConnected, fetchSettings]);
 
   const logout = useCallback(() => {
     localStorage.removeItem("scrutinize_project_id");
@@ -511,8 +551,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissUploadJob: (jobId) => dispatch({ type: "UPLOAD_JOB_REMOVE", jobId }),
       login,
       logout,
+      updateSettings,
+      fetchSettings,
     }),
-    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout],
+    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout, updateSettings, fetchSettings],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

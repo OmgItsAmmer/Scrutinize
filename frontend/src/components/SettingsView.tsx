@@ -1,11 +1,34 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import { IconCopy, IconEye, IconEyeOff } from "./icons";
 
 export function SettingsView() {
-  const { state } = useApp();
+  const { state, updateSettings } = useApp();
   const [showKeys, setShowKeys] = useState(false);
   const [copiedKey, setCopiedKey] = useState<"api" | "client" | null>(null);
+
+  // States for prompt overrides
+  const [gatePrompt, setGatePrompt] = useState("");
+  const [rewriterPrompt, setRewriterPrompt] = useState("");
+  const [genericPrompt, setGenericPrompt] = useState("");
+  const [synthesisPrompt, setSynthesisPrompt] = useState("");
+  const [decisionPrompt, setDecisionPrompt] = useState("");
+
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const [errorText, setErrorText] = useState("");
+
+  // Sync prompts state when settings load
+  useEffect(() => {
+    if (state.project?.settings) {
+      const overrides = state.project.settings.system_prompt_overrides || {};
+      setGatePrompt(overrides.gate || "");
+      setRewriterPrompt(overrides.rewriter || "");
+      setGenericPrompt(overrides.generic || "");
+      setSynthesisPrompt(overrides.synthesis || "");
+      setDecisionPrompt(overrides.decision || "");
+    }
+  }, [state.project?.settings]);
 
   const handleCopy = (text: string, type: "api" | "client") => {
     navigator.clipboard.writeText(text);
@@ -13,18 +36,45 @@ export function SettingsView() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  const handleSavePrompts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setSaveStatus("idle");
+    setErrorText("");
+
+    try {
+      await updateSettings({
+        system_prompt_overrides: {
+          gate: gatePrompt.trim() || undefined,
+          rewriter: rewriterPrompt.trim() || undefined,
+          generic: genericPrompt.trim() || undefined,
+          synthesis: synthesisPrompt.trim() || undefined,
+          decision: decisionPrompt.trim() || undefined,
+        },
+      });
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch (err: any) {
+      setSaveStatus("error");
+      setErrorText(err?.message || "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!state.project) return null;
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-zinc-50 p-6 lg:p-8">
-      <div className="mx-auto w-full max-w-2xl">
-        <div className="mb-8">
+      <div className="mx-auto w-full max-w-2xl space-y-8">
+        <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Project Settings</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Manage your project credentials and API keys.
+            Manage your project credentials, API keys, and customize agent prompts.
           </p>
         </div>
 
+        {/* API Keys Card */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="mb-6 flex items-center justify-between">
             <div>
@@ -84,6 +134,101 @@ export function SettingsView() {
             </div>
           </div>
         </div>
+
+        {/* LLM Prompts Card */}
+        <form onSubmit={handleSavePrompts} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-6">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-900">Agent Prompts</h2>
+            <p className="text-sm text-zinc-500">
+              Customize the system prompts for each agent in the Scrutinize pipeline. Leave empty to use the system defaults.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Gate */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">1. RAG Gate Prompt</label>
+              <p className="text-xs text-zinc-500">Routes the user query to generic conversation or RAG search.</p>
+              <textarea
+                value={gatePrompt}
+                onChange={(e) => setGatePrompt(e.target.value)}
+                placeholder="Default RAG gate prompt..."
+                rows={3}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+
+            {/* Rewriter */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">2. Query Rewriter Prompt</label>
+              <p className="text-xs text-zinc-500">Rewrites user queries for optimal keyword retrieval.</p>
+              <textarea
+                value={rewriterPrompt}
+                onChange={(e) => setRewriterPrompt(e.target.value)}
+                placeholder="Default query rewriter prompt..."
+                rows={3}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+
+            {/* Generic Agent */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">3. Generic Agent Prompt</label>
+              <p className="text-xs text-zinc-500">Handles chit-chat and general knowledge queries directly without RAG search.</p>
+              <textarea
+                value={genericPrompt}
+                onChange={(e) => setGenericPrompt(e.target.value)}
+                placeholder="Default generic agent prompt..."
+                rows={3}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+
+            {/* Synthesis */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">4. Answer Synthesis Prompt</label>
+              <p className="text-xs text-zinc-500">Generates draft answers grounded strictly in retrieved documents.</p>
+              <textarea
+                value={synthesisPrompt}
+                onChange={(e) => setSynthesisPrompt(e.target.value)}
+                placeholder="Default answer synthesis prompt..."
+                rows={3}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+
+            {/* Decision */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">5. Decision Agent Prompt</label>
+              <p className="text-xs text-zinc-500">Scores draft answer quality and controls the query rewriting/retrieval retry loop.</p>
+              <textarea
+                value={decisionPrompt}
+                onChange={(e) => setDecisionPrompt(e.target.value)}
+                placeholder="Default decision agent prompt..."
+                rows={3}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
+            <div>
+              {saveStatus === "success" && (
+                <p className="text-sm font-medium text-emerald-600">Settings saved successfully!</p>
+              )}
+              {saveStatus === "error" && (
+                <p className="text-sm font-medium text-rose-600">{errorText}</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-1 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Prompts"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ from app.services.v2.query_rewriter import RewrittenQuery
 from app.services.v2.generic_agent import GenericReplyResult
 from app.services.v2.rag_synthesis_agent import SynthesisResult
 from app.services.v2.decision_agent import DecisionResult
+from app.services.v2.retrieval_utils import RetrievalStats
 
 logger = logging.getLogger(__name__)
 
@@ -123,14 +124,19 @@ class PipelineLogger:
         query: str,
         rewritten_query: str,
         sources: list[SearchSource],
+        *,
+        retrieval_stats: RetrievalStats | None = None,
+        source_rank_fields: list[dict] | None = None,
+        latency_ms: int = 0,
     ) -> None:
         if not self._session or not run_id:
             return
 
         try:
             serialized_sources = []
+            rank_fields_by_index = source_rank_fields or []
             for rank, source in enumerate(sources, start=1):
-                serialized_sources.append({
+                entry = {
                     "segment_id": str(source.segment_id) if source.segment_id else None,
                     "file_id": str(source.file_id) if source.file_id else None,
                     "modality": str(source.modality),
@@ -141,7 +147,17 @@ class PipelineLogger:
                     "end_time": source.end_time,
                     "score": float(source.score),
                     "rank": rank,
-                })
+                }
+                if rank - 1 < len(rank_fields_by_index):
+                    entry.update(rank_fields_by_index[rank - 1])
+                serialized_sources.append(entry)
+
+            structured_output: dict = {
+                "query": query,
+                "rewritten_query": rewritten_query,
+            }
+            if retrieval_stats is not None:
+                structured_output["retrieval"] = retrieval_stats.to_dict()
 
             step = PipelineStep(
                 run_id=run_id,
@@ -151,12 +167,9 @@ class PipelineLogger:
                 model_input=None,
                 raw_thinking=None,
                 model_output=None,
-                structured_output={
-                    "query": query,
-                    "rewritten_query": rewritten_query,
-                },
+                structured_output=structured_output,
                 retrieved_sources=serialized_sources,
-                latency_ms=0,
+                latency_ms=latency_ms,
                 status="success",
                 created_at=datetime.now(UTC),
             )

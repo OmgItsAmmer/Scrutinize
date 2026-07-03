@@ -124,7 +124,11 @@ class PipelineOrchestrator:
         if gate_result.reply:
             answer = gate_result.reply
         else:
-            generic_result = self._generic.reply(query, conversation_context=conversation_context)
+            generic_result = self._generic.reply(
+                query,
+                system_override=project_ctx.system_prompt_overrides.get("generic") if project_ctx else None,
+                conversation_context=conversation_context,
+            )
             answer = generic_result.answer
             self._db_logger.log_synthesis(
                 run_id=run_id,
@@ -143,12 +147,14 @@ class PipelineOrchestrator:
                 conversation_context=conversation_context,
             ),
             model=project_ctx.decision_model if project_ctx else None,
+            system_override=project_ctx.system_prompt_overrides.get("decision") if project_ctx else None,
         )
         self._db_logger.log_evaluation(
             run_id=run_id,
             attempt=1,
             decision=decision,
         )
+
 
         logger.info(
             "v2 generic decision %s",
@@ -229,6 +235,7 @@ class PipelineOrchestrator:
                 stripped,
                 prev_feedback,
                 model=project_ctx.rewriter_model if project_ctx else None,
+                system_override=project_ctx.system_prompt_overrides.get("rewriter") if project_ctx else None,
                 conversation_context=conversation_context,
             )
             rewritten_text = rewritten.text
@@ -238,17 +245,21 @@ class PipelineOrchestrator:
                 rewritten=rewritten,
             )
 
-            sources = self._rrf.retrieve(
+            retrieval = self._rrf.retrieve(
                 rewritten_text,
                 project_id=project_id,
                 modality_filter=modality_filter,
             )
+            sources = retrieval.sources
             self._db_logger.log_retrieval(
                 run_id=run_id,
                 attempt=attempt,
                 query=stripped,
                 rewritten_query=rewritten_text,
                 sources=sources,
+                retrieval_stats=retrieval.stats,
+                source_rank_fields=retrieval.source_rank_fields,
+                latency_ms=retrieval.latency_ms,
             )
 
             if not sources:
@@ -288,6 +299,7 @@ class PipelineOrchestrator:
                     conversation_context=conversation_context,
                 ),
                 model=project_ctx.decision_model if project_ctx else None,
+                system_override=project_ctx.system_prompt_overrides.get("decision") if project_ctx else None,
             )
             confidence = decision.confidence
             self._db_logger.log_evaluation(
@@ -295,6 +307,7 @@ class PipelineOrchestrator:
                 attempt=attempt,
                 decision=decision,
             )
+
 
             logger.info(
                 "v2 pipeline attempt %s",
@@ -306,6 +319,7 @@ class PipelineOrchestrator:
                         "verdict": decision.verdict,
                         "correct_route": decision.correct_route,
                         "source_count": len(sources),
+                        "retrieval": retrieval.stats.to_dict(),
                     }
                 ),
             )

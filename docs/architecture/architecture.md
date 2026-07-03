@@ -168,7 +168,7 @@ Here is how each technology operates within the pipeline and why it was selected
 
 ### 4.2 Qdrant (Vector Database)
 * **How it works**: Holds text and media embeddings (1536 dimensions) mapped to payloads containing document IDs, modality types (`text`, `audio`, `video`), text contents, and timestamps.
-* **Why it's used**: Purpose-built vector databases like Qdrant offer rapid approximate nearest neighbor (ANN) search, payload-based metadata filtering (e.g., modality filters), and support for multiple named vectors per point—allowing expansion into visual/audio embeddings without migration.
+* **Why it's used**: Purpose-built vector databases like Qdrant offer Antix approximate nearest neighbor (ANN) search, payload-based metadata filtering (e.g., modality filters), and support for multiple named vectors per point—allowing expansion into visual/audio embeddings without migration.
 
 ### 4.3 Neon Postgres (Relational DB & Observability)
 * **How it works**: Serves as the database for relational schemas (files, processing jobs, segments) and houses `PipelineLogger` tables to track the multi-stage execution logs.
