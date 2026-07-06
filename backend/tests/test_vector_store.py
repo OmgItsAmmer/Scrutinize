@@ -1,6 +1,7 @@
 import pytest
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import patch
 from qdrant_client import QdrantClient
 from qdrant_client.models import SparseVector
 
@@ -56,6 +57,39 @@ def test_upsert_and_retrieve_dense_only(in_memory_vector_store: VectorStore):
     assert len(hits) == 1
     assert hits[0]["id"] == str(segment_id)
     assert hits[0]["payload"]["content"] == segment.content
+
+
+@pytest.mark.unit
+def test_upsert_uses_enriched_sparse_index_text(in_memory_vector_store: VectorStore):
+    segment_id = uuid.uuid4()
+    file_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+
+    segment = VectorSegment(
+        id=segment_id,
+        vector=[0.5, 0.5, 0.5, 0.5],
+        file_id=file_id,
+        project_id=project_id,
+        modality="text",
+        content="Uses the OpenAI API",
+        source_path="https://example.com/open ai guide.pdf",
+        title="Open-AI Notes",
+        created_at=datetime.now(UTC),
+    )
+
+    with patch.object(
+        in_memory_vector_store.sparse_model,
+        "embed",
+        wraps=in_memory_vector_store.sparse_model.embed,
+    ) as mock_embed:
+        in_memory_vector_store.upsert_segments([segment])
+
+    assert mock_embed.call_count == 1
+    sparse_text = mock_embed.call_args.args[0][0]
+    assert "openai" in sparse_text
+    assert "open ai" in sparse_text
+    assert "open ai notes" in sparse_text
+    assert "open ai guide" in sparse_text
 
 
 def test_upsert_with_sparse_vector_generation(in_memory_vector_store: VectorStore):

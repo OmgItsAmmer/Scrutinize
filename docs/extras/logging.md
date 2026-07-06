@@ -34,7 +34,7 @@ erDiagram
         numeric final_confidence
         integer attempts_count
         boolean disclaimer_appended
-        jsonb metadata
+        jsonb run_metadata
         timestamptz created_at
     }
     pipeline_steps {
@@ -70,7 +70,7 @@ Stores the metadata, high-level inputs, and final outcomes of a single end-to-en
 | **`final_confidence`** | `NUMERIC` | Overall confidence score of the final answer. |
 | **`attempts_count`** | `INTEGER` | Number of iterations run before exiting the loop (minimum `1`). |
 | **`disclaimer_appended`** | `BOOLEAN` | Whether the low-confidence disclaimer message was appended. |
-| **`metadata`** | `JSONB` | Extensible global metadata (e.g., pipeline configuration settings). |
+| **`run_metadata`** | `JSONB` | Extensible global metadata (e.g., pipeline configuration settings). |
 | **`created_at`** | `TIMESTAMPTZ` | Datetime when the database row was inserted. |
 
 ### Table 2: `pipeline_steps`

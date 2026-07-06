@@ -1,78 +1,233 @@
 [{
-  "source_table": "pipeline_steps",
-  "source_column": "run_id",
-  "target_table": "pipeline_runs",
-  "target_column": "id",
-  "constraint_name": "pipeline_steps_run_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "id",
+  "data_type": "uuid"
 }, {
-  "source_table": "processing_jobs",
-  "source_column": "file_id",
-  "target_table": "files",
-  "target_column": "id",
-  "constraint_name": "processing_jobs_file_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "filename",
+  "data_type": "character varying"
 }, {
-  "source_table": "retrieved_sources",
-  "source_column": "step_id",
-  "target_table": "step_retrievals",
-  "target_column": "step_id",
-  "constraint_name": "retrieved_sources_step_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "modality",
+  "data_type": "USER-DEFINED"
 }, {
-  "source_table": "retrieved_sources",
-  "source_column": "file_id",
-  "target_table": "files",
-  "target_column": "id",
-  "constraint_name": "retrieved_sources_file_id_fkey",
-  "on_delete_action": "SET NULL"
+  "table_name": "files",
+  "column_name": "storage_path",
+  "data_type": "character varying"
 }, {
-  "source_table": "retrieved_sources",
-  "source_column": "segment_id",
-  "target_table": "segments",
-  "target_column": "id",
-  "constraint_name": "retrieved_sources_segment_id_fkey",
-  "on_delete_action": "SET NULL"
+  "table_name": "files",
+  "column_name": "duration_seconds",
+  "data_type": "double precision"
 }, {
-  "source_table": "segments",
-  "source_column": "file_id",
-  "target_table": "files",
-  "target_column": "id",
-  "constraint_name": "segments_file_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "size_bytes",
+  "data_type": "integer"
 }, {
-  "source_table": "step_evaluations",
-  "source_column": "step_id",
-  "target_table": "pipeline_steps",
-  "target_column": "id",
-  "constraint_name": "step_evaluations_step_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "status",
+  "data_type": "USER-DEFINED"
 }, {
-  "source_table": "step_gates",
-  "source_column": "step_id",
-  "target_table": "pipeline_steps",
-  "target_column": "id",
-  "constraint_name": "step_gates_step_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "uploaded_at",
+  "data_type": "timestamp without time zone"
 }, {
-  "source_table": "step_retrievals",
-  "source_column": "step_id",
-  "target_table": "pipeline_steps",
-  "target_column": "id",
-  "constraint_name": "step_retrievals_step_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "files",
+  "column_name": "project_id",
+  "data_type": "uuid"
 }, {
-  "source_table": "step_rewrites",
-  "source_column": "step_id",
-  "target_table": "pipeline_steps",
-  "target_column": "id",
-  "constraint_name": "step_rewrites_step_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "pipeline_runs",
+  "column_name": "id",
+  "data_type": "uuid"
 }, {
-  "source_table": "step_syntheses",
-  "source_column": "step_id",
-  "target_table": "pipeline_steps",
-  "target_column": "id",
-  "constraint_name": "step_syntheses_step_id_fkey",
-  "on_delete_action": "CASCADE"
+  "table_name": "pipeline_runs",
+  "column_name": "original_query",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "modality_filter",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "conversation_context",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "start_time",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "end_time",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "final_route",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "final_answer",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "final_confidence",
+  "data_type": "numeric"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "attempts_count",
+  "data_type": "integer"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "disclaimer_appended",
+  "data_type": "boolean"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "run_metadata",
+  "data_type": "jsonb"
+}, {
+  "table_name": "pipeline_runs",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "run_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "step_type",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "attempt",
+  "data_type": "integer"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "model_name",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "model_input",
+  "data_type": "jsonb"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "raw_thinking",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "model_output",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "structured_output",
+  "data_type": "jsonb"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "retrieved_sources",
+  "data_type": "jsonb"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "latency_ms",
+  "data_type": "integer"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "status",
+  "data_type": "text"
+}, {
+  "table_name": "pipeline_steps",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "file_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "stage",
+  "data_type": "character varying"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "status",
+  "data_type": "USER-DEFINED"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "error_message",
+  "data_type": "character varying"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "created_at",
+  "data_type": "timestamp without time zone"
+}, {
+  "table_name": "processing_jobs",
+  "column_name": "updated_at",
+  "data_type": "timestamp without time zone"
+}, {
+  "table_name": "projects",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "projects",
+  "column_name": "name",
+  "data_type": "text"
+}, {
+  "table_name": "projects",
+  "column_name": "api_key",
+  "data_type": "text"
+}, {
+  "table_name": "projects",
+  "column_name": "client_key",
+  "data_type": "text"
+}, {
+  "table_name": "projects",
+  "column_name": "allowed_origins",
+  "data_type": "jsonb"
+}, {
+  "table_name": "projects",
+  "column_name": "settings",
+  "data_type": "jsonb"
+}, {
+  "table_name": "projects",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "projects",
+  "column_name": "password_hash",
+  "data_type": "text"
+}, {
+  "table_name": "segments",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "segments",
+  "column_name": "file_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "segments",
+  "column_name": "modality",
+  "data_type": "USER-DEFINED"
+}, {
+  "table_name": "segments",
+  "column_name": "content",
+  "data_type": "character varying"
+}, {
+  "table_name": "segments",
+  "column_name": "start_time",
+  "data_type": "double precision"
+}, {
+  "table_name": "segments",
+  "column_name": "end_time",
+  "data_type": "double precision"
+}, {
+  "table_name": "segments",
+  "column_name": "created_at",
+  "data_type": "timestamp without time zone"
+}, {
+  "table_name": "segments",
+  "column_name": "project_id",
+  "data_type": "uuid"
 }]

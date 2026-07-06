@@ -38,7 +38,11 @@ async function parseError(response: Response): Promise<string> {
 }
 
 function getProjectKey(path: string): string | null {
-  if (path.includes("/v2/projects/login") || path.includes("/v2/projects/signup")) {
+  if (
+    path.includes("/v2/projects/login")
+    || path.includes("/v2/projects/signup")
+    || path.includes("/v2/projects/reset-password")
+  ) {
     return null;
   }
   if (path.includes("/search")) {
@@ -166,6 +170,39 @@ export function updateProjectSettings(settings: Record<string, any>): Promise<{ 
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
+  });
+}
+
+export function changeProjectPassword(
+  newPassword: string,
+  currentPassword?: string,
+): Promise<{ message: string }> {
+  const body: { new_password: string; current_password?: string } = {
+    new_password: newPassword,
+  };
+  if (currentPassword) {
+    body.current_password = currentPassword;
+  }
+  return request<{ message: string }>("/v2/projects/me/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function resetProjectPassword(
+  name: string,
+  apiKey: string,
+  newPassword: string,
+): Promise<{ message: string }> {
+  return request<{ message: string }>("/v2/projects/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      api_key: apiKey,
+      new_password: newPassword,
+    }),
   });
 }
 

@@ -2,11 +2,10 @@ import logging
 import time
 from uuid import UUID
 
-from qdrant_client.models import SparseVector
-
 from app.core.config import Settings
 from app.models.file import FileModality
 from app.services.embedding_service import EmbeddingService
+from app.services.keyword_search_utils import embed_sparse_query
 from app.services.v2.retrieval_utils import (
     RetrieveResult,
     RetrievalStats,
@@ -46,12 +45,7 @@ class RrfRetriever:
         started = time.monotonic()
         limit = top_k or self._settings.v2_rrf_top_k
         vector = self._embedding_service.embed_texts([query])[0]
-
-        sparse_raw = list(self._vector_store.sparse_model.embed([query]))[0]
-        sparse_emb = SparseVector(
-            indices=list(sparse_raw.indices),
-            values=list(sparse_raw.values),
-        )
+        sparse_emb = embed_sparse_query(self._vector_store.sparse_model, query)
 
         modality = modality_filter.value if modality_filter else None
         hybrid = self._vector_store.search_hybrid(

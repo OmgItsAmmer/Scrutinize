@@ -23,6 +23,7 @@ from qdrant_client.models import (
 )
 
 from app.core.config import Settings
+from app.services.keyword_search_utils import build_sparse_index_text
 from app.services.qdrant_errors import format_qdrant_error
 
 
@@ -143,7 +144,14 @@ class VectorStore:
         missing_sparse = [s for s in segments if s.sparse_vector is None]
         sparse_vectors = {}
         if missing_sparse:
-            texts = [s.content for s in missing_sparse]
+            texts = [
+                build_sparse_index_text(
+                    content=segment.content,
+                    title=segment.title,
+                    source_path=segment.source_path,
+                )
+                for segment in missing_sparse
+            ]
             embeddings = list(self.sparse_model.embed(texts))
             for segment, emb in zip(missing_sparse, embeddings):
                 sparse_vectors[segment.id] = SparseVector(

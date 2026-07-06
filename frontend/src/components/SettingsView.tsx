@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { changeProjectPassword } from "../api/client";
 import { IconCopy, IconEye, IconEyeOff } from "./icons";
 
 export function SettingsView() {
@@ -18,6 +19,13 @@ export function SettingsView() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorText, setErrorText] = useState("");
 
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState<"idle" | "success" | "error">("idle");
+  const [passwordError, setPasswordError] = useState("");
+
   // Sync prompts state when settings load
   useEffect(() => {
     if (state.project?.settings) {
@@ -34,6 +42,41 @@ export function SettingsView() {
     navigator.clipboard.writeText(text);
     setCopiedKey(type);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordStatus("idle");
+    setPasswordError("");
+
+    if (newPassword.length < 6) {
+      setPasswordStatus("error");
+      setPasswordError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus("error");
+      setPasswordError("New passwords do not match.");
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      await changeProjectPassword(
+        newPassword,
+        currentPassword.trim() ? currentPassword : undefined,
+      );
+      setPasswordStatus("success");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setTimeout(() => setPasswordStatus("idle"), 3000);
+    } catch (err: any) {
+      setPasswordStatus("error");
+      setPasswordError(err?.message || "Failed to update password.");
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const handleSavePrompts = async (e: React.FormEvent) => {
@@ -73,6 +116,70 @@ export function SettingsView() {
             Manage your project credentials, API keys, and customize agent prompts.
           </p>
         </div>
+
+        {/* Password Card */}
+        <form onSubmit={handleChangePassword} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-6">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-900">Login Password</h2>
+            <p className="text-sm text-zinc-500">
+              Change the password used to sign in to this project. Leave current password empty to
+              reset using your admin API key (while logged in).
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">Current password</label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Leave empty if you forgot it"
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">New password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={6}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-zinc-900">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                minLength={6}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
+            <div>
+              {passwordStatus === "success" && (
+                <p className="text-sm font-medium text-emerald-600">Password updated.</p>
+              )}
+              {passwordStatus === "error" && (
+                <p className="text-sm font-medium text-rose-600">{passwordError}</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={passwordSaving}
+              className="flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {passwordSaving ? "Updating..." : "Update Password"}
+            </button>
+          </div>
+        </form>
 
         {/* API Keys Card */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">

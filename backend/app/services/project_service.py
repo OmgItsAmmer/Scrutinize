@@ -68,6 +68,50 @@ class ProjectService:
             return project
         return None
 
+    def change_password(
+        self,
+        project_id: UUID,
+        new_password: str,
+        *,
+        current_password: str | None = None,
+    ) -> bool:
+        """Update project password.
+
+        When current_password is provided, it must match the stored hash.
+        When omitted, the caller must already be authenticated with the admin API key.
+        """
+        project = self.get_by_id(project_id)
+        if project is None:
+            return False
+
+        if current_password is not None:
+            if not project.password_hash or not verify_password(
+                current_password, project.password_hash
+            ):
+                return False
+
+        project.password_hash = hash_password(new_password)
+        self._session.add(project)
+        self._session.commit()
+        return True
+
+    def reset_password_with_admin_key(
+        self,
+        name: str,
+        api_key: str,
+        new_password: str,
+    ) -> bool:
+        """Reset password when user proves ownership with project name + admin API key."""
+        project = self.get_by_admin_key(api_key)
+        if project is None or project.name != name:
+            verify_password(new_password, "pbkdf2_sha256$100000$dummy$dummy")
+            return False
+
+        project.password_hash = hash_password(new_password)
+        self._session.add(project)
+        self._session.commit()
+        return True
+
     def get_by_id(self, project_id: UUID) -> Project | None:
         return self._session.get(Project, project_id)
 
