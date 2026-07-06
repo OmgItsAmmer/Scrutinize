@@ -6,6 +6,10 @@ primary_region = "ord"
 
 [env]
   ENVIRONMENT = "production"
+  USE_CLOUD_LLM = "true"
+  LOCAL_LLM_GATE_MODEL = "gpt-4o-mini"
+  LOCAL_LLM_REWRITER_MODEL = "gpt-4o-mini"
+  LOCAL_LLM_DECISION_MODEL = "gpt-4o-mini"
 
 [processes]
   worker = "celery -A app.workers.celery_app worker --loglevel=info"

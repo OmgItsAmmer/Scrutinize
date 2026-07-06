@@ -5,10 +5,6 @@ from pydantic import BaseModel, Field
 from app.models.file import FileModality
 
 
-class SearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=2000)
-    modality_filter: FileModality | None = None
-    top_k: int | None = Field(default=None, ge=1, le=20)
 
 
 class SearchSource(BaseModel):
@@ -23,9 +19,4 @@ class SearchSource(BaseModel):
     score: float
 
 
-class SearchResponse(BaseModel):
-    query: str
-    search_query: str
-    modality_filter: FileModality | None = None
-    answer: str
-    sources: list[SearchSource]
+

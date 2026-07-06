@@ -90,7 +90,7 @@ The browser **only** talks to the Fly API (`VITE_API_URL` on Vercel). The worker
 ```text
 Upload flow:
 
-  Vercel UI  ──POST /upload──►  scrutinize-api
+  Vercel UI  ──POST /v2/projects/files──►  scrutinize-api
                                     │
                                     ├─► Cloudinary (store file)
                                     ├─► Neon (create file + job rows)
@@ -103,15 +103,15 @@ Upload flow:
         ├─► Qdrant (store vectors)
         └─► Neon (update job status → indexed | failed)
 
-  Vercel UI  ──GET /jobs/{id}──►  scrutinize-api  (poll every 2s until done)
-  Vercel UI  ──POST /search──►   scrutinize-api  (search uses Qdrant; no worker needed)
+  Vercel UI  ──GET /status/{id}──►  scrutinize-api  (poll every 2s until done)
+  Vercel UI  ──POST /v2/search──►   scrutinize-api  (search uses Qdrant; no worker needed)
 ```
 
 | User action | Frontend calls | Worker involved? |
 |---|---|---|
 | Health / library / search | API only | No |
-| Upload file | `POST /upload` → API enqueues to Redis | **Yes** — must be running (`worker=1`) |
-| Watch upload progress | `GET /jobs/{id}` → API reads Neon | No (worker already updated Neon) |
+| Upload file | `POST /v2/projects/files` (or `POST /upload`) → API enqueues to Redis | **Yes** — must be running (`worker=1`) |
+| Watch upload progress | `GET /status/{id}` → API reads Neon | No (worker already updated Neon) |
 
 If the worker is scaled to **0**, uploads succeed but jobs stay **pending** until you start it (§5d). Search works without the worker as long as content was already indexed.
 
@@ -309,11 +309,18 @@ primary_region = "ord"
 
 [build]
   dockerfile = "../../../backend/Dockerfile"
-  context = "../../../backend"
 
 [env]
   ENVIRONMENT = "production"
   DEBUG = "false"
+  PORT = "8000"
+  USE_CLOUD_LLM = "true"
+  LOCAL_LLM_GATE_MODEL = "gpt-4o-mini"
+  LOCAL_LLM_REWRITER_MODEL = "gpt-4o-mini"
+  LOCAL_LLM_DECISION_MODEL = "gpt-4o-mini"
+
+[processes]
+  app = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 [http_service]
   internal_port = 8000
@@ -321,26 +328,20 @@ primary_region = "ord"
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0   # budget: scale to zero; use 1 for always-on
+  processes = ["app"]
 
   [http_service.concurrency]
     type = "requests"
     hard_limit = 50
     soft_limit = 40
 
+# No [http_service.checks] — Fly health probes keep the machine awake.
+# Frontend wake: GET /health/wake on landing (no Redis/Qdrant ping).
+
 [[vm]]
-  memory = "256mb"           # budget; use "512mb" for always-on
+  memory = "512mb"           # 256mb OOMs under load; 512mb minimum for API
   cpu_kind = "shared"
   cpus = 1
-
-[checks]
-  [checks.health]
-    grace_period = "20s"
-    interval = "15s"
-    method = "GET"
-    path = "/health"
-    port = 8000
-    timeout = "5s"
-    type = "http"
 ```
 
 Adjust `context` / `dockerfile` paths if you place `fly.toml` elsewhere.
@@ -430,10 +431,13 @@ primary_region = "ord"
 
 [build]
   dockerfile = "../../../backend/Dockerfile"
-  context = "../../../backend"
 
 [env]
   ENVIRONMENT = "production"
+  USE_CLOUD_LLM = "true"
+  LOCAL_LLM_GATE_MODEL = "gpt-4o-mini"
+  LOCAL_LLM_REWRITER_MODEL = "gpt-4o-mini"
+  LOCAL_LLM_DECISION_MODEL = "gpt-4o-mini"
 
 [processes]
   worker = "celery -A app.workers.celery_app worker --loglevel=info"
@@ -577,7 +581,7 @@ Redeploy the frontend on Vercel if you change `VITE_API_URL` to a custom API dom
 | UI connectivity | Open your Vercel URL                                            | Green **API connected** badge                                      |
 | Worker          | `fly scale count worker=1` then `fly logs -a scrutinize-worker` | Celery worker ready, no import errors                              |
 | Upload smoke    | Start worker (§5d), upload a small `.txt` via UI                | Job reaches `indexed`; Qdrant point count increases                |
-| Search smoke    | Run a query after indexing                                      | `/search` returns results                                          |
+| Search smoke    | Run a query after indexing                                      | `/v2/search` returns results                                       |
 
 
 Optional CLI checks (from a machine with repo + `.env` pointing at production URLs):
@@ -750,6 +754,11 @@ Neon is shared across local and Fly environments; one migration applies everywhe
 | `CLOUDINARY_*`   | api, worker | [cloudinary-setup.md](cloudinary-setup.md)                                        |
 | `CORS_ORIGINS`   | api         | JSON array of Vercel (and custom) frontend origin(s)                              |
 | `ENVIRONMENT`    | api, worker | `production`                                                                      |
+| `USE_CLOUD_LLM`  | api, worker | Set to `true` to use cloud LLM (OpenAI) instead of local model                    |
+| `LOCAL_LLM_GATE_MODEL` | api, worker | Fallback Cloud model name (e.g. `gpt-4o-mini`) when `USE_CLOUD_LLM=true`         |
+| `LOCAL_LLM_REWRITER_MODEL` | api, worker | Fallback Cloud model name (e.g. `gpt-4o-mini`) when `USE_CLOUD_LLM=true`    |
+| `LOCAL_LLM_DECISION_MODEL` | api, worker | Fallback Cloud model name (e.g. `gpt-4o-mini`) when `USE_CLOUD_LLM=true`    |
+
 
 
 ### Vercel (frontend)

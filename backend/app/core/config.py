@@ -69,10 +69,6 @@ class Settings(BaseSettings):
     openai_max_retries: int = 8
     openai_retry_min_delay_seconds: float = 2.0
 
-    # Search & agents (M6 v1)
-    router_model: str = "gpt-4o-mini"
-    synthesis_model: str = "gpt-4o-mini"
-    search_top_k: int = 5
 
     # Local LLM pipeline (v2 — M6)
     local_llm_base_url: str = ""
