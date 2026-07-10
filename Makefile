@@ -1,10 +1,42 @@
 .PHONY: help up down logs infra-up infra-down reset-qdrant backend-shell backend-dev worker-dev v2-dev v2-health \
 	db-migrate test test-unit test-integration test-system test-security lint install-backend install-frontend frontend-dev
 
-# Scrutinize — common dev commands (Windows: use Git Bash or WSL for `make`)
+# =============================================================================
+# Scrutinize — run the entire project
+# =============================================================================
+# Windows: use Git Bash or WSL for `make`.
+#
+# FIRST TIME ONLY
+#   1. cp .env.example backend/.env
+#      Edit backend/.env — Neon DATABASE_URL, Cloudinary, OPENAI_API_KEY, etc.
+#   2. make install-backend
+#   3. make install-frontend
+#   4. make db-migrate
+#
+# OPTION A — Full stack in Docker (simplest; backend + worker in containers)
+#   Terminal 1:  make up-build
+#   Terminal 2:  make frontend-dev
+#   App:         http://localhost:5173
+#   API docs:    http://localhost:8000/docs
+#
+# OPTION B — Local backend with hot reload (best for v2 pipeline development)
+#   Terminal 1:  make v2-dev            # starts Qdrant + Redis, prints next steps
+#   Terminal 2:  make backend-dev       # FastAPI with --reload on :8000
+#   Terminal 3:  make worker-dev        # Celery worker (required for file uploads)
+#   Terminal 4:  make frontend-dev
+#   Search-only (no uploads): set CELERY_TASK_ALWAYS_EAGER=true in backend/.env
+#                             and skip worker-dev.
+#
+# AFTER STARTUP
+#   make logs         — follow Docker service logs
+#   make v2-health    — check v2 LLM endpoints (local pipeline)
+#   make help         — list all commands
+# =============================================================================
 
 help:
 	@echo "Scrutinize dev commands"
+	@echo ""
+	@echo "  Quick start: see instructions at the top of this Makefile."
 	@echo ""
 	@echo "  Full stack (Docker):     make up"
 	@echo "  v2 local backend:        make v2-dev          (infra + guide; then backend-dev in another terminal)"

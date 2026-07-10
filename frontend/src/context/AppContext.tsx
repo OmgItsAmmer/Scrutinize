@@ -16,7 +16,7 @@ import {
   deleteLibraryFile as deleteLibraryFileRequest,
   getApiUrl,
   isLocalDevApi,
-  searchContent,
+  searchContentStream,
   uploadFile,
   fetchProjectInfo as fetchProjectInfoApi,
   updateProjectSettings as updateProjectSettingsApi,
@@ -31,14 +31,26 @@ import type {
   SearchV2Response,
   UploadJobState,
 } from "../types/api";
+import {
+  appendSynthesizerOutput,
+  applyStreamStatus,
+  type AgentOutput,
+} from "../lib/pipelineAgents";
 
 type SearchState = {
   query: string;
+  activeQuery: string | null;
   modalityFilter: ModalityFilter;
   loading: boolean;
   error: string | null;
   result: SearchV2Response | null;
   conversation: ConversationState;
+  realtimeStep: string | null;
+  realtimeModel: string | null;
+  realtimeMessage: string | null;
+  realtimeText: string;
+  realtimeSources: any[] | null;
+  agentOutputs: AgentOutput[];
 };
 
 const emptyConversation = (): ConversationState => ({ messages: [] });
@@ -81,6 +93,8 @@ type Action =
   | { type: "SET_SEARCH_QUERY"; query: string }
   | { type: "SET_MODALITY_FILTER"; filter: ModalityFilter }
   | { type: "SEARCH_START" }
+  | { type: "SEARCH_STREAM_UPDATE"; step: string | null; model: string | null; message: string | null; sources?: any[]; route?: string; rewritten?: string; sources_count?: number; confidence?: number; verdict?: string; feedback?: string }
+  | { type: "SEARCH_STREAM_CHUNK"; text: string }
   | { type: "SEARCH_SUCCESS"; result: SearchV2Response }
   | { type: "SEARCH_ERROR"; error: string }
   | { type: "CLEAR_SEARCH" }
@@ -105,11 +119,18 @@ const initialState: AppState = {
   healthError: null,
   search: {
     query: "",
+    activeQuery: null,
     modalityFilter: "all",
     loading: false,
     error: null,
     result: null,
     conversation: emptyConversation(),
+    realtimeStep: null,
+    realtimeModel: null,
+    realtimeMessage: null,
+    realtimeText: "",
+    realtimeSources: null,
+    agentOutputs: [],
   },
   upload: {
     uploading: false,
@@ -180,7 +201,57 @@ function reducer(state: AppState, action: Action): AppState {
     case "SEARCH_START":
       return {
         ...state,
-        search: { ...state.search, loading: true, error: null },
+        search: {
+          ...state.search,
+          loading: true,
+          error: null,
+          result: null,
+          activeQuery: state.search.query.trim(),
+          realtimeStep: "gate",
+          realtimeModel: null,
+          realtimeMessage: "Classifying query route...",
+          realtimeText: "",
+          realtimeSources: null,
+          agentOutputs: [],
+        },
+      };
+    case "SEARCH_STREAM_UPDATE": {
+      const agentOutputs =
+        action.step != null
+          ? applyStreamStatus(state.search.agentOutputs, {
+              step: action.step,
+              message: action.message,
+              model: action.model,
+              route: action.route,
+              rewritten: action.rewritten,
+              sources_count: action.sources_count,
+              sources: action.sources,
+              confidence: action.confidence,
+              verdict: action.verdict,
+              feedback: action.feedback,
+            })
+          : state.search.agentOutputs;
+
+      return {
+        ...state,
+        search: {
+          ...state.search,
+          realtimeStep: action.step ?? state.search.realtimeStep,
+          realtimeModel: action.model ?? state.search.realtimeModel,
+          realtimeMessage: action.message ?? state.search.realtimeMessage,
+          realtimeSources: action.sources ?? state.search.realtimeSources,
+          agentOutputs,
+        },
+      };
+    }
+    case "SEARCH_STREAM_CHUNK":
+      return {
+        ...state,
+        search: {
+          ...state.search,
+          realtimeText: state.search.realtimeText + action.text,
+          agentOutputs: appendSynthesizerOutput(state.search.agentOutputs, action.text),
+        },
       };
     case "SEARCH_SUCCESS":
       return {
@@ -191,12 +262,29 @@ function reducer(state: AppState, action: Action): AppState {
           error: null,
           result: action.result,
           conversation: action.result.conversation,
+          activeQuery: null,
+          realtimeStep: null,
+          realtimeModel: null,
+          realtimeMessage: null,
+          realtimeText: "",
+          realtimeSources: null,
+          agentOutputs: [],
         },
       };
     case "SEARCH_ERROR":
       return {
         ...state,
-        search: { ...state.search, loading: false, error: action.error },
+        search: {
+          ...state.search,
+          loading: false,
+          error: action.error,
+          activeQuery: null,
+          realtimeStep: null,
+          realtimeModel: null,
+          realtimeMessage: null,
+          realtimeSources: null,
+          agentOutputs: [],
+        },
       };
     case "CLEAR_SEARCH":
       return {
@@ -204,11 +292,18 @@ function reducer(state: AppState, action: Action): AppState {
         search: {
           ...state.search,
           query: "",
+          activeQuery: null,
           modalityFilter: "all",
           error: null,
           result: null,
           loading: false,
           conversation: emptyConversation(),
+          realtimeStep: null,
+          realtimeModel: null,
+          realtimeMessage: null,
+          realtimeText: "",
+          realtimeSources: null,
+          agentOutputs: [],
         },
       };
     case "UPLOAD_START":
@@ -445,12 +540,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     dispatch({ type: "SEARCH_START" });
     try {
-      const result = await searchContent(
+      await searchContentStream(
         query,
         state.search.modalityFilter,
         state.search.conversation,
+        (event) => {
+          if (event.event === "status") {
+            dispatch({
+              type: "SEARCH_STREAM_UPDATE",
+              step: event.data.step,
+              model: event.data.model ?? null,
+              message: event.data.message ?? null,
+              sources: event.data.sources ?? undefined,
+              route: event.data.route,
+              rewritten: event.data.rewritten,
+              sources_count: event.data.sources_count,
+              confidence: event.data.confidence,
+              verdict: event.data.verdict,
+              feedback: event.data.feedback,
+            });
+          } else if (event.event === "chunk") {
+            dispatch({
+              type: "SEARCH_STREAM_CHUNK",
+              text: event.data.text,
+            });
+          } else if (event.event === "result") {
+            dispatch({
+              type: "SEARCH_SUCCESS",
+              result: event.data,
+            });
+          }
+        }
       );
-      dispatch({ type: "SEARCH_SUCCESS", result });
     } catch (error) {
       dispatch({ type: "SEARCH_ERROR", error: formatError(error) });
     }

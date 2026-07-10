@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Literal
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.schemas.search import SearchSource
@@ -43,6 +44,7 @@ class DecisionAgent:
         self._model = settings.local_llm_decision_model
         self._system = load_prompt("decision_agent_system.txt")
 
+    @traceable(name="DecisionAgent.evaluate", run_type="chain")
     def evaluate(
         self,
         context: DecisionContext,

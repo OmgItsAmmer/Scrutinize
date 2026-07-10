@@ -1,6 +1,7 @@
 import time
-from typing import Any
+from typing import Any, Iterator
 import httpx
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.services.v2.llm_clients.base import BaseLlmClient, LlmResponse
@@ -40,6 +41,7 @@ class LocalLlmClient(BaseLlmClient):
             return trimmed
         return f"{trimmed}/v1/chat/completions"
 
+    @traceable(name="LocalLlmClient.generate", run_type="llm")
     def generate(
         self,
         model: str,
@@ -118,3 +120,61 @@ class LocalLlmClient(BaseLlmClient):
             raw_thinking=raw_thinking,
             latency_ms=latency_ms,
         )
+
+    @traceable(name="LocalLlmClient.generate_stream", run_type="llm")
+    def generate_stream(
+        self,
+        model: str,
+        system: str,
+        user: str,
+    ) -> Iterator[str]:
+        import json
+        messages = []
+        if system.strip():
+            messages.append({"role": "system", "content": system.strip()})
+        messages.append({"role": "user", "content": user.strip()})
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            NGROK_SKIP_BROWSER_WARNING: "true",
+        }
+
+        url = self._get_url(model)
+
+        try:
+            with httpx.stream(
+                "POST",
+                url,
+                json=payload,
+                headers=headers,
+                timeout=self._timeout,
+            ) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            content = data["choices"][0]["delta"].get("content")
+                            if content:
+                                yield content
+                        except Exception:
+                            pass
+        except httpx.TimeoutException as exc:
+            raise LocalLlmError(f"Local LLM request timed out after {self._timeout}s") from exc
+        except httpx.HTTPStatusError as exc:
+            raise LocalLlmError(
+                f"Local LLM returned HTTP {exc.response.status_code}",
+                status_code=exc.response.status_code,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LocalLlmError("Local LLM request failed") from exc
+

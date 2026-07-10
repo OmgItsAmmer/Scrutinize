@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from typing import Iterator
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.schemas.search import SearchSource
@@ -21,6 +23,7 @@ class RagSynthesisAgent:
         self._model = settings.local_llm_rewriter_model
         self._system = load_prompt("rag_synthesis_system.txt")
 
+    @traceable(name="RagSynthesisAgent.synthesize", run_type="chain")
     def synthesize(
         self,
         query: str,
@@ -48,6 +51,35 @@ class RagSynthesisAgent:
             answer=llm_response.content,
             llm_call=llm_response,
         )
+
+    def synthesize_stream(
+        self,
+        query: str,
+        sources: list[SearchSource],
+        *,
+        model: str | None = None,
+        system_override: str | None = None,
+        conversation_context: str = "",
+    ) -> Iterator[str]:
+        effective_model = model or self._model
+        effective_system = system_override or self._system
+        lines: list[str] = []
+        for index, source in enumerate(sources, start=1):
+            time_label = _format_time_range(source.start_time, source.end_time)
+            lines.append(
+                f"{index}. [{source.modality}] {source.title} {time_label} "
+                f"(score={source.score:.3f}): {source.content}"
+            )
+
+        user_lines = [f"Question: {query.strip()}", "", "Sources:", *lines]
+        append_conversation_context(user_lines, conversation_context)
+
+        return self._client.generate_stream(
+            effective_model,
+            effective_system,
+            "\n".join(user_lines),
+        )
+
 
 
 

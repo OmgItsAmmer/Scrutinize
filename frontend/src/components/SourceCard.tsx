@@ -6,6 +6,7 @@ import {
   V2_LOW_CONFIDENCE_DISCLAIMER,
 } from "../lib/format";
 import type { SearchSource, SearchV2Response } from "../types/api";
+import { IconDocument, IconX } from "./icons";
 
 function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
   const styles = {
@@ -21,9 +22,9 @@ function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
   );
 }
 
-function TextSourceCard({ source }: { source: SearchSource }) {
+function TextSourceCard({ source, style }: { source: SearchSource; style?: React.CSSProperties }) {
   return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <article className="rounded-2xl border p-4 shadow-sm" style={style}>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
@@ -36,7 +37,7 @@ function TextSourceCard({ source }: { source: SearchSource }) {
   );
 }
 
-function AudioSourceCard({ source }: { source: SearchSource }) {
+function AudioSourceCard({ source, style }: { source: SearchSource; style?: React.CSSProperties }) {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -52,7 +53,7 @@ function AudioSourceCard({ source }: { source: SearchSource }) {
   }, [source.source_path, source.start_time]);
 
   return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <article className="rounded-2xl border p-4 shadow-sm" style={style}>
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
@@ -68,7 +69,7 @@ function AudioSourceCard({ source }: { source: SearchSource }) {
   );
 }
 
-function VideoSourceCard({ source }: { source: SearchSource }) {
+function VideoSourceCard({ source, style }: { source: SearchSource; style?: React.CSSProperties }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -84,7 +85,7 @@ function VideoSourceCard({ source }: { source: SearchSource }) {
   }, [source.source_path, source.start_time]);
 
   return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <article className="rounded-2xl border p-4 shadow-sm" style={style}>
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
@@ -106,7 +107,96 @@ function VideoSourceCard({ source }: { source: SearchSource }) {
   );
 }
 
-function renderMarkdown(text: string) {
+const getCardStyle = (index: number) => {
+  const badgeColors = [
+    "var(--chatly-badge-all)",
+    "var(--chatly-badge-text)",
+    "var(--chatly-badge-audio)",
+    "var(--chatly-badge-video)",
+  ];
+  const color = badgeColors[index % badgeColors.length];
+  return {
+    backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
+    borderColor: `color-mix(in srgb, ${color} 25%, transparent)`,
+  };
+};
+
+function CitationButton({
+  index,
+  title,
+  onClick,
+}: {
+  index: number;
+  title: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="inline-flex items-center justify-center gap-1 mx-0.5 px-2 py-0.5 rounded-full text-[11px] font-bold text-zinc-700 dark:text-zinc-300 bg-white/20 dark:bg-white/10 border border-white/40 dark:border-white/15 shadow-sm backdrop-blur-md transition-all duration-200 hover:scale-105 hover:bg-white/35 dark:hover:bg-white/20 hover:border-white/60 cursor-pointer active:scale-95 select-none"
+    >
+      <IconDocument className="h-3 w-3 shrink-0 opacity-80" />
+      <span className="leading-none">{index + 1}</span>
+    </button>
+  );
+}
+
+function parseCitations(
+  text: string,
+  sources?: SearchSource[],
+  onSourceClick?: (source: SearchSource, index: number) => void
+): React.ReactNode[] {
+  if (!sources || sources.length === 0 || !text) {
+    return [text];
+  }
+
+  const sortedSources = [...sources]
+    .map((s, idx) => ({ source: s, index: idx }))
+    .filter(item => item.source.title)
+    .sort((a, b) => b.source.title.length - a.source.title.length);
+
+  if (sortedSources.length === 0) {
+    return [text];
+  }
+
+  const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const pattern = sortedSources
+    .map(item => `\\(\\s*${escapeRegExp(item.source.title)}\\s*\\)`)
+    .join("|");
+
+  const regex = new RegExp(`(${pattern})`, "g");
+  const parts = text.split(regex);
+
+  return parts.map((part, index) => {
+    const trimmed = part.trim();
+    if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+      const titleCandidate = trimmed.slice(1, -1).trim();
+      const matched = sortedSources.find(
+        item => item.source.title.trim() === titleCandidate
+      );
+      if (matched) {
+        return (
+          <CitationButton
+            key={`cit-${matched.index}-${index}`}
+            index={matched.index}
+            title={matched.source.title}
+            onClick={() => onSourceClick?.(matched.source, matched.index)}
+          />
+        );
+      }
+    }
+    return part;
+  });
+}
+
+export function renderMarkdown(
+  text: string,
+  sources?: SearchSource[],
+  onSourceClick?: (source: SearchSource, index: number) => void
+) {
   const lines = text.split("\n");
   let inList = false;
   const listItems: string[] = [];
@@ -114,11 +204,11 @@ function renderMarkdown(text: string) {
 
   const parseInline = (chunk: string): React.ReactNode[] => {
     const parts = chunk.split(/(\*\*.*?\*\*|`.*?`)/g);
-    return parts.map((part, index) => {
+    return parts.flatMap((part, index) => {
       if (part.startsWith("**") && part.endsWith("**")) {
         return (
           <strong key={index} className="font-semibold text-zinc-950">
-            {part.slice(2, -2)}
+            {parseCitations(part.slice(2, -2), sources, onSourceClick)}
           </strong>
         );
       }
@@ -132,7 +222,7 @@ function renderMarkdown(text: string) {
           </code>
         );
       }
-      return part;
+      return parseCitations(part, sources, onSourceClick);
     });
   };
 
@@ -178,7 +268,83 @@ function renderMarkdown(text: string) {
   return elements;
 }
 
-export function ScrollFade({ children }: { children: React.ReactNode }) {
+type SourcePreviewModalProps = {
+  source: SearchSource;
+  index: number;
+  onClose: () => void;
+};
+
+export function SourcePreviewModal({ source, index, onClose }: SourcePreviewModalProps) {
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/60 p-4 backdrop-blur-md animate-fade-in"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-xl overflow-hidden rounded-3xl border border-white/20 bg-white/80 dark:bg-zinc-900/80 p-6 shadow-2xl backdrop-blur-xl animate-scale-up"
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <span className="rounded-full bg-white/30 border border-white/40 px-2.5 py-0.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider backdrop-blur-sm">
+                Source [{index + 1}]
+              </span>
+              <ModalityBadge modality={source.modality} />
+              <span className="text-xs text-zinc-500 font-medium">
+                {(source.score * 100).toFixed(0)}% match
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-white break-words">
+              {source.title}
+            </h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-full p-2 text-zinc-500 hover:bg-black/5 dark:hover:bg-white/5 hover:text-zinc-800 dark:hover:text-white transition-all cursor-pointer"
+            aria-label="Close"
+          >
+            <IconX className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-2 space-y-4 max-h-[60vh] overflow-y-auto pr-1 no-scrollbar">
+          <div className="rounded-2xl bg-black/5 dark:bg-white/5 border border-white/10 p-4">
+            <p className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap">
+              {source.content}
+            </p>
+          </div>
+
+          {source.modality === "audio" && source.source_path && (
+            <div className="rounded-2xl bg-black/5 dark:bg-white/5 p-3">
+              <audio controls src={source.source_path} className="w-full" autoPlay={false} />
+            </div>
+          )}
+
+          {source.modality === "video" && source.source_path && (
+            <div className="rounded-2xl overflow-hidden bg-black aspect-video border border-white/10">
+              <video controls src={source.source_path} className="w-full h-full" autoPlay={false} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ScrollFade({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -207,6 +373,7 @@ export function ScrollFade({ children }: { children: React.ReactNode }) {
   return (
     <div
       ref={ref}
+      style={{ transitionDelay: `${delay}ms` }}
       className={`transform transition-all duration-700 ease-out ${
         isVisible
           ? "scale-100 translate-y-0 opacity-100"
@@ -218,14 +385,16 @@ export function ScrollFade({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SourceCard({ source }: { source: SearchSource }) {
+export function SourceCard({ source, index = 0 }: { source: SearchSource; index?: number }) {
+  const style = getCardStyle(index);
+
   if (source.modality === "audio") {
-    return <AudioSourceCard source={source} />;
+    return <AudioSourceCard source={source} style={style} />;
   }
   if (source.modality === "video") {
-    return <VideoSourceCard source={source} />;
+    return <VideoSourceCard source={source} style={style} />;
   }
-  return <TextSourceCard source={source} />;
+  return <TextSourceCard source={source} style={style} />;
 }
 
 type SearchResultsProps = {

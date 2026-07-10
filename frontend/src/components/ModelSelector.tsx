@@ -8,7 +8,7 @@ export type ModelOption = {
 };
 
 const MODELS: ModelOption[] = [
-  { id: "gpt-4o-mini", label: "GPT-4o-mini (recommended)", provider: "OpenAI" },
+  { id: "gpt-4o-mini", label: "GPT-4o-mini", provider: "" },
  
 ];
 
@@ -42,7 +42,7 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
         type="button"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1.5 rounded-lg border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-2.5 py-1.5 text-xs font-medium text-[var(--chatly-text-secondary)] transition hover:bg-[var(--chatly-dropdown-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex items-center gap-1 rounded-lg border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-2 py-1 text-[11px] font-medium text-[var(--chatly-text-secondary)] transition hover:bg-[var(--chatly-dropdown-hover)] disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs"
         aria-haspopup="listbox"
         aria-expanded={open}
       >

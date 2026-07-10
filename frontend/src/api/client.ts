@@ -109,6 +109,99 @@ export function searchContent(
   });
 }
 
+export type StreamEvent =
+  | { event: "status"; data: { step: string; model?: string; message: string; route?: string; rewritten?: string; confidence?: number; verdict?: string; correct_route?: string; feedback?: string; sources_count?: number; sources?: any[] } }
+  | { event: "chunk"; data: { text: string } }
+  | { event: "result"; data: SearchV2Response };
+
+function parseSseChunk(chunk: string, onEvent: (event: StreamEvent) => void): boolean {
+  const trimmedLine = chunk.trim();
+  if (!trimmedLine.startsWith("data: ")) {
+    return false;
+  }
+
+  const rawJson = trimmedLine.slice(6).trim();
+  if (!rawJson) {
+    return false;
+  }
+
+  const parsed = JSON.parse(rawJson) as StreamEvent;
+  onEvent(parsed);
+  return parsed.event === "result";
+}
+
+export async function searchContentStream(
+  query: string,
+  modalityFilter: ModalityFilter,
+  conversation: ConversationState | undefined,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const path = "/v2/search/stream";
+  const key = getProjectKey(path);
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  if (key) {
+    headers.set("X-Project-Key", key);
+  }
+
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      query,
+      modality_filter: modalityFilter === "all" ? null : modalityFilter,
+      conversation: conversation ?? { messages: [] },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body reader available.");
+  }
+
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let sawResult = false;
+
+  const consumeBuffer = () => {
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      try {
+        if (parseSseChunk(part, onEvent)) {
+          sawResult = true;
+        }
+      } catch (e) {
+        console.error("Error parsing stream SSE line:", part, e);
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: true });
+      consumeBuffer();
+    }
+    if (done) {
+      break;
+    }
+  }
+
+  buffer += decoder.decode();
+  consumeBuffer();
+
+  if (!sawResult) {
+    throw new Error("Search stream ended before a final result was received.");
+  }
+}
+
+
 export function uploadFile(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);

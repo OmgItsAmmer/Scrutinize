@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Literal
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.services.v2.json_utils import parse_json_object
@@ -29,6 +30,7 @@ class RagGate:
         self._model = settings.local_llm_gate_model
         self._system = load_prompt("rag_gate_system.txt")
 
+    @traceable(name="RagGate.classify", run_type="chain")
     def classify(
         self,
         original: str,

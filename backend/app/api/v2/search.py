@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.core.config import Settings
@@ -52,4 +53,44 @@ def search_v2(
             status_code=503,
             detail=f"Local LLM is unavailable: {exc}",
         ) from exc
+
+
+@router.post("/search/stream", tags=["v2"])
+def search_v2_stream(
+    body: SearchV2Request,
+    orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator),
+    x_project_key: Annotated[str | None, Header(alias="X-Project-Key")] = None,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_app_settings),
+) -> StreamingResponse:
+    """Run the v2 search pipeline and stream SSE status updates & final result."""
+    project_ctx: ProjectContext | None = None
+    if x_project_key:
+        svc = ProjectService(session)
+        project = svc.get_by_client_key(x_project_key)
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid X-Project-Key (client key).")
+        project_ctx = svc.resolve_context(project, settings)
+
+    try:
+        generator = orchestrator.search_stream(
+            body.query,
+            project_ctx=project_ctx,
+            modality_filter=body.modality_filter,
+            conversation=body.conversation,
+        )
+        return StreamingResponse(
+            generator,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+    except LocalLlmError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Local LLM is unavailable: {exc}",
+        ) from exc
+
 

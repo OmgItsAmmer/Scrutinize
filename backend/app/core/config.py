@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     v2_rrf_k: int = 60
     v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
 
+    # LangSmith tracing config
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "scrutinize"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+
     # Cloudinary — raw file uploads (text, audio, video); relational data lives in Neon.
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
@@ -176,7 +182,17 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if settings.langsmith_tracing:
+        import os
+        os.environ["LANGSMITH_TRACING"] = "true"
+        if settings.langsmith_api_key:
+            os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
+        if settings.langsmith_project:
+            os.environ["LANGSMITH_PROJECT"] = settings.langsmith_project
+        if settings.langsmith_endpoint:
+            os.environ["LANGSMITH_ENDPOINT"] = settings.langsmith_endpoint
+    return settings
 
 
 def reload_settings() -> Settings:

@@ -1,6 +1,7 @@
 import time
 import logging
-from typing import Any
+from typing import Any, Iterator
+from langsmith import traceable
 
 from openai import OpenAI
 from app.core.config import Settings
@@ -24,6 +25,7 @@ class CloudLlmClient(BaseLlmClient):
         self._max_retries = settings.openai_max_retries
         self._min_delay_seconds = settings.openai_retry_min_delay_seconds
 
+    @traceable(name="CloudLlmClient.generate", run_type="llm")
     def generate(
         self,
         model: str,
@@ -82,3 +84,29 @@ class CloudLlmClient(BaseLlmClient):
             raw_thinking=raw_thinking,
             latency_ms=latency_ms,
         )
+
+    @traceable(name="CloudLlmClient.generate_stream", run_type="llm")
+    def generate_stream(
+        self,
+        model: str,
+        system: str,
+        user: str,
+    ) -> Iterator[str]:
+        messages = []
+        if system.strip():
+            messages.append({"role": "system", "content": system.strip()})
+        messages.append({"role": "user", "content": user.strip()})
+        
+        try:
+            response = self._client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+            )
+            for chunk in response:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+        except Exception as exc:
+            raise CloudLlmError(f"Cloud LLM streaming failed: {exc}") from exc
+

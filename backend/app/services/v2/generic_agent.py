@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from typing import Iterator
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.services.v2.conversation_format import append_conversation_context
@@ -20,6 +22,7 @@ class GenericAgent:
         self._model = settings.local_llm_gate_model
         self._system = load_prompt("generic_agent_system.txt")
 
+    @traceable(name="GenericAgent.reply", run_type="chain")
     def reply(
         self,
         query: str,
@@ -39,4 +42,21 @@ class GenericAgent:
             answer=llm_response.content,
             llm_call=llm_response,
         )
+
+    def reply_stream(
+        self,
+        query: str,
+        *,
+        system_override: str | None = None,
+        conversation_context: str = "",
+    ) -> Iterator[str]:
+        user_lines = [query.strip()]
+        append_conversation_context(user_lines, conversation_context)
+        effective_system = system_override or self._system
+        return self._client.generate_stream(
+            self._model,
+            effective_system,
+            "\n".join(user_lines),
+        )
+
 

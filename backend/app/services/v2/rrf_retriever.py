@@ -1,6 +1,7 @@
 import logging
 import time
 from uuid import UUID
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.models.file import FileModality
@@ -30,6 +31,7 @@ class RrfRetriever:
         self._vector_store = vector_store
         self._settings = settings
 
+    @traceable(name="RrfRetriever.retrieve", run_type="retriever")
     def retrieve(
         self,
         rewritten_query: str,

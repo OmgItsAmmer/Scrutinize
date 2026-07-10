@@ -24,6 +24,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pypdf[image]>=4.0.0",
     "fastembed>=0.3.0",
+    "langsmith>=0.1.0",
 ]
 
 [project.optional-dependencies]

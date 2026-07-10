@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from langsmith import traceable
 
 from app.core.config import Settings
 from app.services.v2.conversation_format import (
@@ -23,6 +24,7 @@ class QueryRewriter:
         self._model = settings.local_llm_rewriter_model
         self._system = load_prompt("query_rewriter_system.txt")
 
+    @traceable(name="QueryRewriter.rewrite", run_type="chain")
     def rewrite(
         self,
         query: str,

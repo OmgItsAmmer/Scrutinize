@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Iterator
 
 @dataclass(frozen=True)
 class LlmResponse:
@@ -25,3 +26,14 @@ class BaseLlmClient(ABC):
     ) -> LlmResponse:
         """Generate a response given a system and user prompt."""
         pass
+
+    @abstractmethod
+    def generate_stream(
+        self,
+        model: str,
+        system: str,
+        user: str,
+    ) -> Iterator[str]:
+        """Generate a streamed response token by token."""
+        pass
+

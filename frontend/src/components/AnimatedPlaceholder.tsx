@@ -48,7 +48,7 @@ export function AnimatedPlaceholder({ paused }: AnimatedPlaceholderProps) {
   }, [displayText, isDeleting, paused, queryIndex]);
 
   return (
-    <span className="pointer-events-none absolute inset-0 flex items-start pt-1 text-[15px] text-[var(--chatly-text-muted)]">
+    <span className="pointer-events-none absolute inset-0 flex items-start py-1.5 text-[14px] text-[var(--chatly-text-muted)] sm:text-[15px]">
       {displayText}
       <span className="ml-0.5 inline-block h-[1.1em] w-0.5 animate-pulse bg-[var(--chatly-text-muted)]" />
     </span>
