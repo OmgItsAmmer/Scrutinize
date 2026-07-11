@@ -33,7 +33,7 @@ export default function App() {
 
   return (
     <div className="flex h-[100dvh] bg-[var(--chatly-bg)] text-[var(--chatly-text-primary)]">
-      <Sidebar />
+      <Sidebar compact={state.pdfDrawer.open} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileHeader />
         {!state.apiConnected && (

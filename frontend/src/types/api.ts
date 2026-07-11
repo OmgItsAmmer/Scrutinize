@@ -79,6 +79,13 @@ export type SearchV2Response = {
   conversation: ConversationState;
 };
 
+export type PdfDrawerState = {
+  open: boolean;
+  url: string | null;
+  title: string | null;
+  filename: string | null;
+};
+
 export type LibraryFileItem = {
   id: string;
   filename: string;

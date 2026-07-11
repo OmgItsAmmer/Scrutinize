@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     local_llm_decision_model: str = "qwen3.5:4b"
     local_llm_timeout_s: float = 120.0
 
+    # PDF rename agent (separate from the main pipeline LLMs)
+    pdf_renamer_base_url: str = ""
+    pdf_renamer_model: str = ""
+    pdf_renamer_timeout_s: float = 60.0
+
     # v2 pipeline tuning
     use_cloud_llm: bool = False
     v2_max_pipeline_attempts: int = 2
@@ -87,6 +92,9 @@ class Settings(BaseSettings):
     v2_rrf_top_k: int = 5
     v2_rrf_k: int = 60
     v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
+
+    # MCP Configurations
+    mcp_pdf_server_enabled: bool = True
 
     # LangSmith tracing config
     langsmith_tracing: bool = False
@@ -178,6 +186,10 @@ class Settings(BaseSettings):
             self.local_llm_rewriter_url.strip() or 
             self.local_llm_decision_url.strip()
         )
+
+    @property
+    def pdf_renamer_configured(self) -> bool:
+        return bool(self.pdf_renamer_base_url.strip() and self.pdf_renamer_model.strip())
 
 
 @lru_cache

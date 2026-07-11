@@ -20,11 +20,17 @@ flowchart TB
         UPLOAD["POST /v2/projects/files<br/>X-Project-Key (admin key)"]
         HEALTH["GET /v2/llm-health"]
         PROJ["GET /v2/projects/…"]
+        MCP_API["POST /v2/pdf/generate<br/>GET /v2/pdf/download/:filename"]
     end
 
     subgraph Agents["Agentic pipeline (v2/services)"]
         ORCH["PipelineOrchestrator"]
         WORKERS["Celery workers<br/>text / audio / video processors"]
+        MGR["McpClientManager<br/>(spawns MCP servers via stdio)"]
+    end
+
+    subgraph MCPServers["Local MCP Servers"]
+        PDF_SERV["PDF Generator Server<br/>(FastMCP subprocess)"]
     end
 
     subgraph External["External services"]
@@ -42,7 +48,11 @@ flowchart TB
 
     UI --> SEARCH
     UI --> UPLOAD
+    UI --> MCP_API
     SEARCH --> ORCH
+    MCP_API --> MGR
+    ORCH --> MGR
+    MGR -->|"JSON-RPC via stdio"| PDF_SERV
     UPLOAD --> CDN
     UPLOAD --> NEON
     UPLOAD --> REDIS
@@ -93,6 +103,8 @@ flowchart TD
         EMPTY{"Any chunks<br/>retrieved?"}
         SYN["RagSynthesisAgent.synthesize()<br/>uses full conversation_context<br/>LLM: Rewriter Model"]
         NOIDX["Fixed message:<br/>No matching indexed content found"]
+        MCP_DEC{"Is PDF generation requested<br/>(tool call or query intent)?"}
+        MCP_CALL["McpClientManager.call_tool()<br/>Compile PDF and format download URL"]
         RDEC{"DecisionAgent.evaluate()<br/>uses full conversation_context<br/>LLM: Decision Model"}
         OK{"confidence ≥ threshold<br/>and verdict = good?"}
         RETRY{"Attempts<br/>remaining?"}
@@ -120,8 +132,10 @@ flowchart TD
     DENSE --> HYBRID
     KW --> HYBRID
     HYBRID --> FUSE --> EMPTY
-    EMPTY -->|"no"| NOIDX --> RDEC
-    EMPTY -->|"yes"| SYN --> RDEC
+    EMPTY -->|"no"| NOIDX --> MCP_DEC
+    EMPTY -->|"yes"| SYN --> MCP_DEC
+    MCP_DEC -->|"yes"| MCP_CALL --> RDEC
+    MCP_DEC -->|"no"| RDEC
     RDEC --> OK
     OK -->|"yes"| RECORD
     OK -->|"no"| RETRY
@@ -208,7 +222,7 @@ Re-index existing files after keyword-indexing changes so sparse vectors include
 
 ## 5. LLM client routing
 
-All agent LLM calls go through `get_v2_llm_client()` (`USE_CLOUD_LLM` flag):
+All agent LLM calls go through `get_v2_llm_client()` (`USE_CLOUD_LLM` flag), with MCP tools injected into synthesis-related calls:
 
 ```mermaid
 flowchart TD
@@ -232,11 +246,16 @@ flowchart TD
         M_DECISION["Decision — qwen3.5:4b or gpt-4o-mini"]
     end
 
+    subgraph MCPTools["MCP Tool Layer"]
+        MGR_T["McpClientManager.list_tools()"]
+    end
+
     GATE_A --> CLIENT
     GEN_A --> CLIENT
     RW_A --> CLIENT
     SYN_A --> CLIENT
     DEC_A --> CLIENT
+    MGR_T -.->|"Injected tools"| SYN_A
 
     CLIENT -->|"False"| LOCAL
     CLIENT -->|"True"| CLOUD
@@ -257,7 +276,7 @@ Embeddings (dense) and ingestion media APIs (Whisper, vision) always use OpenAI 
 
 | Module | Role | LLM / external |
 |--------|------|----------------|
-| `pipeline_orchestrator.py` | Wires gate → generic/decision or RAG loop; escalation; logging | — |
+| `pipeline_orchestrator.py` | Wires gate → generic/decision or RAG loop; escalation; logging; fallback PDF trigger | — |
 | `conversation_memory.py` | Rolling chat snapshot (default 10 exchanges, UTC timestamps) | — |
 | `conversation_format.py` | Greeting/chitchat check (`is_standalone_message`) and formatting for LLM conversation contexts | — |
 | `rag_gate.py` | Route `generic` vs `rag`; optional direct generic reply | Gate model |
@@ -271,6 +290,8 @@ Embeddings (dense) and ingestion media APIs (Whisper, vision) always use OpenAI 
 | `rag_synthesis_agent.py` | Grounded answer from top-k chunks | Rewriter model |
 | `decision_agent.py` | Score draft; retry or generic→RAG escalation | Decision model |
 | `pipeline_logger.py` | `pipeline_runs` + `pipeline_steps` in Postgres | Neon |
+| `mcp_manager.py` | McpClientManager - synchronizes and boots local FastMCP stdio subprocesses | FastMCP SDK / Stdio |
+| `mcp_servers/pdf_generator.py` | Local MCP server exposing the `generate_pdf` tool via FastMCP | ReportLab / FastMCP |
 | `json_utils.py` | Robust parsing of JSON structures from raw LLM responses (handling code fences) | — |
 | `llm_clients/base.py` | Base client class (`BaseLlmClient`) and structured LLM response interfaces | — |
 | `llm_clients/local.py` | OpenAI-compatible local HTTP client | Ollama / ngrok |
@@ -287,6 +308,8 @@ Embeddings (dense) and ingestion media APIs (Whisper, vision) always use OpenAI 
 | `POST` | `/v2/projects/files` | `X-Project-Key` (admin) | Upload + enqueue ingestion |
 | `GET` | `/v2/llm-health` | — | Probe gate LLM reachability |
 | `GET/POST` | `/v2/projects/…` | Admin key | Project management |
+| `POST` | `/v2/pdf/generate` | Optional `X-Project-Key` | Directly compile markdown to PDF |
+| `GET` | `/v2/pdf/download/{filename}` | — | Download a compiled PDF file |
 
 Frontend default search path: `VITE_SEARCH_API=/v2/search`.
 

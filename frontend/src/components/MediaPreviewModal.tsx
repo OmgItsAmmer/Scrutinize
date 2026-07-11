@@ -96,12 +96,12 @@ export function MediaPreviewModal({ file, onClose }: MediaPreviewModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/40 p-0 backdrop-blur-md sm:items-center sm:p-4"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="relative w-full max-h-[92dvh] max-w-3xl overflow-hidden rounded-t-2xl border border-zinc-200 bg-white shadow-xl sm:max-h-none sm:rounded-2xl"
+        className="relative w-full max-h-[92dvh] max-w-3xl overflow-hidden rounded-t-2xl border border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 shadow-xl sm:max-h-none sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"

@@ -1,6 +1,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Iterator, List, Optional
+
+@dataclass(frozen=True)
+class ToolCall:
+    """Carries details about a tool execution request from the LLM."""
+    id: str
+    name: str
+    arguments: dict
 
 @dataclass(frozen=True)
 class LlmResponse:
@@ -11,6 +18,7 @@ class LlmResponse:
     prompt_user: str
     raw_thinking: str | None = None
     latency_ms: int = 0
+    tool_calls: Optional[List[ToolCall]] = None
 
 class BaseLlmClient(ABC):
     """Abstract base interface for V2 LLM clients (Local or Cloud)."""
@@ -23,6 +31,7 @@ class BaseLlmClient(ABC):
         user: str,
         *,
         json_mode: bool = False,
+        tools: Optional[List[dict]] = None,
     ) -> LlmResponse:
         """Generate a response given a system and user prompt."""
         pass

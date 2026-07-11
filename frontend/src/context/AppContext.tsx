@@ -28,6 +28,7 @@ import type {
   JobStatus,
   LibraryFileItem,
   ModalityFilter,
+  PdfDrawerState,
   SearchV2Response,
   UploadJobState,
 } from "../types/api";
@@ -81,6 +82,7 @@ type AppState = {
   apiConnected: boolean;
   health: HealthResponse | null;
   healthError: string | null;
+  pdfDrawer: PdfDrawerState;
   search: SearchState;
   upload: UploadState;
   library: LibraryState;
@@ -97,6 +99,7 @@ type Action =
   | { type: "SEARCH_STREAM_CHUNK"; text: string }
   | { type: "SEARCH_SUCCESS"; result: SearchV2Response }
   | { type: "SEARCH_ERROR"; error: string }
+  | { type: "SEARCH_STREAM_ERROR"; error: string }
   | { type: "CLEAR_SEARCH" }
   | { type: "UPLOAD_START" }
   | { type: "UPLOAD_ERROR"; error: string }
@@ -110,13 +113,21 @@ type Action =
   | { type: "LIBRARY_FILE_REMOVED"; fileId: string }
   | { type: "AUTH_SUCCESS"; project: NonNullable<ProjectSessionState> }
   | { type: "AUTH_LOGOUT" }
-  | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any> };
+  | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any> }
+  | { type: "OPEN_PDF_DRAWER"; url: string; title: string; filename: string }
+  | { type: "CLOSE_PDF_DRAWER" };
 
 const initialState: AppState = {
   view: "search",
   apiConnected: false,
   health: null,
   healthError: null,
+  pdfDrawer: {
+    open: false,
+    url: null,
+    title: null,
+    filename: null,
+  },
   search: {
     query: "",
     activeQuery: null,
@@ -193,6 +204,26 @@ function reducer(state: AppState, action: Action): AppState {
         health: action.health,
         healthError: action.error,
         apiConnected: action.health !== null,
+      };
+    case "OPEN_PDF_DRAWER":
+      return {
+        ...state,
+        pdfDrawer: {
+          open: true,
+          url: action.url,
+          title: action.title,
+          filename: action.filename,
+        },
+      };
+    case "CLOSE_PDF_DRAWER":
+      return {
+        ...state,
+        pdfDrawer: {
+          open: false,
+          url: null,
+          title: null,
+          filename: null,
+        },
       };
     case "SET_SEARCH_QUERY":
       return { ...state, search: { ...state.search, query: action.query } };
@@ -272,6 +303,7 @@ function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "SEARCH_ERROR":
+    case "SEARCH_STREAM_ERROR":
       return {
         ...state,
         search: {
@@ -405,6 +437,8 @@ type AppContextValue = {
   logout: () => void;
   updateSettings: (settings: Record<string, any>) => Promise<void>;
   fetchSettings: () => Promise<void>;
+  openPdfDrawer: (payload: { url: string; title: string; filename: string }) => void;
+  closePdfDrawer: () => void;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -569,6 +603,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
               type: "SEARCH_SUCCESS",
               result: event.data,
             });
+          } else if (event.event === "error") {
+            dispatch({
+              type: "SEARCH_STREAM_ERROR",
+              error: event.data.message,
+            });
           }
         }
       );
@@ -674,6 +713,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       logout,
       updateSettings,
       fetchSettings,
+      openPdfDrawer: (payload) => dispatch({ type: "OPEN_PDF_DRAWER", ...payload }),
+      closePdfDrawer: () => dispatch({ type: "CLOSE_PDF_DRAWER" }),
     }),
     [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout, updateSettings, fetchSettings],
   );

@@ -49,6 +49,7 @@ class LocalLlmClient(BaseLlmClient):
         user: str,
         *,
         json_mode: bool = False,
+        tools: list[dict] | None = None,
     ) -> LlmResponse:
         start_time = time.perf_counter()
 
@@ -64,6 +65,8 @@ class LocalLlmClient(BaseLlmClient):
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if tools:
+            payload["tools"] = tools
 
         headers = {
             "Content-Type": "application/json",
@@ -99,12 +102,32 @@ class LocalLlmClient(BaseLlmClient):
 
         try:
             message = body["choices"][0]["message"]
-            text = str(message["content"]).strip()
+            text = str(message.get("content") or "").strip()
         except (KeyError, IndexError, TypeError) as exc:
             raise LocalLlmError(f"Unexpected response format from local LLM: {body}") from exc
 
-        if not text:
-            raise LocalLlmError("Local LLM returned an empty response")
+        tool_calls = None
+        if "tool_calls" in message and message["tool_calls"]:
+            import json
+            from app.services.v2.llm_clients.base import ToolCall
+            tool_calls = []
+            for tc in message["tool_calls"]:
+                try:
+                    args_raw = tc["function"]["arguments"]
+                    if isinstance(args_raw, str):
+                        args = json.loads(args_raw)
+                    else:
+                        args = args_raw
+                except Exception:
+                    args = {}
+                tool_calls.append(ToolCall(
+                    id=tc.get("id", ""),
+                    name=tc["function"]["name"],
+                    arguments=args
+                ))
+
+        if not text and not tool_calls:
+            raise LocalLlmError("Local LLM returned an empty response with no tool calls")
 
         raw_thinking = message.get("reasoning_content") or message.get("reasoning")
         if raw_thinking:
@@ -119,6 +142,7 @@ class LocalLlmClient(BaseLlmClient):
             prompt_user=user,
             raw_thinking=raw_thinking,
             latency_ms=latency_ms,
+            tool_calls=tool_calls,
         )
 
     @traceable(name="LocalLlmClient.generate_stream", run_type="llm")

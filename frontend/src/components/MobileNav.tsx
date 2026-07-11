@@ -26,7 +26,7 @@ export function MobileNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white lg:hidden"
+      className="fixed bottom-4 inset-x-4 z-40 rounded-2xl border border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 shadow-[0_8px_32px_rgba(0,0,0,0.03)] lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       aria-label="Main navigation"
     >
@@ -39,14 +39,14 @@ export function MobileNav() {
               key={item.id}
               type="button"
               onClick={() => handleNav(item.id, item.clearSearch)}
-              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
-                active ? "text-zinc-900" : "text-zinc-500"
+              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-semibold transition active:scale-95 ${
+                active ? "text-zinc-950" : "text-zinc-500 hover:text-zinc-700"
               }`}
               aria-current={active ? "page" : undefined}
             >
               <span
-                className={`flex h-8 w-8 items-center justify-center rounded-full transition ${
-                  active ? "bg-zinc-100 text-zinc-900" : "text-zinc-500"
+                className={`flex h-8 w-8 items-center justify-center rounded-xl border transition duration-300 ${
+                  active ? "bg-white/70 border-white/80 text-zinc-950 shadow-sm" : "bg-transparent border-transparent text-zinc-500"
                 }`}
               >
                 <Icon className="h-4 w-4" />

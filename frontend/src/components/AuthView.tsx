@@ -84,10 +84,10 @@ export function AuthView() {
   }
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-zinc-50 px-4 py-12 text-zinc-900 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-8 rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+    <div className="flex min-h-screen w-full items-center justify-center px-4 py-12 text-zinc-900 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md space-y-8 rounded-3xl p-8 glass-panel shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
         <div className="text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-900 text-lg font-bold text-white shadow-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-900 text-lg font-bold text-white shadow-md">
             S
           </div>
           <h2 className="mt-6 text-3xl font-bold tracking-tight text-zinc-900">
@@ -130,7 +130,7 @@ export function AuthView() {
                   disabled={loading}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
+                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
                 />
               </div>
               <div>
@@ -145,7 +145,7 @@ export function AuthView() {
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="scrutinize_sk_..."
-                  className="mt-1 block w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 font-mono text-sm shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
+                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 font-mono text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
                 />
               </div>
               <div>
@@ -160,7 +160,7 @@ export function AuthView() {
                   disabled={loading}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
+                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
                 />
               </div>
               <div>
@@ -175,7 +175,7 @@ export function AuthView() {
                   disabled={loading}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
+                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
                 />
               </div>
             </div>
@@ -203,7 +203,7 @@ export function AuthView() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. support-chatbot"
-                  className="mt-1 block w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50 sm:text-sm"
+                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50 sm:text-sm"
                 />
               </div>
               <div>
@@ -219,7 +219,7 @@ export function AuthView() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="mt-1 block w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50 sm:text-sm"
+                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50 sm:text-sm"
                 />
               </div>
             </div>

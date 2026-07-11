@@ -19,6 +19,7 @@ from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import RagGate
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 from app.services.v2.rrf_retriever import RrfRetriever
+from app.services.v2.mcp_manager import McpClientManager
 from app.services.vector_store import VectorStore
 
 
@@ -46,6 +47,8 @@ def get_vector_store(settings: Settings = Depends(get_app_settings)) -> VectorSt
     return VectorStore(settings)
 
 
+def get_mcp_manager(settings: Settings = Depends(get_app_settings)) -> McpClientManager:
+    return McpClientManager(settings)
 
 
 def get_v2_llm_client(settings: Settings = Depends(get_app_settings)) -> BaseLlmClient:
@@ -111,6 +114,7 @@ def get_pipeline_orchestrator(
     rag_synthesis: RagSynthesisAgent = Depends(get_rag_synthesis_agent),
     decision_agent: DecisionAgent = Depends(get_decision_agent),
     conversation_memory: ConversationMemory = Depends(get_conversation_memory),
+    mcp_manager: McpClientManager = Depends(get_mcp_manager),
     settings: Settings = Depends(get_app_settings),
     session: Session = Depends(get_db_session),
 ) -> PipelineOrchestrator:
@@ -123,6 +127,7 @@ def get_pipeline_orchestrator(
         decision_agent,
         conversation_memory,
         settings,
+        mcp_manager,
         session,
     )
 

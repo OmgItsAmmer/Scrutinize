@@ -24,7 +24,7 @@ function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
 
 function TextSourceCard({ source, style }: { source: SearchSource; style?: React.CSSProperties }) {
   return (
-    <article className="rounded-2xl border p-4 shadow-sm" style={style}>
+    <article className="rounded-2xl border p-4 shadow-sm backdrop-blur-md saturate-125" style={style}>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
@@ -53,7 +53,7 @@ function AudioSourceCard({ source, style }: { source: SearchSource; style?: Reac
   }, [source.source_path, source.start_time]);
 
   return (
-    <article className="rounded-2xl border p-4 shadow-sm" style={style}>
+    <article className="rounded-2xl border p-4 shadow-sm backdrop-blur-md saturate-125" style={style}>
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
@@ -85,7 +85,7 @@ function VideoSourceCard({ source, style }: { source: SearchSource; style?: Reac
   }, [source.source_path, source.start_time]);
 
   return (
-    <article className="rounded-2xl border p-4 shadow-sm" style={style}>
+    <article className="rounded-2xl border p-4 shadow-sm backdrop-blur-md saturate-125" style={style}>
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
@@ -116,8 +116,10 @@ const getCardStyle = (index: number) => {
   ];
   const color = badgeColors[index % badgeColors.length];
   return {
-    backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
-    borderColor: `color-mix(in srgb, ${color} 25%, transparent)`,
+    backgroundColor: `color-mix(in srgb, ${color} 18%, rgba(255, 255, 255, 0.28))`,
+    borderColor: `color-mix(in srgb, ${color} 40%, transparent)`,
+    backdropFilter: "blur(20px)",
+    WebkitBackdropFilter: "blur(20px)",
   };
 };
 
@@ -139,6 +141,26 @@ function CitationButton({
     >
       <IconDocument className="h-3 w-3 shrink-0 opacity-80" />
       <span className="leading-none">{index + 1}</span>
+    </button>
+  );
+}
+
+function LinkButton({
+  label,
+  href,
+  onClick,
+}: {
+  label: string;
+  href: string;
+  onClick?: (href: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onClick?.(href)}
+      className="inline-flex items-center rounded-full border border-white/45 bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-zinc-800 shadow-sm backdrop-blur-md transition hover:-translate-y-[1px] hover:bg-white"
+    >
+      {label}
     </button>
   );
 }
@@ -195,7 +217,8 @@ function parseCitations(
 export function renderMarkdown(
   text: string,
   sources?: SearchSource[],
-  onSourceClick?: (source: SearchSource, index: number) => void
+  onSourceClick?: (source: SearchSource, index: number) => void,
+  onLinkClick?: (href: string) => void
 ) {
   const lines = text.split("\n");
   let inList = false;
@@ -203,8 +226,13 @@ export function renderMarkdown(
   const elements: React.ReactNode[] = [];
 
   const parseInline = (chunk: string): React.ReactNode[] => {
-    const parts = chunk.split(/(\*\*.*?\*\*|`.*?`)/g);
+    const parts = chunk.split(/(\[[^\]]+\]\([^)]+\)|\*\*.*?\*\*|`.*?`)/g);
     return parts.flatMap((part, index) => {
+      const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        const [, label, href] = linkMatch;
+        return <LinkButton key={index} label={label} href={href} onClick={onLinkClick} />;
+      }
       if (part.startsWith("**") && part.endsWith("**")) {
         return (
           <strong key={index} className="font-semibold text-zinc-950">

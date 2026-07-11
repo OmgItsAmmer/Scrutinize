@@ -108,8 +108,8 @@ export function SettingsView() {
   if (!state.project) return null;
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-zinc-50 p-6 lg:p-8">
-      <div className="mx-auto w-full max-w-2xl space-y-8">
+    <div className="flex h-full flex-col overflow-y-auto bg-zinc-50/50 p-6 lg:p-8">
+      <div className="mx-auto w-full max-w-6xl space-y-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Project Settings</h1>
           <p className="mt-1 text-sm text-zinc-500">
@@ -117,128 +117,136 @@ export function SettingsView() {
           </p>
         </div>
 
-        {/* Password Card */}
-        <form onSubmit={handleChangePassword} className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-6">
-          <div>
-            <h2 className="text-base font-semibold text-zinc-900">Login Password</h2>
-            <p className="text-sm text-zinc-500">
-              Change the password used to sign in to this project. Leave current password empty to
-              reset using your admin API key (while logged in).
-            </p>
-          </div>
+        {/* Credentials Grid */}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* Password Card */}
+          <form onSubmit={handleChangePassword} className="flex flex-col justify-between rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-base font-semibold text-zinc-900">Login Password</h2>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Change the password used to sign in to this project. Leave current password empty to
+                  reset using your admin API key.
+                </p>
+              </div>
 
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">Current password</label>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Leave empty if you forgot it"
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">New password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={6}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">Confirm new password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                minLength={6}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
-            <div>
-              {passwordStatus === "success" && (
-                <p className="text-sm font-medium text-emerald-600">Password updated.</p>
-              )}
-              {passwordStatus === "error" && (
-                <p className="text-sm font-medium text-rose-600">{passwordError}</p>
-              )}
-            </div>
-            <button
-              type="submit"
-              disabled={passwordSaving}
-              className="flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
-            >
-              {passwordSaving ? "Updating..." : "Update Password"}
-            </button>
-          </div>
-        </form>
-
-        {/* API Keys Card */}
-        <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-zinc-900">API Keys</h2>
-              <p className="text-sm text-zinc-500">
-                Use these keys to authenticate your application.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowKeys(!showKeys)}
-              className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-900"
-            >
-              {showKeys ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
-              {showKeys ? "Hide Keys" : "Reveal Keys"}
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            {/* Admin API Key */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-900">Admin API Key</label>
-              <p className="text-xs text-zinc-500">
-                Used for administrative actions (e.g. uploading or deleting media). Keep this secret!
-              </p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-mono text-zinc-800 break-all">
-                  {showKeys ? state.project.apiKey : "•".repeat(40)}
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-700">Current password</label>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Leave empty if you forgot it"
+                    className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  />
                 </div>
-                <button
-                  onClick={() => handleCopy(state.project!.apiKey, "api")}
-                  className="flex h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-1"
-                >
-                  <IconCopy className="h-4 w-4" />
-                  {copiedKey === "api" ? "Copied!" : "Copy"}
-                </button>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-700">New password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-700">Confirm new password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                  />
+                </div>
               </div>
             </div>
 
-            {/* Client Key */}
-            <div className="space-y-2 pt-4 border-t border-zinc-100">
-              <label className="text-sm font-medium text-zinc-900">Public Client Key</label>
-              <p className="text-xs text-zinc-500">
-                Used for reading data (e.g. searching/chatting). Safe to embed in frontend clients.
-              </p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-mono text-zinc-800 break-all">
-                  {showKeys ? state.project.clientKey : "•".repeat(40)}
+            <div className="mt-6 flex items-center justify-between pt-4 border-t border-zinc-100">
+              <div className="min-w-0 pr-2">
+                {passwordStatus === "success" && (
+                  <p className="text-xs font-medium text-emerald-600 truncate">Password updated.</p>
+                )}
+                {passwordStatus === "error" && (
+                  <p className="text-xs font-medium text-rose-600 truncate">{passwordError}</p>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={passwordSaving}
+                className="flex h-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
+              >
+                {passwordSaving ? "Updating..." : "Update Password"}
+              </button>
+            </div>
+          </form>
+
+          {/* API Keys Card */}
+          <div className="flex flex-col justify-between rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div>
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-zinc-900">API Keys</h2>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Use these keys to authenticate external integrations or custom clients.
+                  </p>
                 </div>
                 <button
-                  onClick={() => handleCopy(state.project!.clientKey, "client")}
-                  className="flex h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-1"
+                  onClick={() => setShowKeys(!showKeys)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900"
                 >
-                  <IconCopy className="h-4 w-4" />
-                  {copiedKey === "client" ? "Copied!" : "Copy"}
+                  {showKeys ? <IconEyeOff className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
+                  {showKeys ? "Hide" : "Reveal"}
                 </button>
               </div>
+
+              <div className="space-y-4">
+                {/* Admin API Key */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-700">Admin API Key</label>
+                  <p className="text-[11px] text-zinc-500">
+                    Used for administrative actions (e.g. uploading media). Keep this secret!
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-mono text-zinc-800 break-all select-all">
+                      {showKeys ? state.project.apiKey : "•".repeat(40)}
+                    </div>
+                    <button
+                      onClick={() => handleCopy(state.project!.apiKey, "api")}
+                      className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900"
+                    >
+                      <IconCopy className="h-3.5 w-3.5" />
+                      {copiedKey === "api" ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Client Key */}
+                <div className="space-y-1.5 pt-4 border-t border-zinc-100">
+                  <label className="text-xs font-medium text-zinc-700">Public Client Key</label>
+                  <p className="text-[11px] text-zinc-500">
+                    Used for read/search actions. Safe to embed in frontend applications.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-mono text-zinc-800 break-all select-all">
+                      {showKeys ? state.project.clientKey : "•".repeat(40)}
+                    </div>
+                    <button
+                      onClick={() => handleCopy(state.project!.clientKey, "client")}
+                      className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-900"
+                    >
+                      <IconCopy className="h-3.5 w-3.5" />
+                      {copiedKey === "client" ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
+            <div className="h-9" /> {/* Spacer to align visually with the Password form button row */}
           </div>
         </div>
 
@@ -251,69 +259,79 @@ export function SettingsView() {
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {/* Gate */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">1. RAG Gate Prompt</label>
-              <p className="text-xs text-zinc-500">Routes the user query to generic conversation or RAG search.</p>
+            <div className="flex flex-col space-y-2">
+              <div>
+                <label className="text-sm font-semibold text-zinc-900">1. RAG Gate Prompt</label>
+                <p className="text-xs text-zinc-500">Routes the user query to generic conversation or RAG search.</p>
+              </div>
               <textarea
                 value={gatePrompt}
                 onChange={(e) => setGatePrompt(e.target.value)}
                 placeholder="Default RAG gate prompt..."
-                rows={3}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                rows={8}
+                className="w-full flex-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 font-mono"
               />
             </div>
 
             {/* Rewriter */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">2. Query Rewriter Prompt</label>
-              <p className="text-xs text-zinc-500">Rewrites user queries for optimal keyword retrieval.</p>
+            <div className="flex flex-col space-y-2">
+              <div>
+                <label className="text-sm font-semibold text-zinc-900">2. Query Rewriter Prompt</label>
+                <p className="text-xs text-zinc-500">Rewrites user queries for optimal keyword retrieval.</p>
+              </div>
               <textarea
                 value={rewriterPrompt}
                 onChange={(e) => setRewriterPrompt(e.target.value)}
                 placeholder="Default query rewriter prompt..."
-                rows={3}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                rows={8}
+                className="w-full flex-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 font-mono"
               />
             </div>
 
             {/* Generic Agent */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">3. Generic Agent Prompt</label>
-              <p className="text-xs text-zinc-500">Handles chit-chat and general knowledge queries directly without RAG search.</p>
+            <div className="flex flex-col space-y-2">
+              <div>
+                <label className="text-sm font-semibold text-zinc-900">3. Generic Agent Prompt</label>
+                <p className="text-xs text-zinc-500">Handles chit-chat and general knowledge queries directly.</p>
+              </div>
               <textarea
                 value={genericPrompt}
                 onChange={(e) => setGenericPrompt(e.target.value)}
                 placeholder="Default generic agent prompt..."
-                rows={3}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                rows={8}
+                className="w-full flex-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 font-mono"
               />
             </div>
 
             {/* Synthesis */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">4. Answer Synthesis Prompt</label>
-              <p className="text-xs text-zinc-500">Generates draft answers grounded strictly in retrieved documents.</p>
+            <div className="flex flex-col space-y-2">
+              <div>
+                <label className="text-sm font-semibold text-zinc-900">4. Answer Synthesis Prompt</label>
+                <p className="text-xs text-zinc-500">Generates draft answers grounded strictly in retrieved documents.</p>
+              </div>
               <textarea
                 value={synthesisPrompt}
                 onChange={(e) => setSynthesisPrompt(e.target.value)}
                 placeholder="Default answer synthesis prompt..."
-                rows={3}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                rows={8}
+                className="w-full flex-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 font-mono"
               />
             </div>
 
             {/* Decision */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-zinc-900">5. Decision Agent Prompt</label>
-              <p className="text-xs text-zinc-500">Scores draft answer quality and controls the query rewriting/retrieval retry loop.</p>
+            <div className="flex flex-col space-y-2 lg:col-span-2">
+              <div>
+                <label className="text-sm font-semibold text-zinc-900">5. Decision Agent Prompt</label>
+                <p className="text-xs text-zinc-500">Scores draft answer quality and controls the query rewriting/retrieval retry loop.</p>
+              </div>
               <textarea
                 value={decisionPrompt}
                 onChange={(e) => setDecisionPrompt(e.target.value)}
                 placeholder="Default decision agent prompt..."
-                rows={3}
-                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                rows={8}
+                className="w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm text-zinc-800 shadow-sm focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 font-mono"
               />
             </div>
           </div>

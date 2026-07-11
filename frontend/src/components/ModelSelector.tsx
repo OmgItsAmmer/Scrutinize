@@ -42,12 +42,12 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
         type="button"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1 rounded-lg border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-2 py-1 text-[11px] font-medium text-[var(--chatly-text-secondary)] transition hover:bg-[var(--chatly-dropdown-hover)] disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs"
+        className="flex items-center gap-1 rounded-lg border border-white/60 bg-white/20 backdrop-blur-md px-2 py-1 text-[11px] font-medium text-zinc-700 transition hover:bg-white/40 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <IconOpenAI className="h-3.5 w-3.5 shrink-0 text-[var(--chatly-text-primary)]" />
-        <span className="text-[var(--chatly-text-primary)]">{selected.provider}</span>
+        <IconOpenAI className="h-3.5 w-3.5 shrink-0 text-zinc-800" />
+        <span className="text-zinc-800">{selected.provider}</span>
         <span className="hidden sm:inline">{selected.label}</span>
         <span className="sm:hidden">Mini</span>
         <IconChevronDown className="h-3 w-3 opacity-60" />
@@ -56,7 +56,7 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
       {open && (
         <ul
           role="listbox"
-          className="absolute bottom-full right-0 z-20 mb-1.5 min-w-[220px] overflow-hidden rounded-xl border border-[var(--chatly-border)] bg-[var(--chatly-panel)] py-1 shadow-lg"
+          className="absolute bottom-full right-0 z-20 mb-1.5 min-w-[220px] overflow-hidden rounded-xl border border-white/60 bg-white/30 backdrop-blur-2xl saturate-150 py-1 shadow-lg"
         >
           {MODELS.map((model) => (
             <li key={model.id} role="option" aria-selected={model.id === selectedId}>

@@ -112,7 +112,8 @@ export function searchContent(
 export type StreamEvent =
   | { event: "status"; data: { step: string; model?: string; message: string; route?: string; rewritten?: string; confidence?: number; verdict?: string; correct_route?: string; feedback?: string; sources_count?: number; sources?: any[] } }
   | { event: "chunk"; data: { text: string } }
-  | { event: "result"; data: SearchV2Response };
+  | { event: "result"; data: SearchV2Response }
+  | { event: "error"; data: { message: string } };
 
 function parseSseChunk(chunk: string, onEvent: (event: StreamEvent) => void): boolean {
   const trimmedLine = chunk.trim();
@@ -127,7 +128,7 @@ function parseSseChunk(chunk: string, onEvent: (event: StreamEvent) => void): bo
 
   const parsed = JSON.parse(rawJson) as StreamEvent;
   onEvent(parsed);
-  return parsed.event === "result";
+  return parsed.event === "result" || parsed.event === "error";
 }
 
 export async function searchContentStream(

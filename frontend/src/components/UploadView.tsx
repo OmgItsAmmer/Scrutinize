@@ -71,8 +71,8 @@ export function UploadView() {
           }}
           className={`mt-6 flex flex-col items-center justify-center rounded-3xl border-2 border-dashed px-4 py-10 text-center transition sm:mt-8 sm:px-8 sm:py-16 ${
             upload.dragActive
-              ? "border-zinc-900 bg-zinc-50"
-              : "border-zinc-200 bg-white hover:border-zinc-300"
+              ? "border-zinc-900 bg-white/40 backdrop-blur-md"
+              : "border-white/50 bg-white/20 backdrop-blur-2xl saturate-150 hover:bg-white/35 hover:border-white/70"
           } ${!apiConnected ? "pointer-events-none opacity-50" : ""}`}
         >
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
@@ -112,7 +112,7 @@ export function UploadView() {
             {upload.activeJobs.map((job) => (
               <div
                 key={job.jobId}
-                className="flex items-start justify-between gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+                className="flex items-start justify-between gap-4 rounded-2xl border border-white/60 bg-white/20 backdrop-blur-xl saturate-150 p-4 shadow-sm"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-zinc-900">{job.filename}</p>

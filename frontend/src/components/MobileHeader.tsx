@@ -5,7 +5,7 @@ export function MobileHeader() {
 
   return (
     <header
-      className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 lg:hidden"
+      className="flex shrink-0 items-center justify-between border-b border-white/50 bg-white/20 backdrop-blur-3xl saturate-150 px-4 py-3 lg:hidden"
       style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))" }}
     >
       <div className="flex items-center gap-2 min-w-0">

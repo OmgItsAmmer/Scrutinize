@@ -40,6 +40,13 @@ class QueryRewriter:
 
         effective_model = model or self._model
         effective_system = system_override or self._system
+        
+        import datetime
+        now = datetime.datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        day_of_week = now.strftime("%A")
+        effective_system = f"Current Date: {date_str} ({day_of_week})\n\n{effective_system}"
+
         user_lines = [f"User query: {stripped}"]
         if feedback and feedback.strip():
             user_lines.append(f"Revision feedback: {feedback.strip()}")

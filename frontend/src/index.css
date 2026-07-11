@@ -1,56 +1,53 @@
 @import "tailwindcss";
 
 :root {
-  --chatly-bg: #fafafa;
-  --chatly-panel: #ffffff;
-  --chatly-text-primary: #111111;
-  --chatly-text-secondary: #6b7280;
+  --chatly-bg: #f6f4ef;
+  --chatly-panel: rgba(255, 255, 255, 0.28);
+  --chatly-text-primary: #121212;
+  --chatly-text-secondary: #4b5563;
   --chatly-text-muted: #9ca3af;
-  --chatly-border: #e8e8e8;
-  --chatly-input-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  --chatly-send-bg: #171717;
-  --chatly-send-hover: #2a2a2a;
-  --chatly-dropdown-hover: #f5f5f5;
+  --chatly-border: rgba(255, 255, 255, 0.75);
+  --chatly-input-shadow: 0 12px 36px rgba(15, 23, 42, 0.05);
+  --chatly-send-bg: #111111;
+  --chatly-send-hover: #2d2d2d;
+  --chatly-dropdown-hover: rgba(255, 255, 255, 0.45);
   --chatly-badge-all: #8b5cf6;
   --chatly-badge-text: #0ea5e9;
   --chatly-badge-audio: #10b981;
   --chatly-badge-video: #f59e0b;
 }
 
+.glass-panel {
+  background: rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 
+    0 8px 32px 0 rgba(15, 23, 42, 0.04),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.glass-panel-hover:hover {
+  background: rgba(255, 255, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 
+    0 12px 40px 0 rgba(15, 23, 42, 0.06),
+    inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.95);
+  transform: translateY(-1px);
+}
+
 body {
   @apply min-h-screen antialiased;
-  background-color: var(--chatly-bg);
+  background:
+    radial-gradient(circle at 10% 20%, rgba(240, 235, 255, 0.6) 0%, transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(255, 235, 230, 0.65) 0%, transparent 35%),
+    linear-gradient(135deg, #fbfaf7 0%, #f4eee2 55%, #f1ebe0 100%);
   color: var(--chatly-text-primary);
   -webkit-tap-highlight-color: transparent;
 }
-
-#root {
-  min-height: 100vh;
-  min-height: 100dvh;
-}
-
-/* Custom Scrollbars: Liquish Glassy Transparent */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 9999px;
-  border: 1px solid transparent;
-  background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.18);
-  background-clip: padding-box;
-}
-
 /* Hide scrollbar utility */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
@@ -91,18 +88,13 @@ body {
 }
 
 .thinking-panel {
-  background: linear-gradient(
-    135deg,
-    rgba(180, 180, 188, 0.22) 0%,
-    rgba(140, 140, 150, 0.14) 50%,
-    rgba(200, 200, 208, 0.18) 100%
-  );
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.65);
   box-shadow:
-    0 -4px 24px rgba(80, 80, 90, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    0 8px 32px 0 rgba(15, 23, 42, 0.03),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .thinking-panel-header {
@@ -181,6 +173,48 @@ body {
 
 .animate-scale-up {
   animation: scale-up 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(14px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Custom Scrollbars: Liquish Glassy Transparent */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.18);
+  background-clip: padding-box;
 }
 
 

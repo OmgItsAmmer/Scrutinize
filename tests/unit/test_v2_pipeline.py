@@ -51,7 +51,10 @@ def _memory_mock() -> MagicMock:
     return memory
 
 
-def _orchestrator(rewriter, gate, generic, rrf, synthesis, decision, memory, **settings_overrides):
+def _orchestrator(
+    rewriter, gate, generic, rrf, synthesis, decision, memory, *, mcp_manager=None,
+    **settings_overrides,
+):
     return PipelineOrchestrator(
         rewriter,
         gate,
@@ -61,6 +64,7 @@ def _orchestrator(rewriter, gate, generic, rrf, synthesis, decision, memory, **s
         decision,
         memory,
         _settings(**settings_overrides),
+        mcp_manager,
     )
 
 
@@ -236,6 +240,124 @@ def test_pipeline_orchestrator_rag_with_synthesis():
     assert response.rewritten_query == "garlic amount pasta recipe"
     decision.evaluate.assert_called_once()
     rewriter.rewrite.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_pipeline_pdf_intent_uses_rewritten_topic_and_calls_mcp_without_discovery():
+    rewriter = MagicMock()
+    rewriter.rewrite.return_value = RewrittenQuery(
+        text="OpenAI news updates and announcements."
+    )
+    gate = MagicMock()
+    gate.classify.return_value = GateResult(route="rag", reason="OpenAI news request")
+    generic = MagicMock()
+    rrf = MagicMock()
+    source = SearchSource(
+        segment_id=uuid4(),
+        file_id=uuid4(),
+        modality=FileModality.TEXT,
+        title="openai-news.txt",
+        content="OpenAI announced new Academy courses.",
+        source_path="https://example.com/openai-news",
+        score=0.9,
+    )
+    rrf.retrieve.return_value = _retrieve_result([source])
+    synthesis = MagicMock()
+    synthesis.synthesize.return_value = SynthesisResult(
+        answer="OpenAI announced new Academy courses."
+    )
+    decision = MagicMock()
+    decision.evaluate.return_value = DecisionResult(
+        verdict="good", confidence=0.95, feedback="", correct_route="rag"
+    )
+    memory = _memory_mock()
+    mcp_manager = MagicMock()
+    mcp_manager.is_enabled.return_value = True
+    mcp_manager.list_tools.return_value = []
+    mcp_manager.call_tool.return_value = (
+        "C:/tmp/generated_pdfs/openai-news-updates.pdf"
+    )
+
+    orchestrator = _orchestrator(
+        rewriter,
+        gate,
+        generic,
+        rrf,
+        synthesis,
+        decision,
+        memory,
+        mcp_manager=mcp_manager,
+    )
+    response = orchestrator.search("generate me pdf on openai news")
+
+    assert response.answer.startswith("PDF generated successfully:")
+    assert "openai-news-updates.pdf" in response.answer
+    assert synthesis.synthesize.call_args.args[0] == "OpenAI news updates and announcements."
+    assert synthesis.synthesize.call_args.kwargs["tools"] is None
+    mcp_manager.list_tools.assert_not_called()
+    mcp_manager.call_tool.assert_called_once_with(
+        "generate_pdf",
+        {
+            "title": "generate-me-pdf-on-openai-news",
+            "content": "OpenAI announced new Academy courses.",
+        },
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_streaming_pipeline_pdf_intent_calls_mcp_without_discovery():
+    rewriter = MagicMock()
+    rewriter.rewrite.return_value = RewrittenQuery(text="OpenAI news updates.")
+    gate = MagicMock()
+    gate.classify.return_value = GateResult(route="rag", reason="OpenAI news request")
+    generic = MagicMock()
+    rrf = MagicMock()
+    source = SearchSource(
+        segment_id=uuid4(),
+        file_id=uuid4(),
+        modality=FileModality.TEXT,
+        title="openai-news.txt",
+        content="OpenAI announced new Academy courses.",
+        source_path="https://example.com/openai-news",
+        score=0.9,
+    )
+    rrf.retrieve.return_value = _retrieve_result([source])
+    synthesis = MagicMock()
+    synthesis.synthesize.return_value = SynthesisResult(
+        answer="OpenAI announced new Academy courses."
+    )
+    decision = MagicMock()
+    decision.evaluate.return_value = DecisionResult(
+        verdict="good", confidence=0.95, feedback="", correct_route="rag"
+    )
+    memory = _memory_mock()
+    mcp_manager = MagicMock()
+    mcp_manager.is_enabled.return_value = True
+    mcp_manager.list_tools.return_value = []
+    mcp_manager.call_tool.return_value = "C:/tmp/generated_pdfs/openai-news.pdf"
+
+    orchestrator = _orchestrator(
+        rewriter,
+        gate,
+        generic,
+        rrf,
+        synthesis,
+        decision,
+        memory,
+        mcp_manager=mcp_manager,
+    )
+    events = "".join(
+        orchestrator.search_stream("generate me pdf on openai news")
+    )
+
+    assert '"step": "tool_call"' in events
+    assert '"step": "tool_call_end"' in events
+    assert "openai-news.pdf" in events
+    assert synthesis.synthesize.call_args.args[0] == "OpenAI news updates."
+    mcp_manager.list_tools.assert_not_called()
+    mcp_manager.call_tool.assert_called_once()
 
 
 @pytest.mark.unit

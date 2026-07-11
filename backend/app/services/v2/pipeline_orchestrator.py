@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import typing
 from uuid import UUID
 
@@ -18,13 +19,16 @@ from app.services.v2.generic_agent import GenericAgent
 from app.services.v2.pipeline_logger import PipelineLogger
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import GateResult, RagGate
-from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
+from app.services.v2.rag_synthesis_agent import RagSynthesisAgent, SynthesisResult as RagSynthesisResult
 from app.services.v2.rrf_retriever import RrfRetriever
+from app.services.v2.mcp_manager import McpClientManager
 
 logger = logging.getLogger(__name__)
 
 NO_INDEXED_CONTENT = "No matching indexed content found."
 LOW_CONFIDENCE_DISCLAIMER = "Note: answer may vary — retrieval confidence was low."
+PDF_TITLE_FALLBACK = "generated-document"
+PDF_TOOL_NAME = "generate_pdf"
 
 
 class PipelineOrchestrator:
@@ -40,6 +44,7 @@ class PipelineOrchestrator:
         decision_agent: DecisionAgent,
         conversation_memory: ConversationMemory,
         settings: Settings,
+        mcp_manager: McpClientManager | None = None,
         session: Session | None = None,
     ) -> None:
         self._rewriter = rewriter
@@ -49,6 +54,7 @@ class PipelineOrchestrator:
         self._rag_synthesis = rag_synthesis
         self._decision = decision_agent
         self._memory = conversation_memory
+        self._mcp_manager = mcp_manager
         self._settings = settings
         self._db_logger = PipelineLogger(session)
 
@@ -77,6 +83,7 @@ class PipelineOrchestrator:
                 project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
             ),
             conversation_context=conversation_context,
+            tool_context=self._build_gate_tool_context(),
         )
         self._db_logger.log_gate(
             run_id=run_id,
@@ -132,165 +139,273 @@ class PipelineOrchestrator:
         stripped = query.strip()
         conv_state, conversation_context = self._memory.prepare(conversation)
 
-        run_id = self._db_logger.start_run(
-            query=stripped,
-            modality_filter=modality_filter,
-            conversation_context=conversation_context,
-        )
-
-        gate_model = project_ctx.gate_model if project_ctx else self._settings.local_llm_gate_model
-        yield emit("status", {
-            "step": "gate",
-            "model": gate_model,
-            "message": "Classifying query route..."
-        })
-
-        gate_result = self._gate.classify(
-            stripped,
-            model=project_ctx.gate_model if project_ctx else None,
-            system_override=(
-                project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
-            ),
-            conversation_context=conversation_context,
-        )
-        self._db_logger.log_gate(
-            run_id=run_id,
-            gate_result=gate_result,
-        )
-
-        yield emit("status", {
-            "step": "gate_end",
-            "route": gate_result.route,
-            "message": f"Route decided: {gate_result.route.upper()}"
-        })
-
-        if gate_result.route == "generic":
-            answer = ""
-            if gate_result.reply:
-                answer = gate_result.reply
-                yield emit("status", {
-                    "step": "synthesis",
-                    "model": gate_model,
-                    "message": "Retrieving cached reply..."
-                })
-                yield emit("chunk", {"text": answer})
-            else:
-                yield emit("status", {
-                    "step": "synthesis",
-                    "model": gate_model,
-                    "message": "Generating reply..."
-                })
-                for chunk in self._generic.reply_stream(
-                    stripped,
-                    system_override=project_ctx.system_prompt_overrides.get("generic") if project_ctx else None,
-                    conversation_context=conversation_context,
-                ):
-                    answer += chunk
-                    yield emit("chunk", {"text": chunk})
-
-            yield emit("status", {
-                "step": "evaluation",
-                "model": project_ctx.decision_model if project_ctx else self._settings.local_llm_decision_model,
-                "message": "Evaluating reply..."
-            })
-            
-            from app.services.v2.generic_agent import GenericReplyResult
-            self._db_logger.log_synthesis(
-                run_id=run_id,
-                attempt=1,
-                synthesis_result=GenericReplyResult(answer=answer, llm_call=None),
+        run_id: UUID | None = None
+        try:
+            run_id = self._db_logger.start_run(
+                query=stripped,
+                modality_filter=modality_filter,
+                conversation_context=conversation_context,
             )
 
-            decision = self._decision.evaluate(
-                DecisionContext(
-                    original_query=stripped,
-                    rewritten_query=stripped,
-                    route="generic",
-                    draft_answer=answer,
-                    sources=[],
-                    attempt=1,
-                    conversation_context=conversation_context,
+            gate_model = project_ctx.gate_model if project_ctx else self._settings.local_llm_gate_model
+            yield emit("status", {
+                "step": "gate",
+                "model": gate_model,
+                "message": "Classifying query route..."
+            })
+
+            gate_result = self._gate.classify(
+                stripped,
+                model=project_ctx.gate_model if project_ctx else None,
+                system_override=(
+                    project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
                 ),
-                model=project_ctx.decision_model if project_ctx else None,
-                system_override=project_ctx.system_prompt_overrides.get("decision") if project_ctx else None,
+                conversation_context=conversation_context,
+                tool_context=self._build_gate_tool_context(),
             )
-            self._db_logger.log_evaluation(
+            self._db_logger.log_gate(
                 run_id=run_id,
-                attempt=1,
-                decision=decision,
+                gate_result=gate_result,
             )
 
             yield emit("status", {
-                "step": "evaluation_end",
-                "confidence": decision.confidence,
-                "verdict": decision.verdict,
-                "correct_route": decision.correct_route,
-                "message": f"Evaluation verdict: {decision.verdict.upper()} (Confidence: {int((decision.confidence or 0)*100)}%)"
+                "step": "gate_end",
+                "route": gate_result.route,
+                "message": f"Route decided: {gate_result.route.upper()}"
             })
 
-            if decision.correct_route == "rag":
-                escalated = GateResult(
-                    route="rag",
-                    reason=(
-                        f"Escalated from generic gate: {decision.feedback or gate_result.reason}"
-                    ),
-                    llm_call=None,
-                )
-                self._db_logger.log_gate(
-                    run_id=run_id,
-                    gate_result=escalated,
-                )
+            if gate_result.route == "generic":
+                answer = ""
+                if gate_result.reply:
+                    answer = gate_result.reply
+                    yield emit("status", {
+                        "step": "synthesis",
+                        "model": gate_model,
+                        "message": "Retrieving cached reply..."
+                    })
+                    yield emit("chunk", {"text": answer})
+                else:
+                    yield emit("status", {
+                        "step": "synthesis",
+                        "model": gate_model,
+                        "message": "Generating reply..."
+                    })
+                    for chunk in self._generic.reply_stream(
+                        stripped,
+                        system_override=project_ctx.system_prompt_overrides.get("generic") if project_ctx else None,
+                        conversation_context=conversation_context,
+                    ):
+                        answer += chunk
+                        yield emit("chunk", {"text": chunk})
+
                 yield emit("status", {
-                    "step": "escalate",
-                    "message": "Generic response evaluation failed. Escalating to RAG pipeline..."
+                    "step": "evaluation",
+                    "model": project_ctx.decision_model if project_ctx else self._settings.local_llm_decision_model,
+                    "message": "Evaluating reply..."
                 })
+
+                from app.services.v2.generic_agent import GenericReplyResult
+                self._db_logger.log_synthesis(
+                    run_id=run_id,
+                    attempt=1,
+                    synthesis_result=GenericReplyResult(answer=answer, llm_call=None),
+                )
+
+                decision = self._decision.evaluate(
+                    DecisionContext(
+                        original_query=stripped,
+                        rewritten_query=stripped,
+                        route="generic",
+                        draft_answer=answer,
+                        sources=[],
+                        attempt=1,
+                        conversation_context=conversation_context,
+                    ),
+                    model=project_ctx.decision_model if project_ctx else None,
+                    system_override=project_ctx.system_prompt_overrides.get("decision") if project_ctx else None,
+                )
+                self._db_logger.log_evaluation(
+                    run_id=run_id,
+                    attempt=1,
+                    decision=decision,
+                )
+
+                yield emit("status", {
+                    "step": "evaluation_end",
+                    "confidence": decision.confidence,
+                    "verdict": decision.verdict,
+                    "correct_route": decision.correct_route,
+                    "message": f"Evaluation verdict: {decision.verdict.upper()} (Confidence: {int((decision.confidence or 0)*100)}%)"
+                })
+
+                if decision.correct_route == "rag":
+                    escalated = GateResult(
+                        route="rag",
+                        reason=(
+                            f"Escalated from generic gate: {decision.feedback or gate_result.reason}"
+                        ),
+                        llm_call=None,
+                    )
+                    self._db_logger.log_gate(
+                        run_id=run_id,
+                        gate_result=escalated,
+                    )
+                    yield emit("status", {
+                        "step": "escalate",
+                        "message": "Generic response evaluation failed. Escalating to RAG pipeline..."
+                    })
+                    yield from self._stream_rag_pipeline(
+                        run_id=run_id,
+                        stripped=stripped,
+                        gate_result=escalated,
+                        conv_state=conv_state,
+                        conversation_context=conversation_context,
+                        modality_filter=modality_filter,
+                        project_ctx=project_ctx,
+                        emit=emit,
+                    )
+                    return
+
+                updated_conversation = self._memory.record_exchange(conv_state, stripped, answer)
+                response = self._build_response(
+                    query=stripped,
+                    rewritten_query=stripped,
+                    gate_result=gate_result,
+                    modality_filter=modality_filter,
+                    answer=answer,
+                    sources=[],
+                    attempts=1,
+                    confidence=decision.confidence,
+                    disclaimer_appended=False,
+                    conversation=updated_conversation,
+                )
+                self._db_logger.end_run(
+                    run_id=run_id,
+                    final_route=response.route,
+                    final_answer=response.answer,
+                    final_confidence=response.confidence,
+                    attempts_count=response.attempts,
+                    disclaimer_appended=response.disclaimer_appended,
+                )
+                yield emit("result", response.model_dump(mode="json"))
+                return
+
+            else:
                 yield from self._stream_rag_pipeline(
                     run_id=run_id,
                     stripped=stripped,
-                    gate_result=escalated,
+                    gate_result=gate_result,
                     conv_state=conv_state,
                     conversation_context=conversation_context,
                     modality_filter=modality_filter,
                     project_ctx=project_ctx,
                     emit=emit,
                 )
-                return
-
-            updated_conversation = self._memory.record_exchange(conv_state, stripped, answer)
-            response = self._build_response(
-                query=stripped,
-                rewritten_query=stripped,
-                gate_result=gate_result,
-                modality_filter=modality_filter,
-                answer=answer,
-                sources=[],
-                attempts=1,
-                confidence=decision.confidence,
-                disclaimer_appended=False,
-                conversation=updated_conversation,
-            )
-            self._db_logger.end_run(
-                run_id=run_id,
-                final_route=response.route,
-                final_answer=response.answer,
-                final_confidence=response.confidence,
-                attempts_count=response.attempts,
-                disclaimer_appended=response.disclaimer_appended,
-            )
-            yield emit("result", response.model_dump(mode="json"))
+        except Exception as exc:
+            logger.exception("v2 stream failed: %s", exc)
+            if run_id is not None:
+                try:
+                    self._db_logger.end_run(
+                        run_id=run_id,
+                        final_route="generic" if "generic" in str(exc).lower() else "rag",
+                        final_answer=f"Error: {exc}",
+                        final_confidence=None,
+                        attempts_count=1,
+                        disclaimer_appended=False,
+                    )
+                except Exception:
+                    logger.exception("Failed to close run after stream error")
+            yield emit("error", {"message": str(exc)})
             return
 
-        else:
-            yield from self._stream_rag_pipeline(
-                run_id=run_id,
-                stripped=stripped,
-                gate_result=gate_result,
-                conv_state=conv_state,
-                conversation_context=conversation_context,
-                modality_filter=modality_filter,
-                project_ctx=project_ctx,
-                emit=emit,
+    def _build_gate_tool_context(self) -> str:
+        if not self._mcp_manager or not self._mcp_manager.is_enabled():
+            return ""
+        return (
+            "- generate_pdf: Create a downloadable PDF document from synthesized "
+            "technology/AI news content."
+        )
+
+    @staticmethod
+    def _requested_pdf(gate_result: GateResult) -> bool:
+        return gate_result.requested_tool == PDF_TOOL_NAME
+
+    def _build_pdf_download_url(self, filename: str) -> str:
+        base_url = os.getenv("VITE_API_URL", "http://localhost:8000").rstrip("/")
+        return f"{base_url}/v2/pdf/download/{filename}"
+
+    def _build_pdf_success_message(self, filename: str, download_url: str) -> str:
+        return f"PDF generated successfully: [{filename}]({download_url})"
+
+    def _slugify_pdf_title(self, value: str) -> str:
+        cleaned_chars = [
+            character.lower() if character.isalnum() else "-"
+            for character in value.strip()
+        ]
+        cleaned = "".join(cleaned_chars).strip("-")
+        while "--" in cleaned:
+            cleaned = cleaned.replace("--", "-")
+        return cleaned[:40] or PDF_TITLE_FALLBACK
+
+    def _generate_pdf_title(self, query: str, answer: str) -> str:
+        if not self._settings.pdf_renamer_configured:
+            return self._slugify_pdf_title(query)
+
+        prompt = (
+            "You are a filename renaming assistant.\n"
+            "Create a short PDF filename slug from the content.\n"
+            "Rules:\n"
+            "- Return only the slug, no quotes, no punctuation, no markdown.\n"
+            "- Use lowercase words separated by hyphens.\n"
+            "- Keep it under 6 words.\n"
+            "- Prefer the main topic of the content.\n"
+        )
+        user = (
+            f"User request: {query.strip()}\n\n"
+            f"Content:\n{answer.strip() or query.strip()}\n\n"
+            "Filename slug:"
+        )
+
+        try:
+            import httpx
+
+            response = httpx.post(
+                f"{self._settings.pdf_renamer_base_url.rstrip('/')}/v1/chat/completions",
+                json={
+                    "model": self._settings.pdf_renamer_model,
+                    "messages": [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": 0.2,
+                    "stream": False,
+                },
+                timeout=self._settings.pdf_renamer_timeout_s,
             )
+            response.raise_for_status()
+            body = response.json()
+            slug = str(body["choices"][0]["message"].get("content") or "").strip()
+            return self._slugify_pdf_title(slug)
+        except Exception:
+            return self._slugify_pdf_title(query)
+
+    def _generate_pdf_from_answer(self, query: str, answer: str) -> tuple[str, str] | None:
+        if not self._mcp_manager or not self._mcp_manager.is_enabled():
+            return None
+
+        title_slug = self._generate_pdf_title(query, answer)
+
+        filepath = self._mcp_manager.call_tool(
+            "generate_pdf",
+            {
+                "title": title_slug,
+                "content": answer.strip() or query.strip(),
+            },
+        )
+        filename = os.path.basename(str(filepath).strip())
+        if not filename:
+            return None
+        return filename, self._build_pdf_download_url(filename)
 
     def _stream_rag_pipeline(
         self,
@@ -382,11 +497,10 @@ class PipelineOrchestrator:
                     "message": "No documents found. Synthesizing default response..."
                 })
                 yield emit("chunk", {"text": answer})
-                from app.services.v2.rag_synthesis_agent import SynthesisResult
                 self._db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=attempt,
-                    synthesis_result=SynthesisResult(answer=answer, llm_call=None),
+                    synthesis_result=RagSynthesisResult(answer=answer, llm_call=None),
                 )
             else:
                 synthesis_model = project_ctx.synthesis_model if project_ctx else self._settings.local_llm_rewriter_model
@@ -396,24 +510,92 @@ class PipelineOrchestrator:
                     "message": "Synthesizing answer..."
                 })
 
-                answer = ""
-                for chunk in self._rag_synthesis.synthesize_stream(
-                    stripped,
-                    sources,
-                    model=project_ctx.synthesis_model if project_ctx else None,
-                    system_override=(
-                        project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
-                    ),
-                    conversation_context=conversation_context,
-                ):
-                    answer += chunk
-                    yield emit("chunk", {"text": chunk})
+                pdf_requested = self._requested_pdf(gate_result)
+                tools = (
+                    self._mcp_manager.list_tools()
+                    if (
+                        self._mcp_manager
+                        and self._mcp_manager.is_enabled()
+                    )
+                    else None
+                )
+                if tools or pdf_requested:
+                    synthesis_result = self._rag_synthesis.synthesize(
+                        stripped,
+                        sources,
+                        model=project_ctx.synthesis_model if project_ctx else None,
+                        system_override=(
+                            project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
+                        ),
+                        conversation_context=conversation_context,
+                        tools=tools,
+                    )
+                    answer = synthesis_result.answer
 
-                from app.services.v2.rag_synthesis_agent import SynthesisResult
+                    llm_call = synthesis_result.llm_call
+                    pdf_result = None
+                    if llm_call and llm_call.tool_calls:
+                        for tool_call in llm_call.tool_calls:
+                            if tool_call.name == "generate_pdf":
+                                try:
+                                    yield emit("status", {
+                                        "step": "tool_call",
+                                        "message": f"Running tool: {tool_call.name}..."
+                                    })
+                                    filepath = self._mcp_manager.call_tool(tool_call.name, tool_call.arguments)
+                                    filename = os.path.basename(str(filepath).strip())
+                                    download_url = self._build_pdf_download_url(filename)
+                                    yield emit("status", {
+                                        "step": "tool_call_end",
+                                        "message": f"PDF generated successfully: {filename}"
+                                    })
+                                    answer = self._build_pdf_success_message(filename, download_url)
+                                    pdf_result = (filename, download_url)
+                                except Exception as e:
+                                    answer = f"Failed to generate PDF: {e}"
+                                    synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                                    pdf_result = None
+                                break
+
+                    if pdf_requested and pdf_result is None:
+                        try:
+                            yield emit("status", {
+                                "step": "tool_call",
+                                "message": "Running tool: generate_pdf..."
+                            })
+                            maybe_pdf = self._generate_pdf_from_answer(stripped, answer)
+                            if not maybe_pdf:
+                                raise RuntimeError("MCP PDF Server is unavailable or disabled.")
+                            filename, download_url = maybe_pdf
+                            yield emit("status", {
+                                "step": "tool_call_end",
+                                "message": f"PDF generated successfully: {filename}"
+                            })
+                            answer = self._build_pdf_success_message(filename, download_url)
+                        except Exception as exc:
+                            answer = f"Failed to generate PDF: {exc}"
+                        synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+
+                    yield emit("chunk", {"text": answer})
+                else:
+                    answer = ""
+                    for chunk in self._rag_synthesis.synthesize_stream(
+                        stripped,
+                        sources,
+                        model=project_ctx.synthesis_model if project_ctx else None,
+                        system_override=(
+                            project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
+                        ),
+                        conversation_context=conversation_context,
+                    ):
+                        answer += chunk
+                        yield emit("chunk", {"text": chunk})
+                    synthesis_result = RagSynthesisResult(answer=answer, llm_call=None)
+
                 self._db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=attempt,
-                    synthesis_result=SynthesisResult(answer=answer, llm_call=None),
+                    synthesis_result=synthesis_result,
                 )
 
             decision_model = project_ctx.decision_model if project_ctx else self._settings.local_llm_decision_model
@@ -674,14 +856,22 @@ class PipelineOrchestrator:
 
             if not sources:
                 answer = NO_INDEXED_CONTENT
-                from app.services.v2.rag_synthesis_agent import SynthesisResult
-                mock_result = SynthesisResult(answer=answer, llm_call=None)
+                mock_result = RagSynthesisResult(answer=answer, llm_call=None)
                 self._db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=attempt,
                     synthesis_result=mock_result,
                 )
             else:
+                pdf_requested = self._requested_pdf(gate_result)
+                tools = (
+                    self._mcp_manager.list_tools()
+                    if (
+                        self._mcp_manager
+                        and self._mcp_manager.is_enabled()
+                    )
+                    else None
+                )
                 synthesis_result = self._rag_synthesis.synthesize(
                     stripped,
                     sources,
@@ -690,8 +880,35 @@ class PipelineOrchestrator:
                         project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
                     ),
                     conversation_context=conversation_context,
+                    tools=tools,
                 )
                 answer = synthesis_result.answer
+
+                llm_call = synthesis_result.llm_call
+                if llm_call and llm_call.tool_calls:
+                    for tool_call in llm_call.tool_calls:
+                        if tool_call.name == "generate_pdf":
+                            try:
+                                filepath = self._mcp_manager.call_tool(tool_call.name, tool_call.arguments)
+                                filename = os.path.basename(str(filepath).strip())
+                                download_url = self._build_pdf_download_url(filename)
+                                answer = self._build_pdf_success_message(filename, download_url)
+                                synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                            except Exception as e:
+                                answer = f"Failed to generate PDF: {e}"
+                                synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                            break
+                if pdf_requested and not answer.startswith("PDF generated successfully:"):
+                    try:
+                        maybe_pdf = self._generate_pdf_from_answer(stripped, answer)
+                        if not maybe_pdf:
+                            raise RuntimeError("MCP PDF Server is unavailable or disabled.")
+                        filename, download_url = maybe_pdf
+                        answer = self._build_pdf_success_message(filename, download_url)
+                    except Exception as exc:
+                        answer = f"Failed to generate PDF: {exc}"
+                    synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+
                 self._db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=attempt,

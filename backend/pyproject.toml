@@ -25,6 +25,8 @@ dependencies = [
     "pypdf[image]>=4.0.0",
     "fastembed>=0.3.0",
     "langsmith>=0.1.0",
+    "mcp>=1.0.0",
+    "reportlab>=4.0.0",
 ]
 
 [project.optional-dependencies]

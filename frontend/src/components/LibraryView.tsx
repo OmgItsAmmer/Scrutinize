@@ -101,7 +101,7 @@ function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
 
 function LibraryFileCard({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
   return (
-    <article className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <article className="rounded-xl border border-white/50 bg-white/30 backdrop-blur-xl p-4 shadow-sm">
       <div className="flex gap-3">
         <FileThumbnail file={file} onClick={() => onPreview(file)} />
         <div className="min-w-0 flex-1">
@@ -175,7 +175,7 @@ export function LibraryView() {
             type="button"
             onClick={() => void refreshLibrary()}
             disabled={library.loading}
-            className="w-full rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50 sm:w-auto"
+            className="w-full rounded-full border border-white/60 bg-white/20 backdrop-blur-md px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-white/40 disabled:opacity-50 sm:w-auto"
           >
             {library.loading ? "Refreshing…" : "Refresh"}
           </button>
@@ -187,7 +187,7 @@ export function LibraryView() {
           </div>
         )}
 
-        <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm sm:mt-8">
+        <div className="mt-6 overflow-hidden rounded-2xl border border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 shadow-sm sm:mt-8">
           {library.loading && library.files.length === 0 ? (
             <div className="flex items-center justify-center px-6 py-16 text-sm text-zinc-500">
               Loading index…
@@ -211,7 +211,7 @@ export function LibraryView() {
               </div>
               <div className="hidden overflow-x-auto md:block">
                 <table className="min-w-full">
-                  <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  <thead className="bg-white/30 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 border-b border-white/40">
                     <tr>
                       <th className="px-4 py-3">Preview</th>
                       <th className="px-4 py-3">File</th>

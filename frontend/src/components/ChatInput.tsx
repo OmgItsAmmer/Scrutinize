@@ -47,7 +47,7 @@ export function ChatInput({
         <button
           type="button"
           onClick={clearSearch}
-          className="absolute -top-10 left-0 z-20 flex items-center gap-1.5 rounded-lg border border-[var(--chatly-border)] bg-[var(--chatly-panel)] px-2.5 py-1 text-xs font-medium text-[var(--chatly-text-secondary)] shadow-sm transition hover:bg-[var(--chatly-dropdown-hover)] active:scale-95 cursor-pointer sm:-top-11"
+          className="absolute -top-10 left-0 z-20 flex items-center gap-1.5 rounded-lg border border-white/40 bg-white/40 backdrop-blur-lg px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-white/60 active:scale-95 cursor-pointer sm:-top-11"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
           New Session
@@ -55,7 +55,7 @@ export function ChatInput({
       )}
 
       <div
-        className="relative w-full rounded-2xl border border-[var(--chatly-border)] bg-[var(--chatly-panel)] transition focus-within:border-zinc-300"
+        className="relative w-full rounded-2xl border border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 transition-all duration-300 focus-within:border-zinc-400/80 focus-within:bg-white/35 focus-within:shadow-[0_12px_40px_rgba(0,0,0,0.06)]"
         style={{ boxShadow: "var(--chatly-input-shadow)" }}
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 sm:px-4 sm:py-3.5">

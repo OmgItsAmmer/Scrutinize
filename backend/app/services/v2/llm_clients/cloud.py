@@ -33,6 +33,7 @@ class CloudLlmClient(BaseLlmClient):
         user: str,
         *,
         json_mode: bool = False,
+        tools: list[dict] | None = None,
     ) -> LlmResponse:
         start_time = time.perf_counter()
 
@@ -47,6 +48,8 @@ class CloudLlmClient(BaseLlmClient):
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if tools:
+            kwargs["tools"] = tools
             
         def _call_openai() -> Any:
             return self._client.chat.completions.create(**kwargs)
@@ -63,12 +66,29 @@ class CloudLlmClient(BaseLlmClient):
 
         try:
             message = response.choices[0].message
-            text = str(message.content).strip()
+            text = str(message.content or "").strip()
         except (KeyError, IndexError, TypeError, AttributeError) as exc:
             raise CloudLlmError(f"Unexpected response format from Cloud LLM") from exc
 
-        if not text:
-            raise CloudLlmError("Cloud LLM returned an empty response")
+        # Parse tool calls
+        tool_calls = None
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            import json
+            from app.services.v2.llm_clients.base import ToolCall
+            tool_calls = []
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except Exception:
+                    args = {}
+                tool_calls.append(ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=args
+                ))
+
+        if not text and not tool_calls:
+            raise CloudLlmError("Cloud LLM returned an empty response with no tool calls")
 
         # OpenAI o1/o3 models may include reasoning_content or similar in the future,
         # but for now, standard models don't return raw thinking in the same way DeepSeek does.
@@ -83,6 +103,7 @@ class CloudLlmClient(BaseLlmClient):
             prompt_user=user,
             raw_thinking=raw_thinking,
             latency_ms=latency_ms,
+            tool_calls=tool_calls,
         )
 
     @traceable(name="CloudLlmClient.generate_stream", run_type="llm")

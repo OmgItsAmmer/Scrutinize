@@ -19,6 +19,7 @@ class GateResult:
     route: Route
     reason: str
     reply: str | None = None
+    requested_tool: str | None = None
     llm_call: LlmResponse | None = None
 
 
@@ -38,9 +39,12 @@ class RagGate:
         model: str | None = None,
         system_override: str | None = None,
         conversation_context: str = "",
+        tool_context: str = "",
     ) -> GateResult:
         effective_model = model or self._model
         effective_system = system_override or self._system
+        if tool_context.strip():
+            effective_system = f"{effective_system}\n\nAvailable application tools:\n{tool_context.strip()}"
         user_lines = [f"Current user query: {original.strip()}"]
         append_conversation_context(user_lines, conversation_context)
 
@@ -59,9 +63,24 @@ class RagGate:
             reason = str(data.get("reason", "")).strip() or "No reason provided"
             reply_raw = data.get("reply")
             reply = str(reply_raw).strip() if reply_raw not in (None, "", "null") else None
+            requested_tool_raw = data.get("requested_tool")
+            requested_tool = (
+                str(requested_tool_raw).strip()
+                if requested_tool_raw not in (None, "", "null")
+                else None
+            )
+            if requested_tool == "generate_pdf":
+                route = "rag"
+                reply = None
             if route == "generic" and not reply:
                 reply = None
-            return GateResult(route=route, reason=reason, reply=reply, llm_call=llm_response)
+            return GateResult(
+                route=route,
+                reason=reason,
+                reply=reply,
+                requested_tool=requested_tool,
+                llm_call=llm_response,
+            )
         except Exception as exc:
             logger.warning("RAG gate generation/parse failed; defaulting to generic: %s", exc)
             return GateResult(
