@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import typing
+from typing import Any
 from uuid import UUID
 
 from langsmith import traceable
@@ -22,6 +23,7 @@ from app.services.v2.rag_gate import GateResult, RagGate
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent, SynthesisResult as RagSynthesisResult
 from app.services.v2.rrf_retriever import RrfRetriever
 from app.services.v2.mcp_manager import McpClientManager
+from app.services.web_search import WebSearchService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ class PipelineOrchestrator:
         decision_agent: DecisionAgent,
         conversation_memory: ConversationMemory,
         settings: Settings,
+        web_search: WebSearchService | None = None,
         mcp_manager: McpClientManager | None = None,
         session: Session | None = None,
     ) -> None:
@@ -54,6 +57,7 @@ class PipelineOrchestrator:
         self._rag_synthesis = rag_synthesis
         self._decision = decision_agent
         self._memory = conversation_memory
+        self._web_search = web_search
         self._mcp_manager = mcp_manager
         self._settings = settings
         self._db_logger = PipelineLogger(session)
@@ -66,6 +70,7 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
+        web_search: bool = False,
     ) -> SearchV2Response:
         stripped = query.strip()
         conv_state, conversation_context = self._memory.prepare(conversation)
@@ -85,6 +90,18 @@ class PipelineOrchestrator:
             conversation_context=conversation_context,
             tool_context=self._build_gate_tool_context(),
         )
+
+        if web_search:
+            from app.services.v2.rag_gate import GateResult
+            new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
+            gate_result = GateResult(
+                route=new_route,
+                reason=f"{gate_result.reason} (Web search forced by user)",
+                reply=None if new_route != "generic" else gate_result.reply,
+                requested_tool=gate_result.requested_tool,
+                llm_call=gate_result.llm_call
+            )
+
         self._db_logger.log_gate(
             run_id=run_id,
             gate_result=gate_result,
@@ -128,6 +145,7 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
+        web_search: bool = False,
     ) -> typing.Generator[str, None, None]:
         import json
         from uuid import UUID
@@ -163,6 +181,18 @@ class PipelineOrchestrator:
                 conversation_context=conversation_context,
                 tool_context=self._build_gate_tool_context(),
             )
+
+            if web_search:
+                from app.services.v2.rag_gate import GateResult
+                new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
+                gate_result = GateResult(
+                    route=new_route,
+                    reason=f"{gate_result.reason} (Web search forced by user)",
+                    reply=None if new_route != "generic" else gate_result.reply,
+                    requested_tool=gate_result.requested_tool,
+                    llm_call=gate_result.llm_call
+                )
+
             self._db_logger.log_gate(
                 run_id=run_id,
                 gate_result=gate_result,
@@ -466,21 +496,21 @@ class PipelineOrchestrator:
                 "message": "Retrieving context from indexed sources..."
             })
 
-            retrieval = self._rrf.retrieve(
-                rewritten_text,
+            sources, stats, rank_fields, latency_ms = self._retrieve_sources(
+                rewritten_text=rewritten_text,
                 project_id=project_id,
                 modality_filter=modality_filter,
+                route=gate_result.route,
             )
-            sources = retrieval.sources
             self._db_logger.log_retrieval(
                 run_id=run_id,
                 attempt=attempt,
                 query=stripped,
                 rewritten_query=rewritten_text,
                 sources=sources,
-                retrieval_stats=retrieval.stats,
-                source_rank_fields=retrieval.source_rank_fields,
-                latency_ms=retrieval.latency_ms,
+                retrieval_stats=stats,
+                source_rank_fields=rank_fields,
+                latency_ms=latency_ms,
             )
 
             yield emit("status", {
@@ -837,21 +867,21 @@ class PipelineOrchestrator:
                 rewritten=rewritten,
             )
 
-            retrieval = self._rrf.retrieve(
-                rewritten_text,
+            sources, stats, rank_fields, latency_ms = self._retrieve_sources(
+                rewritten_text=rewritten_text,
                 project_id=project_id,
                 modality_filter=modality_filter,
+                route=gate_result.route,
             )
-            sources = retrieval.sources
             self._db_logger.log_retrieval(
                 run_id=run_id,
                 attempt=attempt,
                 query=stripped,
                 rewritten_query=rewritten_text,
                 sources=sources,
-                retrieval_stats=retrieval.stats,
-                source_rank_fields=retrieval.source_rank_fields,
-                latency_ms=retrieval.latency_ms,
+                retrieval_stats=stats,
+                source_rank_fields=rank_fields,
+                latency_ms=latency_ms,
             )
 
             if not sources:
@@ -1033,3 +1063,112 @@ class PipelineOrchestrator:
             disclaimer_appended=disclaimer_appended,
             conversation=conversation,
         )
+
+    def _retrieve_sources(
+        self,
+        rewritten_text: str,
+        project_id: UUID,
+        modality_filter: FileModality | None,
+        route: str,
+    ) -> tuple[list[SearchSource], Any, list[Any], int]:
+        import time
+        from app.services.v2.retrieval_utils import RetrievalStats
+
+        if route == "web":
+            started = time.monotonic()
+            sources = self._retrieve_web(rewritten_text)
+            latency_ms = int((time.monotonic() - started) * 1000)
+            return sources, RetrievalStats.empty(rrf_k=self._settings.v2_rrf_k), [], latency_ms
+
+        # Run RRF retrieval
+        retrieval = self._rrf.retrieve(
+            rewritten_text,
+            project_id=project_id,
+            modality_filter=modality_filter,
+        )
+        sources = retrieval.sources
+        stats = retrieval.stats
+        rank_fields = retrieval.source_rank_fields
+        latency_ms = retrieval.latency_ms
+
+        if route == "hybrid":
+            started_web = time.monotonic()
+            web_sources = self._retrieve_web(rewritten_text)
+            sources = sources + web_sources
+            latency_ms += int((time.monotonic() - started_web) * 1000)
+        elif not sources and self._settings.enable_web_search:
+            # Fallback to web search
+            started_web = time.monotonic()
+            web_sources = self._retrieve_web(rewritten_text)
+            sources = web_sources
+            latency_ms += int((time.monotonic() - started_web) * 1000)
+
+        return sources, stats, rank_fields, latency_ms
+
+    def _retrieve_web(self, query: str) -> list[SearchSource]:
+        if not self._web_search:
+            return []
+
+        # 1. Search the web
+        web_results = self._run_async(self._web_search.search, query, limit=3)
+        if not web_results:
+            return []
+
+        # 2. Extract URLs, titles, and snippets
+        urls = [res["url"] for res in web_results]
+        titles = [res["title"] for res in web_results]
+        snippets = [res["snippet"] for res in web_results]
+
+        # 3. Scrape the content in parallel
+        scraped_contents = self._run_async(self._web_search.scrape_urls_parallel, urls)
+
+        # 4. Convert to SearchSource objects
+        import uuid
+        from app.models.file import FileModality
+
+        sources = []
+        for i, url in enumerate(urls):
+            # Generate deterministic UUIDs from URL to maintain consistency
+            ns = uuid.NAMESPACE_URL
+            seg_id = uuid.uuid5(ns, url)
+            file_id = uuid.uuid5(ns, url + "/file")
+            
+            content = scraped_contents[i].strip() if i < len(scraped_contents) else ""
+            # Fall back to snippet if scraping yielded no content
+            if not content:
+                content = snippets[i]
+
+            # Limit length to avoid breaking context window
+            if len(content) > 8000:
+                content = content[:8000] + "..."
+
+            sources.append(
+                SearchSource(
+                    segment_id=seg_id,
+                    file_id=file_id,
+                    modality=FileModality.TEXT,
+                    title=titles[i] or "Web Result",
+                    content=content,
+                    source_path=url,
+                    score=1.0 - (i * 0.1),
+                )
+            )
+        return sources
+
+    def _run_async(self, func, *args, **kwargs):
+        import asyncio
+        try:
+            from anyio.from_thread import run as anyio_run
+            return anyio_run(func, *args, **kwargs)
+        except Exception:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                future = asyncio.run_coroutine_threadsafe(func(*args, **kwargs), loop)
+                return future.result()
+            else:
+                return asyncio.run(func(*args, **kwargs))

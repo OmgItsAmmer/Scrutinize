@@ -21,6 +21,7 @@ from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 from app.services.v2.rrf_retriever import RrfRetriever
 from app.services.v2.mcp_manager import McpClientManager
 from app.services.vector_store import VectorStore
+from app.services.web_search import WebSearchService
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -106,6 +107,12 @@ def get_conversation_memory(
     return ConversationMemory(settings)
 
 
+def get_web_search_service(
+    settings: Settings = Depends(get_app_settings),
+) -> WebSearchService:
+    return WebSearchService(settings)
+
+
 def get_pipeline_orchestrator(
     rewriter: QueryRewriter = Depends(get_query_rewriter),
     gate: RagGate = Depends(get_rag_gate),
@@ -114,21 +121,23 @@ def get_pipeline_orchestrator(
     rag_synthesis: RagSynthesisAgent = Depends(get_rag_synthesis_agent),
     decision_agent: DecisionAgent = Depends(get_decision_agent),
     conversation_memory: ConversationMemory = Depends(get_conversation_memory),
+    web_search_service: WebSearchService = Depends(get_web_search_service),
     mcp_manager: McpClientManager = Depends(get_mcp_manager),
     settings: Settings = Depends(get_app_settings),
     session: Session = Depends(get_db_session),
 ) -> PipelineOrchestrator:
     return PipelineOrchestrator(
-        rewriter,
-        gate,
-        generic_agent,
-        rrf_retriever,
-        rag_synthesis,
-        decision_agent,
-        conversation_memory,
-        settings,
-        mcp_manager,
-        session,
+        rewriter=rewriter,
+        gate=gate,
+        generic_agent=generic_agent,
+        rrf_retriever=rrf_retriever,
+        rag_synthesis=rag_synthesis,
+        decision_agent=decision_agent,
+        conversation_memory=conversation_memory,
+        web_search=web_search_service,
+        settings=settings,
+        mcp_manager=mcp_manager,
+        session=session,
     )
 
 

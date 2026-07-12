@@ -1,4 +1,4 @@
-Authentication Microservice
+whAuthentication Microservice
 Login/Register functionality
 JWT-based authentication
 Proper session management

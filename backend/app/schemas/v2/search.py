@@ -11,6 +11,8 @@ from app.schemas.search import SearchSource
 class SearchV2Route(StrEnum):
     RAG = "rag"
     GENERIC = "generic"
+    WEB = "web"
+    HYBRID = "hybrid"
 
 
 class ChatMessage(BaseModel):
@@ -27,6 +29,7 @@ class SearchV2Request(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     modality_filter: FileModality | None = None
     conversation: ConversationState | None = None
+    web_search: bool = False
 
 
 class SearchV2Response(BaseModel):

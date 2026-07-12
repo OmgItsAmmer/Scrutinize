@@ -165,6 +165,7 @@ export async function searchContentStream(
   query: string,
   modalityFilter: ModalityFilter,
   conversation: ConversationState | undefined,
+  webSearch: boolean | undefined,
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
   const path = "/v2/search/stream";
@@ -182,6 +183,7 @@ export async function searchContentStream(
       query,
       modality_filter: modalityFilter === "all" ? null : modalityFilter,
       conversation: conversation ?? { messages: [] },
+      web_search: Boolean(webSearch),
     }),
   });
 

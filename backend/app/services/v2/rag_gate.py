@@ -11,7 +11,7 @@ from app.services.v2.conversation_format import append_conversation_context
 
 logger = logging.getLogger(__name__)
 
-Route = Literal["rag", "generic"]
+Route = Literal["rag", "generic", "web", "hybrid"]
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,14 @@ class RagGate:
             raw = llm_response.content
             data = parse_json_object(raw)
             route_raw = str(data.get("route", "generic")).strip().lower()
-            route: Route = "rag" if route_raw == "rag" else "generic"
+            if route_raw == "rag":
+                route: Route = "rag"
+            elif route_raw == "web":
+                route: Route = "web"
+            elif route_raw == "hybrid":
+                route: Route = "hybrid"
+            else:
+                route: Route = "generic"
             reason = str(data.get("reason", "")).strip() or "No reason provided"
             reply_raw = data.get("reply")
             reply = str(reply_raw).strip() if reply_raw not in (None, "", "null") else None

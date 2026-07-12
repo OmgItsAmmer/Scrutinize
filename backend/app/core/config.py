@@ -96,6 +96,13 @@ class Settings(BaseSettings):
     # MCP Configurations
     mcp_pdf_server_enabled: bool = True
 
+    # Web Search Configurations
+    brave_search_api_key: str = ""
+    tavily_api_key: str = ""
+    enable_web_search: bool = True
+    web_search_engine: str = "brave"  # "brave" or "tavily"
+    jina_reader_token: str = ""
+
     # LangSmith tracing config
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""

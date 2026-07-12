@@ -42,6 +42,7 @@ type SearchState = {
   query: string;
   activeQuery: string | null;
   modalityFilter: ModalityFilter;
+  webSearch: boolean;
   loading: boolean;
   error: string | null;
   result: SearchV2Response | null;
@@ -94,6 +95,7 @@ type Action =
   | { type: "SET_HEALTH"; health: HealthResponse | null; error: string | null }
   | { type: "SET_SEARCH_QUERY"; query: string }
   | { type: "SET_MODALITY_FILTER"; filter: ModalityFilter }
+  | { type: "SET_WEB_SEARCH"; enabled: boolean }
   | { type: "SEARCH_START" }
   | { type: "SEARCH_STREAM_UPDATE"; step: string | null; model: string | null; message: string | null; sources?: any[]; route?: string; rewritten?: string; sources_count?: number; confidence?: number; verdict?: string; feedback?: string }
   | { type: "SEARCH_STREAM_CHUNK"; text: string }
@@ -132,6 +134,7 @@ const initialState: AppState = {
     query: "",
     activeQuery: null,
     modalityFilter: "all",
+    webSearch: false,
     loading: false,
     error: null,
     result: null,
@@ -229,6 +232,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, search: { ...state.search, query: action.query } };
     case "SET_MODALITY_FILTER":
       return { ...state, search: { ...state.search, modalityFilter: action.filter } };
+    case "SET_WEB_SEARCH":
+      return { ...state, search: { ...state.search, webSearch: action.enabled } };
     case "SEARCH_START":
       return {
         ...state,
@@ -426,6 +431,7 @@ type AppContextValue = {
   setView: (view: AppView) => void;
   setSearchQuery: (query: string) => void;
   setModalityFilter: (filter: ModalityFilter) => void;
+  setWebSearch: (enabled: boolean) => void;
   runSearch: () => Promise<void>;
   clearSearch: () => void;
   uploadFiles: (files: FileList | File[]) => Promise<void>;
@@ -578,6 +584,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         query,
         state.search.modalityFilter,
         state.search.conversation,
+        state.search.webSearch,
         (event) => {
           if (event.event === "status") {
             dispatch({
@@ -614,7 +621,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       dispatch({ type: "SEARCH_ERROR", error: formatError(error) });
     }
-  }, [state.apiConnected, state.search.conversation, state.search.modalityFilter, state.search.query]);
+  }, [state.apiConnected, state.search.conversation, state.search.modalityFilter, state.search.query, state.search.webSearch]);
 
   const uploadFilesHandler = useCallback(async (files: FileList | File[]) => {
     if (!state.apiConnected) {
@@ -702,6 +709,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setView: (view) => dispatch({ type: "SET_VIEW", view }),
       setSearchQuery: (query) => dispatch({ type: "SET_SEARCH_QUERY", query }),
       setModalityFilter: (filter) => dispatch({ type: "SET_MODALITY_FILTER", filter }),
+      setWebSearch: (enabled) => dispatch({ type: "SET_WEB_SEARCH", enabled }),
       runSearch,
       clearSearch: () => dispatch({ type: "CLEAR_SEARCH" }),
       uploadFiles: uploadFilesHandler,

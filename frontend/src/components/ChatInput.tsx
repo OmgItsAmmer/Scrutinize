@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AnimatedPlaceholder } from "./AnimatedPlaceholder";
-import { IconSend } from "./icons";
+import { IconSend, IconGlobe } from "./icons";
 import { ModelSelector } from "./ModelSelector";
 import { useApp } from "../context/AppContext";
 
@@ -21,7 +21,7 @@ export function ChatInput({
   loading,
   showNewSession = false,
 }: ChatInputProps) {
-  const { clearSearch } = useApp();
+  const { state: { search }, setWebSearch, clearSearch } = useApp();
   const showAnimatedPlaceholder = !value && !disabled;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -79,7 +79,23 @@ export function ChatInput({
           </div>
           
           <div className="flex items-center justify-between pt-2 border-t border-[var(--chatly-border)]/40 mt-1">
-            <ModelSelector disabled={disabled || loading} />
+            <div className="flex items-center gap-2">
+              <ModelSelector disabled={disabled || loading} />
+              <button
+                type="button"
+                onClick={() => setWebSearch(!search.webSearch)}
+                disabled={disabled || loading}
+                className={`flex items-center gap-1 rounded-lg border backdrop-blur-md px-2 py-1 text-[11px] font-medium transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs ${
+                  search.webSearch
+                    ? "border-white/10 bg-zinc-950/80 text-white hover:bg-zinc-900/80"
+                    : "border-white/60 bg-white/20 text-zinc-700 hover:bg-white/40"
+                }`}
+                title="Search web for real-time information"
+              >
+                <IconGlobe className={`h-3.5 w-3.5 shrink-0 transition ${search.webSearch ? "text-white" : "text-zinc-700"}`} />
+                <span>Search Web</span>
+              </button>
+            </div>
             <button
               type="submit"
               disabled={disabled || loading || !value.trim()}
