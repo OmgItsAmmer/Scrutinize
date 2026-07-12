@@ -37,6 +37,19 @@ async function parseError(response: Response): Promise<string> {
   return `Request failed (${response.status})`;
 }
 
+async function parseBlobError(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    return parseError(response);
+  }
+  try {
+    const text = await response.text();
+    return text || `Request failed (${response.status})`;
+  } catch {
+    return `Request failed (${response.status})`;
+  }
+}
+
 function getProjectKey(path: string): string | null {
   if (
     path.includes("/v2/projects/login")
@@ -69,6 +82,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getApiUrl(): string {
   return API_URL;
+}
+
+export async function fetchPdfBlob(url: string): Promise<Blob> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new ApiError(await parseBlobError(response), response.status);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/pdf")) {
+    throw new ApiError(
+      `Expected a PDF response, received ${contentType || "unknown content"}.`,
+      response.status,
+    );
+  }
+
+  return response.blob();
 }
 
 export function isLocalDevApi(): boolean {

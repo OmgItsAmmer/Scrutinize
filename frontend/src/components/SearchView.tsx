@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchPdfBlob } from "../api/client";
 import { useApp } from "../context/AppContext";
 import { ChatInput } from "./ChatInput";
 import { ModalityChips } from "./ModalityChips";
@@ -9,6 +10,22 @@ import { IconDownload, IconX } from "./icons";
 
 const CHAT_INPUT_WIDTH = "max-w-3xl";
 const CHAT_FEED_WIDTH = "max-w-3xl";
+
+function filenameFromPdfUrl(url: string) {
+  let name = url.split("?")[0]?.split("/").filter(Boolean).pop() ?? "generated-document.pdf";
+  if (!name.endsWith(".pdf")) {
+    name = `${name}.pdf`;
+  }
+  return name;
+}
+
+function pdfPreviewUrl(url: string) {
+  let preview = url.replace("/v2/pdf/download/", "/v2/pdf/preview/").split("?")[0] ?? url;
+  if (preview.endsWith(".pdf")) {
+    preview = preview.slice(0, -4);
+  }
+  return preview;
+}
 
 function UserMessage({ content }: { content: string }) {
   return (
@@ -56,40 +73,101 @@ function PdfPanel({
   filename: string | null;
   onClose: () => void;
 }) {
+  const previewUrl = url ? pdfPreviewUrl(url) : null;
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    if (!previewUrl || !open) {
+      setBlobUrl(null);
+      setPdfBlob(null);
+      setPreviewError(null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setBlobUrl(null);
+    setPdfBlob(null);
+
+    fetchPdfBlob(previewUrl)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfBlob(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPreviewError(error instanceof Error ? error.message : "Unable to load PDF preview.");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [open, previewUrl]);
+
+  function handleDownload() {
+    if (!pdfBlob) return;
+    const objectUrl = URL.createObjectURL(pdfBlob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename ?? "generated-document.pdf";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
   return (
     <aside
-      className={`hidden min-h-0 w-[min(42vw,36rem)] shrink-0 flex-col border-l border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 transition-all duration-500 lg:flex ${
+      className={`hidden min-h-0 flex-1 flex-col border-l border-zinc-200/70 bg-white/70 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-2xl saturate-150 transition-all duration-500 lg:flex ${
         open ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-4 opacity-0"
       }`}
     >
-      <div className="border-b border-white/40 px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
+      <div className="shrink-0 border-b border-zinc-200/70 px-4 py-3">
+        <div className="flex min-h-12 items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
               PDF Preview
             </p>
             <h2 className="mt-1 truncate text-base font-semibold text-zinc-950">
               {filename ?? "generated-document.pdf"}
             </h2>
-            {title && <p className="mt-1 line-clamp-2 text-sm text-zinc-600">{title}</p>}
+            {title && <p className="mt-0.5 truncate text-xs text-zinc-500">{title}</p>}
           </div>
           <div className="flex items-center gap-2">
-            {url && (
-              <a
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-white/45 bg-white/65 px-3 py-2 text-xs font-semibold text-zinc-800 shadow-sm transition hover:bg-white"
+            {previewUrl && (
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={!pdfBlob}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-950"
+                title="Download PDF"
+                aria-label="Download PDF"
               >
-                <IconDownload className="h-3.5 w-3.5" />
-                Open
-              </a>
+                <IconDownload className="h-4 w-4" />
+              </button>
             )}
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full border border-white/45 bg-white/65 p-2 text-zinc-600 shadow-sm transition hover:bg-white hover:text-zinc-950"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-600 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-950"
               aria-label="Close PDF preview"
+              title="Close preview"
             >
               <IconX className="h-4 w-4" />
             </button>
@@ -97,20 +175,26 @@ function PdfPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 p-4">
-        <div className="flex h-full flex-col overflow-hidden rounded-[2rem] border border-white/60 bg-white/20 shadow-[0_20px_60px_rgba(15,23,42,0.05)] backdrop-blur-xl">
-          {url ? (
-            <iframe
-              title={filename ?? "generated-document.pdf"}
-              src={url}
-              className="h-full w-full bg-white"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-              No PDF available yet.
-            </div>
-          )}
-        </div>
+      <div className="min-h-0 flex-1 bg-zinc-100">
+        {previewLoading ? (
+          <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+            Loading PDF preview...
+          </div>
+        ) : previewError ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-rose-600">
+            {previewError}
+          </div>
+        ) : blobUrl ? (
+          <iframe
+            title={filename ?? "generated-document.pdf"}
+            src={blobUrl}
+            className="h-full w-full bg-white"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+            No PDF available yet.
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -147,8 +231,8 @@ export function SearchView() {
       return;
     }
 
-    const url = match[2];
-    const filename = url.split("/").filter(Boolean).pop() ?? "generated-document.pdf";
+    const url = pdfPreviewUrl(match[2]);
+    const filename = filenameFromPdfUrl(url);
     openPdfDrawer({
       url,
       title: search.result?.query ?? "Generated PDF",
@@ -166,9 +250,10 @@ export function SearchView() {
       return;
     }
 
-    const filename = href.split("/").filter(Boolean).pop() ?? "generated-document.pdf";
+    const url = pdfPreviewUrl(href);
+    const filename = filenameFromPdfUrl(url);
     openPdfDrawer({
-      url: href,
+      url,
       title: search.result?.query ?? "Generated PDF",
       filename,
     });
@@ -189,7 +274,7 @@ export function SearchView() {
 
   return (
     <div className="flex h-full min-w-0 flex-row bg-[var(--chatly-bg)]">
-      <div className={`relative flex min-w-0 flex-1 flex-col transition-all duration-500 ${pdfOpen ? "lg:max-w-[58%]" : ""}`}>
+      <div className={`relative flex min-w-0 flex-col transition-all duration-500 ${pdfOpen ? "lg:w-[42%] lg:flex-none" : "flex-1"}`}>
         <div
           className={`absolute inset-0 z-10 flex flex-col items-center justify-center px-4 pb-4 transition-all duration-500 ease-out sm:px-6 sm:pb-8 ${
             sessionActive

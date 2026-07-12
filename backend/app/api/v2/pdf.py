@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -11,6 +11,19 @@ router = APIRouter()
 class PdfRequest(BaseModel):
     title: str
     content: str
+
+
+def _generated_pdf_path(filename: str) -> str:
+    if not filename.endswith(".pdf"):
+        filename = f"{filename}.pdf"
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    filepath = os.path.abspath(os.path.join(repo_root, "scratch", "generated_pdfs", filename))
+    output_dir = os.path.abspath(os.path.join(repo_root, "scratch", "generated_pdfs"))
+    if not filepath.startswith(output_dir):
+        raise HTTPException(status_code=400, detail="Invalid path parameter.")
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="PDF file not found.")
+    return filepath
 
 @router.post("/pdf/generate", tags=["v2"])
 def generate_pdf_endpoint(
@@ -41,7 +54,8 @@ def generate_pdf_endpoint(
         return FileResponse(
             path=filepath,
             media_type="application/pdf",
-            filename=os.path.basename(filepath)
+            filename=os.path.basename(filepath),
+            content_disposition_type="inline",
         )
     except Exception as exc:
         raise HTTPException(
@@ -49,26 +63,28 @@ def generate_pdf_endpoint(
             detail=f"Failed to generate PDF: {exc}"
         )
 
-@router.get("/pdf/download/{filename}", tags=["v2"])
-def download_pdf_endpoint(filename: str):
-    """Serve a generated PDF file for download."""
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-    filepath = os.path.join(repo_root, "scratch", "generated_pdfs", filename)
-    
-    # Security check: prevent directory traversal
-    filepath = os.path.abspath(filepath)
-    output_dir = os.path.abspath(os.path.join(repo_root, "scratch", "generated_pdfs"))
-    if not filepath.startswith(output_dir):
-        raise HTTPException(status_code=400, detail="Invalid path parameter.")
-        
-    if not os.path.exists(filepath):
-        raise HTTPException(
-            status_code=404,
-            detail="PDF file not found."
-        )
-        
+@router.get("/pdf/preview/{filename}", tags=["v2"])
+def preview_pdf_endpoint(filename: str):
+    """Serve a generated PDF for inline browser preview."""
+    filepath = _generated_pdf_path(filename)
     return FileResponse(
         path=filepath,
         media_type="application/pdf",
-        filename=filename
+        filename=filename,
+        content_disposition_type="inline",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/pdf/download/{filename}", tags=["v2"])
+def download_pdf_endpoint(filename: str, download: bool = Query(default=True)):
+    """Serve a generated PDF as a download."""
+    filepath = _generated_pdf_path(filename)
+    return FileResponse(
+        path=filepath,
+        media_type="application/pdf",
+        filename=filename,
+        content_disposition_type="attachment" if download else "inline",
     )
