@@ -116,28 +116,6 @@ class ProjectLoginRequest(BaseModel):
     password: str = Field(...)
 
 
-class ChangePasswordRequest(BaseModel):
-    """Request body for POST /v2/projects/me/password (admin key required)."""
-
-    new_password: str = Field(..., min_length=6, max_length=128)
-    current_password: str | None = Field(
-        default=None,
-        description="Required when changing password. Omit to reset using admin API key only.",
-    )
-
-
-class ResetPasswordRequest(BaseModel):
-    """Request body for POST /v2/projects/reset-password (logged-out recovery)."""
-
-    name: str = Field(..., min_length=1, max_length=255)
-    api_key: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=6, max_length=128)
-
-
-class PasswordUpdatedResponse(BaseModel):
-    message: str = "Password updated."
-
-
 class UserProjectResponse(BaseModel):
     project_id: UUID
     name: str

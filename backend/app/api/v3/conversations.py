@@ -17,6 +17,7 @@ from app.core.deps import (
 )
 from app.models.conversation import ChatConversation, ChatMessage, RetrievalPolicy
 from app.models.user import User
+from app.schemas.v2.search import SearchV2Response
 from app.schemas.v2.search import ChatMessage as PipelineMessage
 from app.schemas.v2.search import ConversationState
 from app.schemas.v3.conversation import (
@@ -47,6 +48,13 @@ def _message_read(item: ChatMessage) -> MessageRead:
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _parse_v2_sse(block: str) -> dict | None:
+    for line in block.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line[6:])
+    return None
 
 
 @router.post("", response_model=ConversationRead, status_code=201)
@@ -150,7 +158,7 @@ def stream_message(
         citations: list[dict] = []
         try:
             if conversation.retrieval_policy == RetrievalPolicy.WEB_ONLY:
-                yield _sse("status", {"phase": "web_search", "label": "Searching the web"})
+                yield _sse("status", {"phase": "web_search", "step": "web_search", "label": "Searching the web"})
                 results = asyncio.run(web.search(body.content, limit=5))
                 citations = [
                     {
@@ -160,6 +168,16 @@ def stream_message(
                     }
                     for item in results
                 ]
+                yield _sse(
+                    "status",
+                    {
+                        "phase": "web_search",
+                        "step": "web_search_end",
+                        "label": f"Found {len(citations)} web results",
+                        "sources_count": len(citations),
+                        "sources": citations,
+                    },
+                )
                 web_context = "\n\n".join(
                     f"[{index + 1}] {item['title']}\n{item['url']}\n{item['snippet']}"
                     for index, item in enumerate(citations)
@@ -174,6 +192,7 @@ def stream_message(
                     "the provided web results for factual claims. Cite sources as markdown "
                     "links. Never claim access to project files or project retrieval."
                 )
+                yield _sse("status", {"phase": "synthesis", "step": "synthesis", "label": "Generating reply"})
                 for chunk in llm.generate_stream(settings.local_llm_gate_model, system, prompt):
                     answer += chunk
                     yield _sse("delta", {"assistant_message_id": assistant.id, "text": chunk})
@@ -184,16 +203,32 @@ def stream_message(
                 if project is None:
                     raise RuntimeError("Project not found")
                 project_ctx = ProjectService(session).resolve_context(project, settings)
-                yield _sse("status", {"phase": "project_rag", "label": "Searching project sources"})
-                result = orchestrator.search(
+                result: SearchV2Response | None = None
+                for block in orchestrator.search_stream(
                     body.content,
                     project_ctx=project_ctx,
                     conversation=ConversationState(messages=history),
                     web_search_mode="auto",
-                )
-                answer = result.answer
-                citations = [source.model_dump(mode="json") for source in result.sources]
-                yield _sse("delta", {"assistant_message_id": assistant.id, "text": answer})
+                ):
+                    event = _parse_v2_sse(block)
+                    if not event:
+                        continue
+                    event_name = event.get("event")
+                    data = event.get("data") or {}
+                    if event_name == "status":
+                        yield _sse("status", data)
+                    elif event_name == "chunk":
+                        chunk = data.get("text", "")
+                        answer += chunk
+                        yield _sse("delta", {"assistant_message_id": assistant.id, "text": chunk})
+                    elif event_name == "result":
+                        result = SearchV2Response.model_validate(data)
+                        answer = result.answer
+                        citations = [source.model_dump(mode="json") for source in result.sources]
+                    elif event_name == "error":
+                        raise RuntimeError(data.get("message", "Project search failed"))
+                if result is None:
+                    raise RuntimeError("Project search ended before a final result was received.")
             service.complete(assistant, answer, citations)
             session.refresh(assistant)
             session.refresh(conversation)

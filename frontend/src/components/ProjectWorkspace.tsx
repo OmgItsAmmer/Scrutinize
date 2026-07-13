@@ -25,12 +25,12 @@ export function ProjectWorkspace() {
 
   return (
     <section className="flex h-full min-h-0 flex-col">
-      <header className="shrink-0 border-b border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] px-3 py-2 backdrop-blur-3xl sm:px-4">
+      <header className="shrink-0 px-3 py-2 sm:px-4">
         <div className="flex min-h-11 items-center justify-center">
           <div
             role="tablist"
             aria-label="Project workspace"
-            className="flex items-center gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass)] p-1 shadow-[var(--app-shadow-soft)] backdrop-blur-3xl"
+            className="flex items-center gap-1 rounded-xl p-1"
           >
             {choices.map((item) => {
               const Icon = item.icon;
@@ -45,7 +45,7 @@ export function ProjectWorkspace() {
                   className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-all duration-200 ${
                     selected
                       ? "bg-[var(--app-primary)] text-[var(--app-primary-text)] shadow-sm"
-                      : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)] hover:text-[var(--app-text)]"
+                      : "text-[var(--app-text-muted)] hover:bg-black/5 hover:text-[var(--app-text)]"
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5" />

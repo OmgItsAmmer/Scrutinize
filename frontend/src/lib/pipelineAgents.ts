@@ -20,6 +20,8 @@ const AGENT_BY_STEP: Record<string, string> = {
   evaluation: "Verifier",
   evaluation_end: "Verifier",
   decision: "Verifier",
+  web_search: "Web Search",
+  web_search_end: "Web Search",
 };
 
 const STEP_STARTS = new Set([
@@ -31,6 +33,7 @@ const STEP_STARTS = new Set([
   "decision",
   "escalate",
   "retry",
+  "web_search",
 ]);
 
 const STEP_ENDS = new Set([
@@ -38,6 +41,7 @@ const STEP_ENDS = new Set([
   "rewrite_end",
   "retrieval_end",
   "evaluation_end",
+  "web_search_end",
 ]);
 
 export function agentNameFromStep(step: string): string {
@@ -86,6 +90,10 @@ export function formatAgentOutput(step: string, data: StreamStatusData): string 
     if (data.verdict) parts.push(`Verdict: ${data.verdict}`);
     if (data.confidence != null) parts.push(`Confidence: ${Math.round(data.confidence * 100)}%`);
     return parts.filter(Boolean).join(" · ");
+  }
+  if (step === "web_search_end") {
+    const count = data.sources_count ?? data.sources?.length ?? 0;
+    return `Found ${count} web result${count === 1 ? "" : "s"}`;
   }
   return data.message?.trim() || "";
 }

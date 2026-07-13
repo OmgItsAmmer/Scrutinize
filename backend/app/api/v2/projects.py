@@ -13,16 +13,13 @@ from app.core.deps import (
 from app.models.project import Project
 from app.models.user import ProjectMember, User
 from app.schemas.v2.project import (
-    ChangePasswordRequest,
     CreateProjectRequest,
     CreateProjectResponse,
-    PasswordUpdatedResponse,
     ProjectContext,
     ProjectInfoResponse,
     ProjectLoginRequest,
     ProjectSettings,
     ProjectSignupRequest,
-    ResetPasswordRequest,
     UserCreateProjectRequest,
     UserProjectListResponse,
     UserProjectResponse,
@@ -121,42 +118,16 @@ def login_project(
     )
 
 
-@router.post("/me/password", response_model=PasswordUpdatedResponse)
-def change_project_password(
-    body: ChangePasswordRequest,
-    project_ctx: ProjectContext = Depends(get_project_from_admin_key),
-    session: Session = Depends(get_db_session),
-) -> PasswordUpdatedResponse:
-    """Change or reset the project login password (admin API key required).
-
-    - Provide **current_password** + **new_password** to change while knowing the old password.
-    - Omit **current_password** to reset using only your admin API key (e.g. still logged in).
-    """
-    svc = ProjectService(session)
-    updated = svc.change_password(
-        project_ctx.project_id,
-        body.new_password,
-        current_password=body.current_password,
-    )
-    if not updated:
-        raise HTTPException(status_code=401, detail="Current password is incorrect.")
-    return PasswordUpdatedResponse()
+@router.post("/me/password")
+def change_project_password() -> None:
+    """Project password changes are disabled."""
+    raise HTTPException(status_code=410, detail="Project password changes are disabled.")
 
 
-@router.post("/reset-password", response_model=PasswordUpdatedResponse)
-def reset_project_password(
-    body: ResetPasswordRequest,
-    session: Session = Depends(get_db_session),
-) -> PasswordUpdatedResponse:
-    """Reset password when logged out — requires project name and admin API key."""
-    svc = ProjectService(session)
-    updated = svc.reset_password_with_admin_key(body.name, body.api_key, body.new_password)
-    if not updated:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid project name or admin API key.",
-        )
-    return PasswordUpdatedResponse()
+@router.post("/reset-password")
+def reset_project_password() -> None:
+    """Project password resets are disabled."""
+    raise HTTPException(status_code=410, detail="Project password resets are disabled.")
 
 
 

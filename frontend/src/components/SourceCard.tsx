@@ -165,6 +165,10 @@ function LinkButton({
   );
 }
 
+function hrefMatchesSource(href: string, source: SearchSource) {
+  return href === source.source_path || href === source.segment_id || href === source.file_id;
+}
+
 function parseCitations(
   text: string,
   sources?: SearchSource[],
@@ -231,6 +235,18 @@ export function renderMarkdown(
       const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (linkMatch) {
         const [, label, href] = linkMatch;
+        const matched = sources?.find((source) => hrefMatchesSource(href, source));
+        if (matched) {
+          const sourceIndex = sources?.indexOf(matched) ?? 0;
+          return (
+            <CitationButton
+              key={index}
+              index={sourceIndex}
+              title={matched.title || label}
+              onClick={() => onSourceClick?.(matched, sourceIndex)}
+            />
+          );
+        }
         return <LinkButton key={index} label={label} href={href} onClick={onLinkClick} />;
       }
       if (part.startsWith("**") && part.endsWith("**")) {
@@ -353,6 +369,16 @@ export function SourcePreviewModal({ source, index, onClose }: SourcePreviewModa
             <p className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap">
               {source.content}
             </p>
+            {source.source_path.startsWith("http") && (
+              <a
+                href={source.source_path}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex max-w-full rounded-full border border-white/40 bg-white/40 px-3 py-1 text-xs font-medium text-zinc-700 shadow-sm backdrop-blur-md transition hover:bg-white/70"
+              >
+                <span className="truncate">{source.source_path}</span>
+              </a>
+            )}
           </div>
 
           {source.modality === "audio" && source.source_path && (

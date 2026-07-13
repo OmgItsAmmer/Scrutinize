@@ -79,8 +79,7 @@ export function ChatInput({
       )}
 
       <div
-        className="relative w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg-glass)] backdrop-blur-3xl saturate-150 transition-all duration-300 focus-within:border-[var(--app-border-strong)] focus-within:bg-[var(--app-bg-glass-strong)] focus-within:shadow-[var(--app-shadow-soft)]"
-        style={{ boxShadow: "var(--chatly-input-shadow)" }}
+        className="relative w-full rounded-2xl border border-black/80 bg-transparent transition-all duration-300 focus-within:border-black focus-within:bg-white/25 focus-within:backdrop-blur-2xl"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 sm:px-4 sm:py-3.5">
           <div className="relative min-h-[44px] min-w-0 w-full">
