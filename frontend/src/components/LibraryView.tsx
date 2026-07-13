@@ -8,28 +8,28 @@ import { MediaPreviewModal } from "./MediaPreviewModal";
 function statusBadge(status: FileStatus): string {
   switch (status) {
     case "indexed":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-[var(--app-success-bg)] text-[var(--app-success)]";
     case "processing":
-      return "bg-sky-100 text-sky-800";
+      return "bg-[var(--app-info-bg)] text-[var(--app-info)]";
     case "failed":
-      return "bg-rose-100 text-rose-800";
+      return "bg-[var(--app-danger-bg)] text-[var(--app-danger)]";
     default:
-      return "bg-zinc-100 text-zinc-700";
+      return "bg-[var(--app-bg-glass-strong)] text-[var(--app-text-soft)]";
   }
 }
 
 function ThumbnailPlaceholder({ modality }: { modality: FileModality }) {
   const styles = {
-    text: "bg-sky-100 text-sky-700",
-    audio: "bg-violet-100 text-violet-700",
-    video: "bg-amber-100 text-amber-700",
+    text: "bg-[var(--app-info-bg)] text-[var(--app-info)]",
+    audio: "bg-[var(--app-success-bg)] text-[var(--app-success)]",
+    video: "bg-[var(--app-warning-bg)] text-[var(--app-warning)]",
   }[modality];
 
   const Icon = modality === "video" ? IconFilm : modality === "audio" ? IconWaveform : IconDocument;
 
   return (
     <div
-      className={`flex h-14 w-20 items-center justify-center rounded-lg border border-zinc-200 ${styles}`}
+      className={`flex h-14 w-20 items-center justify-center rounded-lg border border-[var(--app-border)] backdrop-blur-xl ${styles}`}
     >
       <Icon className="h-6 w-6" />
     </div>
@@ -41,7 +41,7 @@ function FileThumbnail({ file, onClick }: { file: LibraryFileItem; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className="group overflow-hidden rounded-lg border border-zinc-200 transition hover:border-zinc-300 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+      className="group overflow-hidden rounded-lg border border-[var(--app-border)] transition hover:border-[var(--app-border-strong)] hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-primary)] focus:ring-offset-2"
       title={`Preview ${file.filename}`}
     >
       {file.thumbnail_url ? (
@@ -67,12 +67,12 @@ type LibraryItemProps = {
 
 function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
   return (
-    <tr className="border-b border-zinc-100 last:border-0">
+    <tr className="border-b border-[var(--app-border)] last:border-0">
       <td className="px-4 py-3">
         <FileThumbnail file={file} onClick={() => onPreview(file)} />
       </td>
-      <td className="px-4 py-3 text-sm font-medium text-zinc-900">{file.filename}</td>
-      <td className="px-4 py-3 text-sm capitalize text-zinc-600">{file.modality}</td>
+      <td className="px-4 py-3 text-sm font-medium text-[var(--app-text)]">{file.filename}</td>
+      <td className="px-4 py-3 text-sm capitalize text-[var(--app-text-soft)]">{file.modality}</td>
       <td className="px-4 py-3">
         <span
           className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${statusBadge(file.status)}`}
@@ -80,15 +80,15 @@ function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
           {file.status}
         </span>
       </td>
-      <td className="px-4 py-3 text-sm text-zinc-600">{file.segment_count}</td>
-      <td className="px-4 py-3 text-sm text-zinc-600">{formatDurationSeconds(file.duration_seconds)}</td>
-      <td className="px-4 py-3 text-sm text-zinc-500">{formatDateTime(file.uploaded_at)}</td>
+      <td className="px-4 py-3 text-sm text-[var(--app-text-soft)]">{file.segment_count}</td>
+      <td className="px-4 py-3 text-sm text-[var(--app-text-soft)]">{formatDurationSeconds(file.duration_seconds)}</td>
+      <td className="px-4 py-3 text-sm text-[var(--app-text-muted)]">{formatDateTime(file.uploaded_at)}</td>
       <td className="px-4 py-3 text-right">
         <button
           type="button"
           onClick={() => onDelete(file)}
           disabled={deleting}
-          className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-danger-bg)] px-3 py-1.5 text-xs font-medium text-[var(--app-danger)] transition hover:bg-white/70 disabled:opacity-50"
           title={`Delete ${file.filename}`}
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -101,13 +101,13 @@ function LibraryRow({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
 
 function LibraryFileCard({ file, deleting, onPreview, onDelete }: LibraryItemProps) {
   return (
-    <article className="rounded-xl border border-white/50 bg-white/30 backdrop-blur-xl p-4 shadow-sm">
+    <article className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass)] p-4 shadow-sm backdrop-blur-xl">
       <div className="flex gap-3">
         <FileThumbnail file={file} onClick={() => onPreview(file)} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-zinc-900">{file.filename}</p>
+          <p className="truncate text-sm font-medium text-[var(--app-text)]">{file.filename}</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <span className="text-xs capitalize text-zinc-500">{file.modality}</span>
+            <span className="text-xs capitalize text-[var(--app-text-muted)]">{file.modality}</span>
             <span
               className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusBadge(file.status)}`}
             >
@@ -116,7 +116,7 @@ function LibraryFileCard({ file, deleting, onPreview, onDelete }: LibraryItemPro
           </div>
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--app-text-muted)]">
         <span>
           {file.segment_count} segments · {formatDurationSeconds(file.duration_seconds)}
         </span>
@@ -126,7 +126,7 @@ function LibraryFileCard({ file, deleting, onPreview, onDelete }: LibraryItemPro
         type="button"
         onClick={() => onDelete(file)}
         disabled={deleting}
-        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-danger-bg)] px-3 py-2 text-xs font-medium text-[var(--app-danger)] transition hover:bg-white/70 disabled:opacity-50"
         title={`Delete ${file.filename}`}
       >
         <IconTrash className="h-3.5 w-3.5" />
@@ -166,8 +166,8 @@ export function LibraryView() {
       <div className="mx-auto w-full max-w-6xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900 sm:text-2xl">My Index</h1>
-            <p className="mt-1.5 text-sm text-zinc-500 sm:mt-2">
+            <h1 className="text-xl font-semibold text-[var(--app-text)] sm:text-2xl">My Index</h1>
+            <p className="mt-1.5 text-sm text-[var(--app-text-muted)] sm:mt-2">
               All uploaded files and their indexing status. Tap a thumbnail to preview.
             </p>
           </div>
@@ -175,25 +175,25 @@ export function LibraryView() {
             type="button"
             onClick={() => void refreshLibrary()}
             disabled={library.loading}
-            className="w-full rounded-full border border-white/60 bg-white/20 backdrop-blur-md px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-white/40 disabled:opacity-50 sm:w-auto"
+            className="w-full rounded-full border border-[var(--app-border)] bg-[var(--app-bg-glass)] px-4 py-2 text-sm font-medium text-[var(--app-text-soft)] backdrop-blur-md transition hover:bg-[var(--app-bg-glass-strong)] disabled:opacity-50 sm:w-auto"
           >
             {library.loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
 
         {library.error && (
-          <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <div className="mt-6 rounded-2xl border border-[var(--app-border)] bg-[var(--app-danger-bg)] px-4 py-3 text-sm text-[var(--app-danger)] backdrop-blur-xl">
             {library.error}
           </div>
         )}
 
-        <div className="mt-6 overflow-hidden rounded-2xl border border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 shadow-sm sm:mt-8">
+        <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg-glass)] shadow-sm backdrop-blur-3xl saturate-150 sm:mt-8">
           {library.loading && library.files.length === 0 ? (
-            <div className="flex items-center justify-center px-6 py-16 text-sm text-zinc-500">
+            <div className="flex items-center justify-center px-6 py-16 text-sm text-[var(--app-text-muted)]">
               Loading index…
             </div>
           ) : library.files.length === 0 ? (
-            <div className="px-6 py-16 text-center text-sm text-zinc-500">
+            <div className="px-6 py-16 text-center text-sm text-[var(--app-text-muted)]">
               No files indexed yet. Upload text, audio, or video to get started.
             </div>
           ) : (
@@ -211,7 +211,7 @@ export function LibraryView() {
               </div>
               <div className="hidden overflow-x-auto md:block">
                 <table className="min-w-full">
-                  <thead className="bg-white/30 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 border-b border-white/40">
+                  <thead className="border-b border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] text-left text-xs font-semibold uppercase tracking-wide text-[var(--app-text-muted)]">
                     <tr>
                       <th className="px-4 py-3">Preview</th>
                       <th className="px-4 py-3">File</th>

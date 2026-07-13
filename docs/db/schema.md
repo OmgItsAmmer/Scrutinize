@@ -35,6 +35,14 @@
   "column_name": "project_id",
   "data_type": "uuid"
 }, {
+  "table_name": "migration_history",
+  "column_name": "name",
+  "data_type": "character varying"
+}, {
+  "table_name": "migration_history",
+  "column_name": "applied_at",
+  "data_type": "timestamp with time zone"
+}, {
   "table_name": "pipeline_runs",
   "column_name": "id",
   "data_type": "uuid"
@@ -167,6 +175,22 @@
   "column_name": "updated_at",
   "data_type": "timestamp without time zone"
 }, {
+  "table_name": "project_members",
+  "column_name": "user_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "project_members",
+  "column_name": "project_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "project_members",
+  "column_name": "role",
+  "data_type": "character varying"
+}, {
+  "table_name": "project_members",
+  "column_name": "joined_at",
+  "data_type": "timestamp with time zone"
+}, {
   "table_name": "projects",
   "column_name": "id",
   "data_type": "uuid"
@@ -230,4 +254,32 @@
   "table_name": "segments",
   "column_name": "project_id",
   "data_type": "uuid"
+}, {
+  "table_name": "users",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "users",
+  "column_name": "email",
+  "data_type": "character varying"
+}, {
+  "table_name": "users",
+  "column_name": "password_hash",
+  "data_type": "character varying"
+}, {
+  "table_name": "users",
+  "column_name": "is_verified",
+  "data_type": "boolean"
+}, {
+  "table_name": "users",
+  "column_name": "verification_otp",
+  "data_type": "character varying"
+}, {
+  "table_name": "users",
+  "column_name": "otp_expires_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "users",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone"
 }]

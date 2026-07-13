@@ -19,6 +19,7 @@ type ChatInputProps = {
   disabled?: boolean;
   loading?: boolean;
   showNewSession?: boolean;
+  webOnly?: boolean;
 };
 
 export function ChatInput({
@@ -28,6 +29,7 @@ export function ChatInput({
   disabled,
   loading,
   showNewSession = false,
+  webOnly = false,
 }: ChatInputProps) {
   const { state: { search }, setWebSearchMode, clearSearch } = useApp();
   const [webSearchOpen, setWebSearchOpen] = useState(false);
@@ -69,7 +71,7 @@ export function ChatInput({
         <button
           type="button"
           onClick={clearSearch}
-          className="absolute -top-10 left-0 z-20 flex items-center gap-1.5 rounded-lg border border-white/40 bg-white/40 backdrop-blur-lg px-2.5 py-1 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-white/60 active:scale-95 cursor-pointer sm:-top-11"
+          className="absolute -top-10 left-0 z-20 flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] px-2.5 py-1 text-xs font-medium text-[var(--app-text-soft)] shadow-sm backdrop-blur-lg transition hover:bg-white/70 active:scale-95 sm:-top-11"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
           New Session
@@ -77,7 +79,7 @@ export function ChatInput({
       )}
 
       <div
-        className="relative w-full rounded-2xl border border-white/60 bg-white/20 backdrop-blur-3xl saturate-150 transition-all duration-300 focus-within:border-zinc-400/80 focus-within:bg-white/35 focus-within:shadow-[0_12px_40px_rgba(0,0,0,0.06)]"
+        className="relative w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg-glass)] backdrop-blur-3xl saturate-150 transition-all duration-300 focus-within:border-[var(--app-border-strong)] focus-within:bg-[var(--app-bg-glass-strong)] focus-within:shadow-[var(--app-shadow-soft)]"
         style={{ boxShadow: "var(--chatly-input-shadow)" }}
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 sm:px-4 sm:py-3.5">
@@ -103,15 +105,19 @@ export function ChatInput({
           <div className="flex items-center justify-between pt-2 border-t border-[var(--chatly-border)]/40 mt-1">
             <div className="flex items-center gap-2">
               <ModelSelector disabled={disabled || loading} />
-              <div ref={webSearchRef} className="relative">
+              {webOnly ? (
+                <span className="flex items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] px-2.5 py-1 text-xs font-medium text-[var(--app-text-soft)]">
+                  <IconGlobe className="h-3.5 w-3.5" /> Web only
+                </span>
+              ) : <div ref={webSearchRef} className="relative">
                 <button
                   type="button"
                   onClick={() => setWebSearchOpen((prev) => !prev)}
                   disabled={disabled || loading}
-                  className="flex items-center gap-1 rounded-lg border border-white/60 bg-white/20 backdrop-blur-md px-2 py-1 text-[11px] font-medium text-zinc-700 transition hover:bg-white/40 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs cursor-pointer"
+                  className="flex cursor-pointer items-center gap-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-glass)] px-2 py-1 text-[11px] font-medium text-[var(--app-text-soft)] backdrop-blur-md transition hover:bg-[var(--app-bg-glass-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs"
                   title="Search web mode selection"
                 >
-                  <IconGlobe className="h-3.5 w-3.5 shrink-0 text-zinc-700" />
+                  <IconGlobe className="h-3.5 w-3.5 shrink-0 text-[var(--app-text-soft)]" />
                   <span>
                     Web Search: {search.webSearchMode === "auto" ? "Auto" : search.webSearchMode === "always" ? "Always" : "Never"}
                   </span>
@@ -120,7 +126,7 @@ export function ChatInput({
                 {webSearchOpen && (
                   <ul
                     role="listbox"
-                    className="absolute bottom-full left-0 z-20 mb-1.5 min-w-[140px] overflow-hidden rounded-xl border border-white/60 bg-white/30 backdrop-blur-2xl saturate-150 py-1 shadow-lg"
+                    className="absolute bottom-full left-0 z-20 mb-1.5 min-w-[140px] overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] py-1 shadow-lg backdrop-blur-2xl saturate-150"
                   >
                     {(["auto", "always", "never"] as const).map((mode) => (
                       <li key={mode}>
@@ -130,11 +136,11 @@ export function ChatInput({
                             setWebSearchMode(mode);
                             setWebSearchOpen(false);
                           }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--chatly-dropdown-hover)] text-zinc-800 hover:text-zinc-950 font-medium"
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-[var(--app-text-soft)] transition hover:bg-[var(--app-dropdown-hover)] hover:text-[var(--app-text)]"
                         >
                           <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
                             {search.webSearchMode === mode && (
-                              <IconCheck className="h-3.5 w-3.5 text-zinc-950" />
+                              <IconCheck className="h-3.5 w-3.5 text-[var(--app-text)]" />
                             )}
                           </div>
                           <span className="capitalize">{mode}</span>
@@ -143,7 +149,7 @@ export function ChatInput({
                     ))}
                   </ul>
                 )}
-              </div>
+              </div>}
             </div>
             <button
               type="submit"

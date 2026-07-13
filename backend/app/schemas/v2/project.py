@@ -96,6 +96,8 @@ class ProjectInfoResponse(BaseModel):
 
     project_id: UUID
     name: str
+    api_key: str
+    client_key: str
     settings: dict[str, Any]
 
 

@@ -80,6 +80,8 @@ type ProjectSessionState = {
 
 type AppState = {
   view: AppView;
+  activeConversationId: string | null;
+  projectChoice: "chats" | "sources" | "library" | "settings";
   apiConnected: boolean;
   health: HealthResponse | null;
   healthError: string | null;
@@ -92,6 +94,8 @@ type AppState = {
 
 type Action =
   | { type: "SET_VIEW"; view: AppView }
+  | { type: "SET_PROJECT_CHOICE"; choice: AppState["projectChoice"] }
+  | { type: "SELECT_CONVERSATION"; conversationId: string | null; view: AppView }
   | { type: "SET_HEALTH"; health: HealthResponse | null; error: string | null }
   | { type: "SET_SEARCH_QUERY"; query: string }
   | { type: "SET_MODALITY_FILTER"; filter: ModalityFilter }
@@ -115,12 +119,14 @@ type Action =
   | { type: "LIBRARY_FILE_REMOVED"; fileId: string }
   | { type: "AUTH_SUCCESS"; project: NonNullable<ProjectSessionState> }
   | { type: "AUTH_LOGOUT" }
-  | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any> }
+  | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any>; apiKey?: string; clientKey?: string }
   | { type: "OPEN_PDF_DRAWER"; url: string; title: string; filename: string }
   | { type: "CLOSE_PDF_DRAWER" };
 
 const initialState: AppState = {
-  view: "search",
+  view: "project",
+  activeConversationId: null,
+  projectChoice: "chats",
   apiConnected: false,
   health: null,
   healthError: null,
@@ -201,6 +207,15 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_VIEW":
       return { ...state, view: action.view };
+    case "SET_PROJECT_CHOICE":
+      return { ...state, projectChoice: action.choice, view: "project" };
+    case "SELECT_CONVERSATION":
+      return {
+        ...state,
+        activeConversationId: action.conversationId,
+        projectChoice: action.view === "project" ? "chats" : state.projectChoice,
+        view: action.view,
+      };
     case "SET_HEALTH":
       return {
         ...state,
@@ -417,6 +432,8 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         project: {
           ...state.project,
+          apiKey: action.apiKey ?? state.project.apiKey,
+          clientKey: action.clientKey ?? state.project.clientKey,
           settings: action.settings,
         },
       };
@@ -429,6 +446,8 @@ type AppContextValue = {
   state: AppState;
   apiUrl: string;
   setView: (view: AppView) => void;
+  setProjectChoice: (choice: AppState["projectChoice"]) => void;
+  selectConversation: (conversationId: string | null, view: AppView) => void;
   setSearchQuery: (query: string) => void;
   setModalityFilter: (filter: ModalityFilter) => void;
   setWebSearchMode: (mode: "auto" | "always" | "never") => void;
@@ -563,12 +582,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => {
-    if (state.view === "library") {
-      void refreshLibrary();
-    }
-  }, [refreshLibrary, state.view]);
-
   const runSearch = useCallback(async () => {
     const query = state.search.query.trim();
     if (!query) {
@@ -673,7 +686,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const fetchSettings = useCallback(async () => {
     try {
       const response = await fetchProjectInfoApi();
-      dispatch({ type: "PROJECT_SETTINGS_UPDATED", settings: response.settings });
+      dispatch({
+        type: "PROJECT_SETTINGS_UPDATED",
+        settings: response.settings,
+        apiKey: response.api_key,
+        clientKey: response.client_key,
+      });
     } catch (error) {
       console.error("Failed to fetch project settings", error);
     }
@@ -682,7 +700,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback(async (newSettings: Record<string, any>) => {
     try {
       const response = await updateProjectSettingsApi(newSettings);
-      dispatch({ type: "PROJECT_SETTINGS_UPDATED", settings: response.settings });
+      dispatch({
+        type: "PROJECT_SETTINGS_UPDATED",
+        settings: response.settings,
+        apiKey: response.api_key,
+        clientKey: response.client_key,
+      });
     } catch (error) {
       console.error("Failed to update project settings", error);
       throw error;
@@ -710,6 +733,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("scrutinize_client_key", project.client_key);
     localStorage.removeItem("scrutinize_admin_key");
     dispatch({ type: "AUTH_SUCCESS", project: { projectId: project.project_id, projectName: project.name, apiKey: "", clientKey: project.client_key } });
+    dispatch({ type: "SELECT_CONVERSATION", conversationId: null, view: "project" });
   }, []);
 
   const value = useMemo<AppContextValue>(
@@ -717,6 +741,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       apiUrl: getApiUrl(),
       setView: (view) => dispatch({ type: "SET_VIEW", view }),
+      setProjectChoice: (choice) => dispatch({ type: "SET_PROJECT_CHOICE", choice }),
+      selectConversation: (conversationId, view) => dispatch({ type: "SELECT_CONVERSATION", conversationId, view }),
       setSearchQuery: (query) => dispatch({ type: "SET_SEARCH_QUERY", query }),
       setModalityFilter: (filter) => dispatch({ type: "SET_MODALITY_FILTER", filter }),
       setWebSearchMode: (mode) => dispatch({ type: "SET_WEB_SEARCH_MODE", mode }),

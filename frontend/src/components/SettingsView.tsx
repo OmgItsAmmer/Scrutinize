@@ -3,7 +3,7 @@ import { useApp } from "../context/AppContext";
 import { changeProjectPassword } from "../api/client";
 import { IconCopy, IconEye, IconEyeOff } from "./icons";
 
-export function SettingsView() {
+export function ProjectSettingsView() {
   const { state, updateSettings } = useApp();
   const [showKeys, setShowKeys] = useState(false);
   const [copiedKey, setCopiedKey] = useState<"api" | "client" | null>(null);

@@ -12,7 +12,7 @@ function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
   const styles = {
     text: "bg-sky-100 text-sky-800",
     audio: "bg-violet-100 text-violet-800",
-    video: "bg-amber-100 text-amber-800",
+  video: "bg-[var(--app-warning-bg)] text-[var(--app-warning)]",
   }[modality];
 
   return (

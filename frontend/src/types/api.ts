@@ -111,7 +111,31 @@ export type DeleteFileResponse = {
 
 export type ModalityFilter = FileModality | "all";
 
-export type AppView = "search" | "library" | "upload" | "settings";
+export type AppView = "general-chat" | "project" | "account-settings";
+
+export type ConversationScope = "general" | "project";
+export type ConversationItem = {
+  id: string;
+  owner_user_id: string;
+  project_id: string | null;
+  scope: ConversationScope;
+  retrieval_policy: "web_only" | "project_rag";
+  title: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+};
+
+export type PersistedMessage = {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+  citations: Array<Record<string, unknown>>;
+  created_at: string;
+  completed_at: string | null;
+};
 
 export type UploadJobState = {
   jobId: string;
@@ -130,4 +154,12 @@ export type ProjectAuthResponse = {
 
 export type AuthTokenResponse = { access_token: string; token_type: string };
 export type UserProject = { project_id: string; name: string; role: string; client_key: string; created_at: string };
+
+export type ProjectInfo = {
+  project_id: string;
+  name: string;
+  api_key: string;
+  client_key: string;
+  settings: Record<string, any>;
+};
 

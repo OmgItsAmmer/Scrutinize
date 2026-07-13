@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
-import { fetchUserProjects, createUserProject, fetchCurrentUser } from "../api/client";
+import { fetchUserProjects, createUserProject, fetchCurrentUser, fetchConversations } from "../api/client";
 import { useApp } from "../context/AppContext";
-import type { AppView, UserProject } from "../types/api";
-import { IconLibrary, IconPlus, IconSettings, IconUpload, IconX } from "./icons";
-
-const NAV: Array<{ id: AppView; label: string; icon: typeof IconPlus }> = [
-  { id: "search", label: "Chat", icon: IconPlus }, { id: "upload", label: "Upload", icon: IconUpload },
-  { id: "library", label: "Library", icon: IconLibrary },
-];
+import type { ConversationItem, UserProject } from "../types/api";
+import { IconChevronDown, IconPlus, IconSettings, IconX } from "./icons";
 
 export function Sidebar({ compact = false }: { compact?: boolean }) {
-  const { state, setView, logout, selectProject } = useApp();
+  const { state, setView, logout, selectProject, selectConversation } = useApp();
   const [projects, setProjects] = useState<UserProject[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [chatsExpanded, setChatsExpanded] = useState(true);
+  const [chats, setChats] = useState<ConversationItem[]>([]);
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [projectChats, setProjectChats] = useState<Record<string, ConversationItem[]>>({});
+  const [projectChatsLoading, setProjectChatsLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [userEmail, setUserEmail] = useState("");
 
@@ -26,9 +26,19 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
     setLoading(true);
     try { setProjects((await fetchUserProjects()).projects); } finally { setLoading(false); }
   }
+
+  async function loadGeneralChats() {
+    try {
+      const result = await fetchConversations("general");
+      setChats(result.conversations);
+    } catch {
+      setChats([]);
+    }
+  }
   
   useEffect(() => {
     void loadProjects();
+    void loadGeneralChats();
     async function loadUser() {
       try {
         const u = await fetchCurrentUser();
@@ -40,7 +50,60 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
     void loadUser();
   }, []);
 
+  useEffect(() => {
+    function handleConversationChange(event: Event) {
+      const detail = (event as CustomEvent<{ scope?: string; projectId?: string }>).detail;
+      if (detail?.scope === "project" && detail.projectId) {
+        void loadProjectChats(detail.projectId);
+        return;
+      }
+      void loadGeneralChats();
+    }
+
+    window.addEventListener("scrutinize:conversations-changed", handleConversationChange);
+    return () => {
+      window.removeEventListener("scrutinize:conversations-changed", handleConversationChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!state.project?.projectId) return;
+    setExpandedProjects((current) => ({ ...current, [state.project!.projectId]: true }));
+    void loadProjectChats(state.project.projectId);
+  }, [state.project?.projectId]);
+
   const shown = expanded ? projects : projects.slice(0, 3);
+
+  async function loadProjectChats(projectId: string) {
+    if (projectChatsLoading[projectId]) return;
+    setProjectChatsLoading((current) => ({ ...current, [projectId]: true }));
+    try {
+      const result = await fetchConversations("project", projectId);
+      setProjectChats((current) => ({ ...current, [projectId]: result.conversations }));
+    } catch {
+      setProjectChats((current) => ({ ...current, [projectId]: [] }));
+    } finally {
+      setProjectChatsLoading((current) => ({ ...current, [projectId]: false }));
+    }
+  }
+
+  function toggleProject(project: UserProject) {
+    const nextExpanded = !expandedProjects[project.project_id];
+    setExpandedProjects((current) => ({ ...current, [project.project_id]: nextExpanded }));
+    selectProject(project);
+    if (nextExpanded || !projectChats[project.project_id]) {
+      void loadProjectChats(project.project_id);
+    }
+  }
+
+  function openProjectChat(project: UserProject, conversationId: string | null) {
+    selectProject(project);
+    selectConversation(conversationId, "project");
+    setExpandedProjects((current) => ({ ...current, [project.project_id]: true }));
+    if (!projectChats[project.project_id]) {
+      void loadProjectChats(project.project_id);
+    }
+  }
 
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
@@ -65,39 +128,121 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
 
   return (
     <>
-      <aside className={`hidden h-full shrink-0 flex-col border-r border-white/60 bg-white/20 backdrop-blur-3xl lg:flex ${compact ? "w-24" : "w-64"}`}>
-        <div className="flex items-center gap-2 px-5 py-5"><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-zinc-900 font-bold text-white">S</div>{!compact && <div><b className="block text-sm">Scrutinize</b><span className="block max-w-40 truncate text-[11px] text-zinc-500">{state.project?.projectName}</span></div>}</div>
-        <nav className="space-y-1 px-3">{NAV.map(item => { const Icon=item.icon; return <button key={item.id} onClick={() => setView(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${state.view === item.id ? "bg-white/55 text-zinc-950" : "text-zinc-600 hover:bg-white/30"}`}><Icon className="h-4 w-4" />{!compact && item.label}</button>; })}</nav>
-        {!compact && <section className={`glass-sidebar-scroll mt-5 min-h-0 px-3 ${expanded ? "flex-1 overflow-y-auto" : ""}`}>
+      <aside className={`hidden h-full shrink-0 flex-col border-r border-[var(--app-border)] bg-[var(--app-bg-glass)] backdrop-blur-3xl lg:flex ${compact ? "w-24" : "w-64"}`}>
+        <div className="flex items-center gap-2 px-5 py-5"><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--app-primary)] font-bold text-[var(--app-primary-text)]">S</div>{!compact && <div><b className="block text-sm text-[var(--app-text)]">Scrutinize</b><span className="block max-w-40 truncate text-[11px] text-[var(--app-text-muted)]">{state.project?.projectName}</span></div>}</div>
+        {!compact && <div className="glass-sidebar-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        <section className="mt-2">
           <div className="flex items-center justify-between px-3 pb-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Projects</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-faint)]">Projects</p>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="flex h-5 w-5 items-center justify-center rounded bg-zinc-900 text-white hover:bg-black transition-colors"
+              className="flex h-5 w-5 items-center justify-center rounded bg-[var(--app-primary)] text-[var(--app-primary-text)] transition-colors hover:bg-[var(--app-primary-hover)]"
               title="Create New Project"
             >
               <IconPlus className="h-3 w-3 stroke-[2.5]" />
             </button>
           </div>
-          {shown.map(project => <button key={project.project_id} onClick={() => selectProject(project)} className={`mb-1 w-full truncate rounded-xl px-3 py-2 text-left text-sm ${state.project?.projectId === project.project_id ? "bg-zinc-900 text-white" : "hover:bg-white/40"}`}>{project.name}</button>)}
-          {projects.length > 3 && <button onClick={() => { const next=!expanded; setExpanded(next); if(next) void loadProjects(); }} className="w-full px-3 py-2 text-left text-xs font-medium text-zinc-500">{loading ? "Loading…" : expanded ? "⌃ Show less" : "⌄ Expand all"}</button>}
-        </section>}
-        <div className="mt-auto border-t border-white/30 p-4">
+          <div className="space-y-1">
+            {shown.map((project) => {
+              const selected = state.project?.projectId === project.project_id;
+              const projectOpen = Boolean(expandedProjects[project.project_id]);
+              const recent = projectChats[project.project_id] ?? [];
+              const chatsLoading = Boolean(projectChatsLoading[project.project_id]);
+
+              return (
+                <div key={project.project_id} className="rounded-xl">
+                  <div
+                    className={`flex items-center gap-1 rounded-xl ${
+                      selected ? "bg-[var(--app-primary)] text-[var(--app-primary-text)]" : "text-[var(--app-text-soft)] hover:bg-[var(--app-bg-glass-strong)]"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleProject(project)}
+                      className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm"
+                    >
+                      <IconChevronDown
+                        className={`h-3.5 w-3.5 shrink-0 transition-transform ${
+                          projectOpen ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                      <span className="truncate">{project.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openProjectChat(project, null)}
+                      className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+                        selected ? "text-[var(--app-primary-text)] hover:bg-white/10" : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)]"
+                      }`}
+                      title="New project chat"
+                    >
+                      <IconPlus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {projectOpen && (
+                    <div className="ml-6 mt-1 space-y-0.5 border-l border-[var(--app-border-strong)] pl-2">
+                      {chatsLoading && (
+                        <p className="px-2 py-1.5 text-xs text-[var(--app-text-faint)]">Loading chats...</p>
+                      )}
+                      {!chatsLoading && recent.length === 0 && (
+                        <button
+                          type="button"
+                          onClick={() => openProjectChat(project, null)}
+                          className="w-full truncate rounded-lg px-2 py-1.5 text-left text-xs text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)]"
+                        >
+                          New chat
+                        </button>
+                      )}
+                      {recent.slice(0, 8).map((chat) => (
+                        <button
+                          key={chat.id}
+                          type="button"
+                          onClick={() => openProjectChat(project, chat.id)}
+                          className={`w-full truncate rounded-lg px-2 py-1.5 text-left text-xs ${
+                            state.activeConversationId === chat.id && selected
+                              ? "bg-white/15 text-[var(--app-primary-text)]"
+                              : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)] hover:text-[var(--app-text)]"
+                          }`}
+                        >
+                          {chat.title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {projects.length > 3 && <button onClick={() => { const next=!expanded; setExpanded(next); if(next) void loadProjects(); }} className="w-full px-3 py-2 text-left text-xs font-medium text-[var(--app-text-muted)]">{loading ? "Loading..." : expanded ? "Show less" : "Expand all"}</button>}
+        </section>
+        <section className="mt-5 border-t border-[var(--app-border)] pt-4">
+          <div className="flex items-center justify-between px-3 pb-2">
+            <button onClick={() => setChatsExpanded((value) => !value)} aria-expanded={chatsExpanded} className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-faint)]">Chats {chatsExpanded ? "Open" : "Closed"}</button>
+            <button onClick={() => selectConversation(null, "general-chat")} className="flex h-5 w-5 items-center justify-center rounded bg-[var(--app-primary)] text-[var(--app-primary-text)]" title="New web chat"><IconPlus className="h-3 w-3" /></button>
+          </div>
+          {chatsExpanded && <div className="space-y-1">
+            <button onClick={() => selectConversation(null, "general-chat")} className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--app-text-soft)] hover:bg-[var(--app-bg-glass-strong)]">New chat</button>
+            {chats.map((chat) => <button key={chat.id} onClick={() => selectConversation(chat.id, "general-chat")} className={`w-full truncate rounded-xl px-3 py-2 text-left text-sm ${state.activeConversationId === chat.id && state.view === "general-chat" ? "bg-[var(--app-primary)] text-[var(--app-primary-text)]" : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)]"}`}>{chat.title}</button>)}
+          </div>}
+        </section>
+        </div>}
+        <div className="mt-auto border-t border-[var(--app-border)] p-4">
           {!compact && (
-            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl bg-white/40 p-2 border border-white/60">
-              <span className="truncate text-xs font-medium text-zinc-700" title={userEmail}>
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] p-2">
+              <span className="truncate text-xs font-medium text-[var(--app-text-soft)]" title={userEmail}>
                 {userEmail || "Loading profile..."}
               </span>
               <button
-                onClick={() => setView("settings")}
-                className="flex h-6 w-6 shrink-0 items-center justify-center bg-transparent text-black hover:bg-black/5 rounded-lg transition-colors"
-                title="Settings"
+                onClick={() => setView("account-settings")}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-transparent text-[var(--app-primary)] transition-colors hover:bg-black/5"
+                title="Account settings"
               >
                 <IconSettings className="h-4 w-4 stroke-[2.5]" />
               </button>
             </div>
           )}
-          <button onClick={logout} className="w-full rounded-xl bg-white/40 py-2 text-xs font-semibold hover:bg-white/60 transition-colors">Sign out</button>
+          <button onClick={logout} className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] py-2 text-xs font-semibold text-[var(--app-text)] transition-colors hover:bg-white/70">Sign out</button>
         </div>
       </aside>  
 

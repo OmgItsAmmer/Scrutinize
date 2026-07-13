@@ -1,11 +1,14 @@
 import type {
   ConversationState,
+  ConversationItem,
+  ConversationScope,
   DeleteFileResponse,
   HealthResponse,
   JobStatusResponse,
   LibraryResponse,
   ModalityFilter,
   ProjectAuthResponse,
+  ProjectInfo,
   AuthTokenResponse,
   UserProject,
   SearchV2Response,
@@ -321,12 +324,12 @@ export function signupProject(name: string, password: string, settings: Record<s
   });
 }
 
-export function fetchProjectInfo(): Promise<{ project_id: string; name: string; settings: Record<string, any> }> {
-  return request<{ project_id: string; name: string; settings: Record<string, any> }>("/v2/projects/me");
+export function fetchProjectInfo(): Promise<ProjectInfo> {
+  return request<ProjectInfo>("/v2/projects/me");
 }
 
-export function updateProjectSettings(settings: Record<string, any>): Promise<{ project_id: string; name: string; settings: Record<string, any> }> {
-  return request<{ project_id: string; name: string; settings: Record<string, any> }>("/v2/projects/me", {
+export function updateProjectSettings(settings: Record<string, any>): Promise<ProjectInfo> {
+  return request<ProjectInfo>("/v2/projects/me", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
@@ -348,6 +351,64 @@ export function changeProjectPassword(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export function fetchConversations(scope: ConversationScope, projectId?: string): Promise<{ conversations: ConversationItem[]; total: number }> {
+  const params = new URLSearchParams({ scope });
+  if (projectId) params.set("project_id", projectId);
+  return request(`/v3/conversations?${params.toString()}`);
+}
+
+export function createConversation(scope: ConversationScope, projectId?: string): Promise<ConversationItem> {
+  return request("/v3/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope, project_id: projectId ?? null }),
+  });
+}
+
+export function fetchConversationMessages(conversationId: string): Promise<{ messages: import("../types/api").PersistedMessage[]; total: number }> {
+  return request(`/v3/conversations/${conversationId}/messages`);
+}
+
+export type ConversationStreamEvent =
+  | { event: "message.accepted"; data: Record<string, unknown> }
+  | { event: "status"; data: { phase: string; label: string } }
+  | { event: "delta"; data: { assistant_message_id: string; text: string } }
+  | { event: "message.completed"; data: { assistant_message: import("../types/api").PersistedMessage; conversation: ConversationItem } }
+  | { event: "error"; data: { code: string; retryable: boolean; message: string } };
+
+export async function streamConversationMessage(
+  conversationId: string,
+  content: string,
+  clientMessageId: string,
+  onEvent: (event: ConversationStreamEvent) => void,
+): Promise<void> {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const token = localStorage.getItem("scrutinize_access_token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_URL}/v3/conversations/${conversationId}/messages/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ content, client_message_id: clientMessageId }),
+  });
+  if (!response.ok) throw new ApiError(await parseError(response), response.status);
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response stream available");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      const eventName = block.split("\n").find((line) => line.startsWith("event: "))?.slice(7);
+      const dataLine = block.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+      if (eventName && dataLine) onEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent);
+    }
+    if (done) break;
+  }
 }
 
 export function resetProjectPassword(

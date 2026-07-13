@@ -173,6 +173,8 @@ def get_project_info(
     return ProjectInfoResponse(
         project_id=project.id,
         name=project.name,
+        api_key=project.api_key,
+        client_key=project.client_key,
         settings=project.settings,
     )
 
@@ -208,6 +210,8 @@ def update_project_settings(
     return ProjectInfoResponse(
         project_id=project.id,
         name=project.name,
+        api_key=project.api_key,
+        client_key=project.client_key,
         settings=project.settings,
     )
 

@@ -1,26 +1,23 @@
+import { AccountSettingsView } from "./components/AccountSettingsView";
 import { useApp } from "./context/AppContext";
-import { LibraryView } from "./components/LibraryView";
 import { MobileHeader } from "./components/MobileHeader";
 import { MobileNav } from "./components/MobileNav";
-import { SearchView } from "./components/SearchView";
+import { ConversationChatView } from "./components/ConversationChatView";
+import { ProjectWorkspace } from "./components/ProjectWorkspace";
 import { Sidebar } from "./components/Sidebar";
-import { UploadView } from "./components/UploadView";
-import { SettingsView } from "./components/SettingsView";
 import { AuthView } from "./components/AuthView";
 
 function MainView() {
   const { state } = useApp();
 
   switch (state.view) {
-    case "settings":
-      return <SettingsView />;
-    case "library":
-      return <LibraryView />;
-    case "upload":
-      return <UploadView />;
-    case "search":
+    case "account-settings":
+      return <AccountSettingsView />;
+    case "general-chat":
+      return <ConversationChatView scope="general" />;
+    case "project":
     default:
-      return <SearchView />;
+      return <ProjectWorkspace />;
   }
 }
 
@@ -37,13 +34,13 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileHeader />
         {!state.apiConnected && (
-          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs text-amber-800 sm:px-6 sm:text-sm">
+          <div className="border-b border-[var(--app-border)] bg-[var(--app-warning-bg)] px-4 py-2 text-center text-xs text-[var(--app-warning)] backdrop-blur-xl sm:px-6 sm:text-sm">
             API unavailable{state.healthError ? ` — ${state.healthError}` : ""}. Some actions are
             disabled until the backend reconnects.
           </div>
         )}
         {state.apiConnected && state.health?.status === "degraded" && (
-          <div className="border-b border-yellow-200 bg-yellow-50 px-4 py-2 text-center text-xs text-yellow-800 sm:px-6 sm:text-sm">
+          <div className="border-b border-[var(--app-border)] bg-[var(--app-warning-bg)] px-4 py-2 text-center text-xs text-[var(--app-warning)] backdrop-blur-xl sm:px-6 sm:text-sm">
             Some backend services are degraded. Search and uploads may fail until dependencies
             recover.
           </div>

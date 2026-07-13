@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +10,7 @@ from app.core.access_log import quiet_poll_access_logs
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.models.conversation import ChatConversation, ChatMessage  # noqa: F401
 from app.models.file import File  # noqa: F401
 from app.models.pipeline_log import (  # noqa: F401
     PipelineRun,
@@ -35,7 +36,10 @@ async def lifespan(_: FastAPI):
         )
         logger.error(msg)
         raise RuntimeError(msg)
-    if settings.environment == "production" and settings.jwt_secret_key == "change-me-in-production":
+    if (
+        settings.environment == "production"
+        and settings.jwt_secret_key == "change-me-in-production"
+    ):
         raise RuntimeError("JWT_SECRET_KEY must be configured in production")
     try:
         init_db()
