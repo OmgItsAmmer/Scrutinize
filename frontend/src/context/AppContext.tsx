@@ -441,6 +441,7 @@ type AppContextValue = {
   dismissUploadJob: (jobId: string) => void;
   login: (projectName: string, apiKey: string, clientKey: string, projectId: string, settings?: Record<string, any>) => void;
   logout: () => void;
+  selectProject: (project: { project_id: string; name: string; client_key: string }) => void;
   updateSettings: (settings: Record<string, any>) => Promise<void>;
   fetchSettings: () => Promise<void>;
   openPdfDrawer: (payload: { url: string; title: string; filename: string }) => void;
@@ -699,7 +700,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("scrutinize_project_name");
     localStorage.removeItem("scrutinize_admin_key");
     localStorage.removeItem("scrutinize_client_key");
+    localStorage.removeItem("scrutinize_access_token");
     dispatch({ type: "AUTH_LOGOUT" });
+  }, []);
+
+  const selectProject = useCallback((project: { project_id: string; name: string; client_key: string }) => {
+    localStorage.setItem("scrutinize_project_id", project.project_id);
+    localStorage.setItem("scrutinize_project_name", project.name);
+    localStorage.setItem("scrutinize_client_key", project.client_key);
+    localStorage.removeItem("scrutinize_admin_key");
+    dispatch({ type: "AUTH_SUCCESS", project: { projectId: project.project_id, projectName: project.name, apiKey: "", clientKey: project.client_key } });
   }, []);
 
   const value = useMemo<AppContextValue>(
@@ -719,12 +729,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissUploadJob: (jobId) => dispatch({ type: "UPLOAD_JOB_REMOVE", jobId }),
       login,
       logout,
+      selectProject,
       updateSettings,
       fetchSettings,
       openPdfDrawer: (payload) => dispatch({ type: "OPEN_PDF_DRAWER", ...payload }),
       closePdfDrawer: () => dispatch({ type: "CLOSE_PDF_DRAWER" }),
     }),
-    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout, updateSettings, fetchSettings],
+    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout, selectProject, updateSettings, fetchSettings],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

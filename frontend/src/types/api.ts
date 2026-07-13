@@ -128,3 +128,6 @@ export type ProjectAuthResponse = {
   client_key: string;
 };
 
+export type AuthTokenResponse = { access_token: string; token_type: string };
+export type UserProject = { project_id: string; name: string; role: string; client_key: string; created_at: string };
+

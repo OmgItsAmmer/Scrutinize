@@ -1,276 +1,107 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
+import { fetchUserProjects, loginWithGoogle } from "../api/client";
 import { useApp } from "../context/AppContext";
-import { loginProject, resetProjectPassword, signupProject } from "../api/client";
 
 export function AuthView() {
   const { login } = useApp();
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
-  function resetFormState() {
-    setError(null);
-    setSuccess(null);
-    setPassword("");
-    setApiKey("");
-    setNewPassword("");
-    setConfirmPassword("");
+  async function finishAuthentication(token: string) {
+    localStorage.setItem("scrutinize_access_token", token);
+    const { projects } = await fetchUserProjects();
+    const project = projects[0];
+    if (!project) throw new Error("Your account has no project.");
+    login(project.name, "", project.client_key, project.project_id);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim() || !password) {
-      setError("Please fill in all fields.");
-      return;
-    }
-    setError(null);
-    setSuccess(null);
+  async function handleCredentialResponse(response: any) {
     setLoading(true);
-
+    setError(null);
     try {
-      if (isSignUp) {
-        const response = await signupProject(name.trim(), password);
-        login(name.trim(), response.api_key, response.client_key, response.project_id);
-      } else {
-        const response = await loginProject(name.trim(), password);
-        login(name.trim(), response.api_key, response.client_key, response.project_id);
+      const authResult = await loginWithGoogle(response.credential);
+      await finishAuthentication(authResult.access_token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google authentication failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+    if (!googleClientId) {
+      console.warn("VITE_GOOGLE_CLIENT_ID is not configured.");
+    }
+
+    // Load the Google client library dynamically
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      const g = (window as any).google;
+      if (g) {
+        g.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleCredentialResponse,
+        });
+        g.accounts.id.renderButton(
+          document.getElementById("google-signin-button"),
+          {
+            theme: "outline",
+            size: "large",
+            width: 320,
+            text: "signin_with",
+            shape: "pill",
+          }
+        );
       }
-    } catch (err: any) {
-      setError(err.message || "Authentication failed. Please check your credentials.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    };
+    document.body.appendChild(script);
 
-  async function handleResetPassword(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    if (!name.trim() || !apiKey.trim() || !newPassword) {
-      setError("Please fill in all fields.");
-      return;
-    }
-    if (newPassword.length < 6) {
-      setError("New password must be at least 6 characters.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError("New passwords do not match.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await resetProjectPassword(name.trim(), apiKey.trim(), newPassword);
-      setSuccess("Password updated. You can sign in with your new password.");
-      setIsForgotPassword(false);
-      setPassword(newPassword);
-      setApiKey("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (err: any) {
-      setError(err.message || "Password reset failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center px-4 py-12 text-zinc-900 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-8 rounded-3xl p-8 glass-panel shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-        <div className="text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-900 text-lg font-bold text-white shadow-md">
-            S
-          </div>
-          <h2 className="mt-6 text-3xl font-bold tracking-tight text-zinc-900">
-            {isForgotPassword
-              ? "Reset your password"
-              : isSignUp
-                ? "Create a Scrutinize Project"
-                : "Sign in to your Project"}
-          </h2>
-          <p className="mt-2 text-sm text-zinc-600">
-            {isForgotPassword
-              ? "Use your project name and admin API key to set a new login password."
-              : "Scrutinize hosts your private documents and search index under your project namespace."}
+    <div className="flex min-h-screen items-center justify-center px-4 bg-gradient-to-br from-zinc-900 via-zinc-800 to-black">
+      <div className="glass-panel w-full max-w-md space-y-8 rounded-3xl p-10 text-center shadow-2xl border border-white/10 backdrop-blur-xl bg-white/5">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100/10 font-bold text-white text-xl border border-white/20 shadow-inner">
+          S
+        </div>
+        <div>
+          <h1 className="mt-5 text-3xl font-extrabold text-white tracking-tight">
+            Welcome to Scrutinize
+          </h1>
+          <p className="mt-3 text-sm text-zinc-400">
+            Sign in to access your projects, files, and conversations.
           </p>
         </div>
 
         {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <span className="font-semibold">Error:</span> {error}
+          <div className="rounded-xl bg-red-500/15 border border-red-500/30 p-4 text-sm text-red-400">
+            {error}
           </div>
         )}
 
-        {success && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-            {success}
-          </div>
-        )}
-
-        {isForgotPassword ? (
-          <form className="mt-8 space-y-6" onSubmit={handleResetPassword}>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="reset-project-name" className="block text-sm font-medium text-zinc-700">
-                  Project Name
-                </label>
-                <input
-                  id="reset-project-name"
-                  type="text"
-                  required
-                  disabled={loading}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label htmlFor="reset-api-key" className="block text-sm font-medium text-zinc-700">
-                  Admin API Key
-                </label>
-                <input
-                  id="reset-api-key"
-                  type="text"
-                  required
-                  disabled={loading}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="scrutinize_sk_..."
-                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 font-mono text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label htmlFor="reset-new-password" className="block text-sm font-medium text-zinc-700">
-                  New Password
-                </label>
-                <input
-                  id="reset-new-password"
-                  type="password"
-                  required
-                  minLength={6}
-                  disabled={loading}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
-                />
-              </div>
-              <div>
-                <label htmlFor="reset-confirm-password" className="block text-sm font-medium text-zinc-700">
-                  Confirm New Password
-                </label>
-                <input
-                  id="reset-confirm-password"
-                  type="password"
-                  required
-                  minLength={6}
-                  disabled={loading}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-sm focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50"
-                />
-              </div>
+        <div className="flex flex-col items-center justify-center py-4">
+          {loading ? (
+            <div className="flex items-center space-x-2 text-zinc-400">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent"></div>
+              <span>Signing you in...</span>
             </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full justify-center rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-            >
-              {loading ? "Updating..." : "Reset Password"}
-            </button>
-          </form>
-        ) : (
-          <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-            <div className="space-y-4 rounded-md">
-              <div>
-                <label htmlFor="project-name" className="block text-sm font-medium text-zinc-700">
-                  Project Name
-                </label>
-                <input
-                  id="project-name"
-                  name="name"
-                  type="text"
-                  required
-                  disabled={loading}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. support-chatbot"
-                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50 sm:text-sm"
-                />
-              </div>
-              <div>
-                <label htmlFor="project-password" className="block text-sm font-medium text-zinc-700">
-                  Password
-                </label>
-                <input
-                  id="project-password"
-                  name="password"
-                  type="password"
-                  required
-                  disabled={loading}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="mt-1 block w-full rounded-xl border border-white/50 bg-white/40 backdrop-blur-md px-3.5 py-2.5 text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:bg-white/60 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-50 sm:text-sm"
-                />
-              </div>
-            </div>
-
-            <div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="group relative flex w-full justify-center rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:opacity-50"
-              >
-                {loading ? "Please wait..." : isSignUp ? "Create Project & Log In" : "Sign In"}
-              </button>
-            </div>
-          </form>
-        )}
-
-        <div className="space-y-2 text-center">
-          {!isSignUp && !isForgotPassword && (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                setIsForgotPassword(true);
-                resetFormState();
-              }}
-              className="block w-full text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:underline"
-            >
-              Forgot password?
-            </button>
+          ) : (
+            <div id="google-signin-button"></div>
           )}
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => {
-              if (isForgotPassword) {
-                setIsForgotPassword(false);
-              } else {
-                setIsSignUp(!isSignUp);
-              }
-              resetFormState();
-            }}
-            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:underline"
-          >
-            {isForgotPassword
-              ? "Back to sign in"
-              : isSignUp
-                ? "Already have a project? Sign in instead"
-                : "Need a new workspace? Create a project"}
-          </button>
+        </div>
+
+        <div className="text-xs text-zinc-500">
+          By signing in, you agree to our Terms of Service and Privacy Policy.
         </div>
       </div>
     </div>
   );
 }
+

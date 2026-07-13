@@ -34,21 +34,57 @@ def _to_psycopg_dsn(url: str) -> str:
     )
 
 
-def apply_migration(path: Path, dsn: str) -> None:
-    sql = path.read_text(encoding="utf-8")
-    with psycopg.connect(_to_psycopg_dsn(dsn)) as conn:
-        conn.execute(sql)
-    print(f"Applied {path.name}")
-
-
 def main() -> None:
     database_url = _load_database_url()
+    dsn = _to_psycopg_dsn(database_url)
     migrations = sorted(MIGRATIONS_DIR.glob("*.sql"))
     if not migrations:
         print(f"No migrations found in {MIGRATIONS_DIR}", file=sys.stderr)
         sys.exit(1)
+
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS migration_history (
+                    name VARCHAR(255) PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            cur.execute("SELECT COUNT(*) FROM migration_history;")
+            count = cur.fetchone()[0]
+            if count == 0:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'users'
+                    );
+                """)
+                users_exists = cur.fetchone()[0]
+                if users_exists:
+                    print("Existing database detected. Backfilling migration history...")
+                    for migration in migrations:
+                        if migration.name <= "010_person_auth.sql":
+                            cur.execute(
+                                "INSERT INTO migration_history (name) VALUES (%s) ON CONFLICT DO NOTHING;",
+                                (migration.name,)
+                            )
+                    conn.commit()
+
     for migration in migrations:
-        apply_migration(migration, database_url)
+        migration_name = migration.name
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM migration_history WHERE name = %s;", (migration_name,))
+                if cur.fetchone():
+                    print(f"Skipping {migration_name} (already applied)")
+                    continue
+            sql = migration.read_text(encoding="utf-8")
+            conn.execute(sql)
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO migration_history (name) VALUES (%s);", (migration_name,))
+            conn.commit()
+            print(f"Applied {migration_name}")
+
 
 
 if __name__ == "__main__":

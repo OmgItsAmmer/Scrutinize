@@ -6,6 +6,8 @@ import type {
   LibraryResponse,
   ModalityFilter,
   ProjectAuthResponse,
+  AuthTokenResponse,
+  UserProject,
   SearchV2Response,
   UploadResponse,
 } from "../types/api";
@@ -70,6 +72,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (key) {
     headers.set("X-Project-Key", key);
   }
+  const token = localStorage.getItem("scrutinize_access_token");
+  const projectId = localStorage.getItem("scrutinize_project_id");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (token && projectId) headers.set("X-Project-Id", projectId);
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers,
@@ -175,6 +181,10 @@ export async function searchContentStream(
   if (key) {
     headers.set("X-Project-Key", key);
   }
+  const token = localStorage.getItem("scrutinize_access_token");
+  const projectId = localStorage.getItem("scrutinize_project_id");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (token && projectId) headers.set("X-Project-Id", projectId);
 
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
@@ -238,10 +248,22 @@ export async function searchContentStream(
 export function uploadFile(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  return request<UploadResponse>("/upload", {
+  return request<UploadResponse>("/v2/projects/files", {
     method: "POST",
     body: formData,
   });
+}
+
+export function loginWithGoogle(idToken: string): Promise<AuthTokenResponse> {
+  return request("/v2/auth/google", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id_token: idToken }),
+  });
+}
+
+export function fetchUserProjects(): Promise<{ projects: UserProject[] }> {
+  return request("/v2/projects");
 }
 
 export function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {

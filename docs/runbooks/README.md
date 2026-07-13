@@ -13,3 +13,8 @@ Related configuration (no runbook yet):
 
 - **Neon** — relational database (`DATABASE_URL`); see [README.md](../../README.md#quick-start)
 - **Qdrant / Redis** — local via `docker compose up`; production on Fly.io via [fly-io-deploy.md](fly-io-deploy.md)
+# Authentication and tenancy
+
+- [Email provider setup](email_provider_setup.md)
+- [Database migration](database_migration.md)
+- [JWT security policy](jwt_security_policy.md)

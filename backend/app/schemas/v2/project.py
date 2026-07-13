@@ -135,3 +135,20 @@ class ResetPasswordRequest(BaseModel):
 class PasswordUpdatedResponse(BaseModel):
     message: str = "Password updated."
 
+
+class UserProjectResponse(BaseModel):
+    project_id: UUID
+    name: str
+    role: str
+    client_key: str
+    created_at: str
+
+
+class UserProjectListResponse(BaseModel):
+    projects: list[UserProjectResponse]
+
+
+class UserCreateProjectRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    settings: dict[str, Any] = Field(default_factory=dict)
+

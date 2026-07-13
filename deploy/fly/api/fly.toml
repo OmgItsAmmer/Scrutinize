@@ -12,6 +12,7 @@ primary_region = "ord"
   LOCAL_LLM_GATE_MODEL = "gpt-4o-mini"
   LOCAL_LLM_REWRITER_MODEL = "gpt-4o-mini"
   LOCAL_LLM_DECISION_MODEL = "gpt-4o-mini"
+  FLY_WORKER_APP_NAME = "scrutinize-worker"
 
 [processes]
   app = "uvicorn app.main:app --host 0.0.0.0 --port 8000"

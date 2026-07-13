@@ -11,7 +11,7 @@ class Project(SQLModel, table=True):
     __tablename__ = "projects"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    name: str = Field(unique=True, index=True)
+    name: str = Field(index=True)
 
     # Admin (secret) key — scrutinize_sk_... — used for upload/management operations.
     # Never expose to frontend clients.

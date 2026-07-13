@@ -6,10 +6,9 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 from app.core.config import Settings
+from app.core.password_security import hash_password, verify_password
 from app.models.project import Project
 from app.schemas.v2.project import ProjectContext, ProjectSettings
-
-from app.core.password_security import hash_password, verify_password
 
 _SK_PREFIX = "scrutinize_sk_"
 _PK_PREFIX = "scrutinize_pk_"
@@ -36,8 +35,10 @@ class ProjectService:
     # CRUD
     # ------------------------------------------------------------------
 
-    def create_project(self, name: str, settings_dict: dict, password: str | None = None) -> Project:
+    def create_project(self, name: str, settings_dict: dict, password: str | None = None, *, allow_duplicate_name: bool = False) -> Project:
         """Create a new project with auto-generated admin and client keys and optional password."""
+        if not allow_duplicate_name and self._session.exec(select(Project).where(Project.name == name)).first():
+            raise ValueError("Project name already exists")
         pw_hash = hash_password(password) if password else None
         project = Project(
             name=name,

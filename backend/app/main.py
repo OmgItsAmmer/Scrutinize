@@ -18,6 +18,7 @@ from app.models.pipeline_log import (  # noqa: F401
 from app.models.processing_job import ProcessingJob  # noqa: F401
 from app.models.project import Project  # noqa: F401
 from app.models.segment import Segment  # noqa: F401
+from app.models.user import ProjectMember, User  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ async def lifespan(_: FastAPI):
         )
         logger.error(msg)
         raise RuntimeError(msg)
+    if settings.environment == "production" and settings.jwt_secret_key == "change-me-in-production":
+        raise RuntimeError("JWT_SECRET_KEY must be configured in production")
     try:
         init_db()
     except Exception:

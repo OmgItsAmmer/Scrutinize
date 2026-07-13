@@ -19,6 +19,7 @@ from app.services.upload_utils import (
     validate_content_type,
 )
 from app.workers.tasks import process_audio, process_text, process_video
+from app.services.fly_scaler import trigger_worker_wakeup
 
 router = APIRouter()
 
@@ -100,6 +101,7 @@ async def upload_file(
     orchestrator.mark_file_status(file_record.id, FileStatus.PROCESSING)
 
     task = TASK_BY_MODALITY[modality.value]
+    trigger_worker_wakeup()
     task.delay(str(job.id))
 
     return UploadResponse(

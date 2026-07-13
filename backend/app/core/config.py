@@ -40,6 +40,14 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
 
+    # Per-person authentication and OTP email verification.
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_expiry_minutes: int = 60 * 24
+    otp_expiry_minutes: int = 15
+    resend_api_key: str = ""
+    email_from: str = "Scrutinize <onboarding@resend.dev>"
+    google_client_id: str = ""
+
     # Embeddings & Qdrant (M5)
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
@@ -157,6 +165,11 @@ class Settings(BaseSettings):
     rate_limit_general_window_seconds: int = 60
     rate_limit_global_requests: int = 300
     rate_limit_global_window_seconds: int = 60
+
+    # Fly.io Scaling settings
+    fly_worker_app_name: str = ""
+    fly_api_token: str = ""
+    worker_idle_timeout_seconds: int = 120
 
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None

@@ -1,25 +1,65 @@
 """Project management endpoints (multi-tenant registration and info)."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.config import Settings
-from app.core.deps import get_app_settings, get_db_session, get_project_from_admin_key
+from app.core.deps import (
+    get_app_settings,
+    get_current_user,
+    get_db_session,
+    get_project_from_admin_key,
+)
+from app.models.project import Project
+from app.models.user import ProjectMember, User
 from app.schemas.v2.project import (
+    ChangePasswordRequest,
     CreateProjectRequest,
     CreateProjectResponse,
+    PasswordUpdatedResponse,
     ProjectContext,
     ProjectInfoResponse,
-    ProjectSignupRequest,
     ProjectLoginRequest,
     ProjectSettings,
-    ChangePasswordRequest,
+    ProjectSignupRequest,
     ResetPasswordRequest,
-    PasswordUpdatedResponse,
+    UserCreateProjectRequest,
+    UserProjectListResponse,
+    UserProjectResponse,
 )
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+@router.get("", response_model=UserProjectListResponse)
+def list_user_projects(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+) -> UserProjectListResponse:
+    rows = session.exec(
+        select(Project, ProjectMember)
+        .join(ProjectMember, Project.id == ProjectMember.project_id)
+        .where(ProjectMember.user_id == user.id)
+        .order_by(Project.created_at.desc())
+    ).all()
+    return UserProjectListResponse(projects=[
+        UserProjectResponse(project_id=project.id, name=project.name, role=member.role, client_key=project.client_key, created_at=project.created_at.isoformat())
+        for project, member in rows
+    ])
+
+
+@router.post("/mine", response_model=UserProjectResponse, status_code=201)
+def create_user_project(
+    body: UserCreateProjectRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+) -> UserProjectResponse:
+    project = ProjectService(session).create_project(body.name.strip(), body.settings, allow_duplicate_name=True)
+    member = ProjectMember(user_id=user.id, project_id=project.id, role="owner")
+    session.add(member)
+    session.commit()
+    return UserProjectResponse(project_id=project.id, name=project.name, role=member.role, client_key=project.client_key, created_at=project.created_at.isoformat())
 
 
 @router.post("", response_model=CreateProjectResponse, status_code=201)

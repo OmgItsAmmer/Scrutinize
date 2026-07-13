@@ -1,10 +1,14 @@
 from collections.abc import Generator
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
+from app.core.jwt_security import InvalidTokenError, decode_access_token
+from app.models.user import ProjectMember, User
 from app.schemas.v2.project import ProjectContext
 from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.embedding_service import EmbeddingService
@@ -13,13 +17,13 @@ from app.services.project_service import ProjectService
 from app.services.v2.conversation_memory import ConversationMemory
 from app.services.v2.decision_agent import DecisionAgent
 from app.services.v2.generic_agent import GenericAgent
-from app.services.v2.llm_clients import BaseLlmClient, LocalLlmClient, CloudLlmClient
+from app.services.v2.llm_clients import BaseLlmClient, CloudLlmClient, LocalLlmClient
+from app.services.v2.mcp_manager import McpClientManager
 from app.services.v2.pipeline_orchestrator import PipelineOrchestrator
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import RagGate
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 from app.services.v2.rrf_retriever import RrfRetriever
-from app.services.v2.mcp_manager import McpClientManager
 from app.services.vector_store import VectorStore
 from app.services.web_search import WebSearchService
 
@@ -153,19 +157,65 @@ def get_project_service(
     return ProjectService(session)
 
 
+_bearer = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_app_settings),
+) -> User:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        claims = decode_access_token(credentials.credentials, settings.jwt_secret_key)
+    except InvalidTokenError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token.") from exc
+    user = session.get(User, UUID(claims["sub"]))
+    if user is None or not user.is_verified:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token.")
+    return user
+
+
+def get_project_from_user(
+    x_project_id: UUID = Header(..., alias="X-Project-Id"),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_app_settings),
+) -> ProjectContext:
+    membership = session.get(ProjectMember, (user.id, x_project_id))
+    if membership is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this project.")
+    project = ProjectService(session).get_by_id(x_project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return ProjectService(session).resolve_context(project, settings)
+
+
 def get_project_from_admin_key(
-    x_project_key: str = Header(
-        ...,
+    x_project_key: str | None = Header(
+        None,
         alias="X-Project-Key",
         description="Private admin key (scrutinize_sk_...) issued on project registration.",
     ),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_app_settings),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    x_project_id: UUID | None = Header(None, alias="X-Project-Id"),
 ) -> ProjectContext:
     """Validate a private admin API key and resolve a ProjectContext.
 
     Used on upload/management endpoints. Raises HTTP 401 for invalid keys.
     """
+    if credentials and x_project_id:
+        user = get_current_user(credentials, session, settings)
+        membership = session.get(ProjectMember, (user.id, x_project_id))
+        if membership is None:
+            raise HTTPException(status_code=403, detail="You are not a member of this project.")
+        project = ProjectService(session).get_by_id(x_project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        return ProjectService(session).resolve_context(project, settings)
     svc = ProjectService(session)
     project = svc.get_by_admin_key(x_project_key)
     if project is None:
@@ -174,18 +224,29 @@ def get_project_from_admin_key(
 
 
 def get_project_from_client_key(
-    x_project_key: str = Header(
-        ...,
+    x_project_key: str | None = Header(
+        None,
         alias="X-Project-Key",
         description="Public client key (scrutinize_pk_...) issued on project registration.",
     ),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_app_settings),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    x_project_id: UUID | None = Header(None, alias="X-Project-Id"),
 ) -> ProjectContext:
     """Validate a public client API key and resolve a ProjectContext.
 
     Used on search/chat endpoints. Raises HTTP 401 for invalid keys.
     """
+    if credentials and x_project_id:
+        user = get_current_user(credentials, session, settings)
+        membership = session.get(ProjectMember, (user.id, x_project_id))
+        if membership is None:
+            raise HTTPException(status_code=403, detail="You are not a member of this project.")
+        project = ProjectService(session).get_by_id(x_project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        return ProjectService(session).resolve_context(project, settings)
     svc = ProjectService(session)
     project = svc.get_by_client_key(x_project_key)
     if project is None:
