@@ -47,7 +47,7 @@ def search_v2(
             project_ctx=project_ctx,
             modality_filter=body.modality_filter,
             conversation=body.conversation,
-            web_search=body.web_search,
+            web_search_mode=body.web_search_mode,
         )
     except LocalLlmError as exc:
         raise HTTPException(
@@ -79,7 +79,7 @@ def search_v2_stream(
             project_ctx=project_ctx,
             modality_filter=body.modality_filter,
             conversation=body.conversation,
-            web_search=body.web_search,
+            web_search_mode=body.web_search_mode,
         )
         return StreamingResponse(
             generator,

@@ -1,8 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatedPlaceholder } from "./AnimatedPlaceholder";
 import { IconSend, IconGlobe } from "./icons";
 import { ModelSelector } from "./ModelSelector";
 import { useApp } from "../context/AppContext";
+
+function IconCheck(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" {...props}>
+      <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 type ChatInputProps = {
   value: string;
@@ -21,9 +29,23 @@ export function ChatInput({
   loading,
   showNewSession = false,
 }: ChatInputProps) {
-  const { state: { search }, setWebSearch, clearSearch } = useApp();
+  const { state: { search }, setWebSearchMode, clearSearch } = useApp();
+  const [webSearchOpen, setWebSearchOpen] = useState(false);
+  const webSearchRef = useRef<HTMLDivElement>(null);
   const showAnimatedPlaceholder = !value && !disabled;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (webSearchRef.current && !webSearchRef.current.contains(event.target as Node)) {
+        setWebSearchOpen(false);
+      }
+    }
+    if (webSearchOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [webSearchOpen]);
 
   // Auto-grow height of textarea based on content
   useEffect(() => {
@@ -81,20 +103,47 @@ export function ChatInput({
           <div className="flex items-center justify-between pt-2 border-t border-[var(--chatly-border)]/40 mt-1">
             <div className="flex items-center gap-2">
               <ModelSelector disabled={disabled || loading} />
-              <button
-                type="button"
-                onClick={() => setWebSearch(!search.webSearch)}
-                disabled={disabled || loading}
-                className={`flex items-center gap-1 rounded-lg border backdrop-blur-md px-2 py-1 text-[11px] font-medium transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs ${
-                  search.webSearch
-                    ? "border-white/10 bg-zinc-950/80 text-white hover:bg-zinc-900/80"
-                    : "border-white/60 bg-white/20 text-zinc-700 hover:bg-white/40"
-                }`}
-                title="Search web for real-time information"
-              >
-                <IconGlobe className={`h-3.5 w-3.5 shrink-0 transition ${search.webSearch ? "text-white" : "text-zinc-700"}`} />
-                <span>Search Web</span>
-              </button>
+              <div ref={webSearchRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setWebSearchOpen((prev) => !prev)}
+                  disabled={disabled || loading}
+                  className="flex items-center gap-1 rounded-lg border border-white/60 bg-white/20 backdrop-blur-md px-2 py-1 text-[11px] font-medium text-zinc-700 transition hover:bg-white/40 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-1.5 sm:px-2.5 sm:text-xs cursor-pointer"
+                  title="Search web mode selection"
+                >
+                  <IconGlobe className="h-3.5 w-3.5 shrink-0 text-zinc-700" />
+                  <span>
+                    Web Search: {search.webSearchMode === "auto" ? "Auto" : search.webSearchMode === "always" ? "Always" : "Never"}
+                  </span>
+                </button>
+
+                {webSearchOpen && (
+                  <ul
+                    role="listbox"
+                    className="absolute bottom-full left-0 z-20 mb-1.5 min-w-[140px] overflow-hidden rounded-xl border border-white/60 bg-white/30 backdrop-blur-2xl saturate-150 py-1 shadow-lg"
+                  >
+                    {(["auto", "always", "never"] as const).map((mode) => (
+                      <li key={mode}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWebSearchMode(mode);
+                            setWebSearchOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[var(--chatly-dropdown-hover)] text-zinc-800 hover:text-zinc-950 font-medium"
+                        >
+                          <div className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                            {search.webSearchMode === mode && (
+                              <IconCheck className="h-3.5 w-3.5 text-zinc-950" />
+                            )}
+                          </div>
+                          <span className="capitalize">{mode}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
             <button
               type="submit"

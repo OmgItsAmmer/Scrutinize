@@ -11,10 +11,10 @@ Show recent chats on top
 Export chats
 
 Project Management
-Create projects
+Create projects     
 Upload project files
 Maintain inter-chat memory
-Share context across chats/projects
+Share context across chats/projects 
 Cross-reference checks
 Clickable references/citations from uploaded documents
 
@@ -45,7 +45,7 @@ animated sign in page
 
 metadata search
 
-massive testingsp 
+massive testing 
 
 RBAC
 

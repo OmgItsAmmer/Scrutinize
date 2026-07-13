@@ -70,8 +70,9 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
-        web_search: bool = False,
+        web_search_mode: str = "auto",
     ) -> SearchV2Response:
+        logger.info("web_search_mode received in search: %s", web_search_mode)
         stripped = query.strip()
         conv_state, conversation_context = self._memory.prepare(conversation)
 
@@ -91,13 +92,23 @@ class PipelineOrchestrator:
             tool_context=self._build_gate_tool_context(),
         )
 
-        if web_search:
+        if web_search_mode == "always":
             from app.services.v2.rag_gate import GateResult
             new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
             gate_result = GateResult(
                 route=new_route,
-                reason=f"{gate_result.reason} (Web search forced by user)",
+                reason=f"{gate_result.reason} (Web search mode: ALWAYS)",
                 reply=None if new_route != "generic" else gate_result.reply,
+                requested_tool=gate_result.requested_tool,
+                llm_call=gate_result.llm_call
+            )
+        elif web_search_mode == "never":
+            from app.services.v2.rag_gate import GateResult
+            new_route = "rag" if gate_result.route in ("web", "hybrid") else gate_result.route
+            gate_result = GateResult(
+                route=new_route,
+                reason=f"{gate_result.reason} (Web search mode: NEVER)",
+                reply=gate_result.reply,
                 requested_tool=gate_result.requested_tool,
                 llm_call=gate_result.llm_call
             )
@@ -126,6 +137,7 @@ class PipelineOrchestrator:
                 conversation_context=conversation_context,
                 modality_filter=modality_filter,
                 project_ctx=project_ctx,
+                web_search_mode=web_search_mode,
             )
 
         self._db_logger.end_run(
@@ -145,7 +157,7 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
-        web_search: bool = False,
+        web_search_mode: str = "auto",
     ) -> typing.Generator[str, None, None]:
         import json
         from uuid import UUID
@@ -154,6 +166,7 @@ class PipelineOrchestrator:
             payload = json.dumps({"event": event, "data": data}, default=str)
             return f"data: {payload}\n\n"
 
+        logger.info("web_search_mode received in search_stream: %s", web_search_mode)
         stripped = query.strip()
         conv_state, conversation_context = self._memory.prepare(conversation)
 
@@ -182,13 +195,23 @@ class PipelineOrchestrator:
                 tool_context=self._build_gate_tool_context(),
             )
 
-            if web_search:
+            if web_search_mode == "always":
                 from app.services.v2.rag_gate import GateResult
                 new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
                 gate_result = GateResult(
                     route=new_route,
-                    reason=f"{gate_result.reason} (Web search forced by user)",
+                    reason=f"{gate_result.reason} (Web search mode: ALWAYS)",
                     reply=None if new_route != "generic" else gate_result.reply,
+                    requested_tool=gate_result.requested_tool,
+                    llm_call=gate_result.llm_call
+                )
+            elif web_search_mode == "never":
+                from app.services.v2.rag_gate import GateResult
+                new_route = "rag" if gate_result.route in ("web", "hybrid") else gate_result.route
+                gate_result = GateResult(
+                    route=new_route,
+                    reason=f"{gate_result.reason} (Web search mode: NEVER)",
+                    reply=gate_result.reply,
                     requested_tool=gate_result.requested_tool,
                     llm_call=gate_result.llm_call
                 )
@@ -293,6 +316,7 @@ class PipelineOrchestrator:
                         modality_filter=modality_filter,
                         project_ctx=project_ctx,
                         emit=emit,
+                        web_search_mode=web_search_mode,
                     )
                     return
 
@@ -330,6 +354,7 @@ class PipelineOrchestrator:
                     modality_filter=modality_filter,
                     project_ctx=project_ctx,
                     emit=emit,
+                    web_search_mode=web_search_mode,
                 )
         except Exception as exc:
             logger.exception("v2 stream failed: %s", exc)
@@ -448,6 +473,7 @@ class PipelineOrchestrator:
         modality_filter: FileModality | None,
         project_ctx: ProjectContext | None,
         emit,
+        web_search_mode: str = "auto",
     ) -> typing.Generator[str, None, None]:
         max_attempts = (
             project_ctx.max_attempts if project_ctx else max(1, self._settings.v2_max_pipeline_attempts)
@@ -501,6 +527,7 @@ class PipelineOrchestrator:
                 project_id=project_id,
                 modality_filter=modality_filter,
                 route=gate_result.route,
+                web_search_mode=web_search_mode,
             )
             self._db_logger.log_retrieval(
                 run_id=run_id,
@@ -836,6 +863,7 @@ class PipelineOrchestrator:
         conversation_context: str,
         modality_filter: FileModality | None,
         project_ctx: ProjectContext | None = None,
+        web_search_mode: str = "auto",
     ) -> SearchV2Response:
         max_attempts = (
             project_ctx.max_attempts if project_ctx else max(1, self._settings.v2_max_pipeline_attempts)
@@ -872,6 +900,7 @@ class PipelineOrchestrator:
                 project_id=project_id,
                 modality_filter=modality_filter,
                 route=gate_result.route,
+                web_search_mode=web_search_mode,
             )
             self._db_logger.log_retrieval(
                 run_id=run_id,
@@ -1070,11 +1099,16 @@ class PipelineOrchestrator:
         project_id: UUID,
         modality_filter: FileModality | None,
         route: str,
+        web_search_mode: str = "auto",
     ) -> tuple[list[SearchSource], Any, list[Any], int]:
         import time
         from app.services.v2.retrieval_utils import RetrievalStats
 
+        disable_web = (web_search_mode == "never")
+
         if route == "web":
+            if disable_web:
+                return [], RetrievalStats.empty(rrf_k=self._settings.v2_rrf_k), [], 0
             started = time.monotonic()
             sources = self._retrieve_web(rewritten_text)
             latency_ms = int((time.monotonic() - started) * 1000)
@@ -1091,12 +1125,12 @@ class PipelineOrchestrator:
         rank_fields = retrieval.source_rank_fields
         latency_ms = retrieval.latency_ms
 
-        if route == "hybrid":
+        if route == "hybrid" and not disable_web:
             started_web = time.monotonic()
             web_sources = self._retrieve_web(rewritten_text)
             sources = sources + web_sources
             latency_ms += int((time.monotonic() - started_web) * 1000)
-        elif not sources and self._settings.enable_web_search:
+        elif not sources and self._settings.enable_web_search and not disable_web:
             # Fallback to web search
             started_web = time.monotonic()
             web_sources = self._retrieve_web(rewritten_text)
