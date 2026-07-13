@@ -262,8 +262,20 @@ export function loginWithGoogle(idToken: string): Promise<AuthTokenResponse> {
   });
 }
 
+export function fetchCurrentUser(): Promise<{ id: string; email: string }> {
+  return request<{ id: string; email: string }>("/v2/auth/me");
+}
+
 export function fetchUserProjects(): Promise<{ projects: UserProject[] }> {
   return request("/v2/projects");
+}
+
+export function createUserProject(name: string, settings: Record<string, any> = {}): Promise<UserProject> {
+  return request<UserProject>("/v2/projects/mine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, settings }),
+  });
 }
 
 export function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {
