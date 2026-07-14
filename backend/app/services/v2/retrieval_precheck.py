@@ -47,6 +47,13 @@ class RetrievalPrecheck:
         client_requested_tool: str | None = None,
         enable_web_search: bool = True,
     ) -> RetrievalPrecheckResult:
+        if client_requested_tool == "generate_pdf" and has_corpus:
+            return RetrievalPrecheckResult(
+                action="route_rag",
+                reason="Tool generate_pdf selected; retrieval required before export.",
+                top_score=None,
+            )
+
         if client_requested_tool:
             return RetrievalPrecheckResult(
                 action="call_gate",

@@ -57,13 +57,13 @@ def test_precheck_low_score_routes_web():
 
 @pytest.mark.unit
 @pytest.mark.v2
-def test_precheck_tool_selection_calls_gate():
+def test_precheck_pdf_tool_routes_rag_when_corpus_exists():
     precheck = RetrievalPrecheck(FakeRetriever(0.03), Settings())
     result = precheck.evaluate(
-        "query",
+        "generate me pdf of how to cook an omelette",
         project_id=uuid4(),
         conversation_id=uuid4(),
         has_corpus=True,
         client_requested_tool="generate_pdf",
     )
-    assert result.action == "call_gate"
+    assert result.action == "route_rag"

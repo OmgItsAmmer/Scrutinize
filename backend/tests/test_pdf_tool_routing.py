@@ -58,3 +58,34 @@ def test_orchestrator_pdf_request_comes_from_gate_tool_field():
     assert not PipelineOrchestrator._requested_pdf(
         GateResult(route="generic", reason="No tool requested.")
     )
+
+
+def test_orchestrator_forces_rag_when_gate_misroutes_pdf_tool():
+    gate_result = GateResult(
+        route="generic",
+        reason="PDF generation requested.",
+        requested_tool="generate_pdf",
+        reply="Use the tool.",
+    )
+    forced = PipelineOrchestrator._maybe_force_rag_for_tool(
+        gate_result,
+        client_requested_tool="generate_pdf",
+    )
+    assert forced.route == "rag"
+    assert forced.requested_tool == "generate_pdf"
+    assert forced.reply is None
+
+
+def test_orchestrator_forces_rag_from_client_tool_even_without_gate_tool_field():
+    gate_result = GateResult(
+        route="generic",
+        reason="Generic reply.",
+        reply="Hello.",
+    )
+    forced = PipelineOrchestrator._maybe_force_rag_for_tool(
+        gate_result,
+        client_requested_tool="generate_pdf",
+    )
+    assert forced.route == "rag"
+    assert forced.requested_tool == "generate_pdf"
+    assert forced.reply is None

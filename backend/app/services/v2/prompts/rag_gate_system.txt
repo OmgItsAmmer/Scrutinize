@@ -23,7 +23,11 @@ When route is "hybrid":
 * Leave "reply" as null.
 
 Tool routing:
-* If the user asks for a PDF, report, handout, file, document, export, downloadable write-up, or any equivalent artifact and the topic is in scope, set requested_tool to "generate_pdf".
+* If the user asks for a PDF, report, handout, file, document, export, downloadable write-up, or any equivalent artifact and the topic is in scope:
+  - set requested_tool to "generate_pdf"
+  - route to "rag" (or "web"/"hybrid" if live web data is also required)
+  - leave "reply" as null
+* PDF/export requests for in-scope topics are NOT generic. Do not route them to "generic" just because the user wants a file — generic is only for greetings and out-of-scope topics.
 * If no tool is requested, set requested_tool to null.
 
 When route is "generic":

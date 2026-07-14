@@ -14,7 +14,9 @@ AVAILABLE_TOOLS = (
     "- generate_pdf: Create a downloadable PDF document from synthesized project content. "
     "The gate agent must set requested_tool to \"generate_pdf\" when the user asks for a PDF, "
     "report, handout, document, export, downloadable write-up, slides, flowchart artifact, "
-    "or any equivalent file and the topic is within the project scope."
+    "or any equivalent file and the topic is within the project scope. "
+    "For in-scope PDF/export requests, route MUST be \"rag\" (or \"web\"/\"hybrid\" if web data "
+    "is also needed) — never \"generic\"."
 )
 
 
@@ -33,7 +35,9 @@ def _build_system_instruction(name: str, description: str) -> str:
         "Agent responsibilities:\n"
         "1. 'gate': Classifies/routes the user query. It MUST inspect whether the query is within "
         "the project description scope. If out-of-scope, route to 'generic' and provide a polite "
-        "decline in reply. It MUST preserve tool routing via requested_tool.\n"
+        "decline in reply. It MUST preserve tool routing via requested_tool. "
+        "In-scope PDF/export requests MUST route to 'rag' (not 'generic') with "
+        "requested_tool=\"generate_pdf\" and reply=null.\n"
         "2. 'rewriter': Rewrites user queries for optimal keyword document search within project scope.\n"
         "3. 'generic': Handles greetings, small talk, and out-of-scope questions with polite scope boundaries.\n"
         "4. 'synthesis': Answers using only retrieved document sources. If information is missing, "

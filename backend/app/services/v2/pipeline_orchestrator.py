@@ -32,8 +32,7 @@ NO_INDEXED_CONTENT = "No matching indexed content found."
 LOW_CONFIDENCE_DISCLAIMER = "Note: answer may vary — retrieval confidence was low."
 PDF_TITLE_FALLBACK = "generated-document"
 PDF_TOOL_NAME = "generate_pdf"
-# Tools that may bypass gate routing and force RAG in the future (none active yet).
-TOOLS_REQUIRING_RAG: frozenset[str] = frozenset()
+TOOLS_REQUIRING_RAG: frozenset[str] = frozenset({PDF_TOOL_NAME})
 
 
 class PipelineOrchestrator:
@@ -396,7 +395,7 @@ class PipelineOrchestrator:
             return ""
         return (
             "- generate_pdf: Create a downloadable PDF document from synthesized "
-            "technology/AI news content."
+            "project content."
         )
 
     @staticmethod
@@ -408,14 +407,26 @@ class PipelineOrchestrator:
         gate_result: GateResult,
         client_requested_tool: str | None,
     ) -> GateResult:
-        """Placeholder: only tools listed in TOOLS_REQUIRING_RAG may override gate routing."""
-        if not client_requested_tool or client_requested_tool not in TOOLS_REQUIRING_RAG:
+        """Force RAG when the client or gate requests a tool that needs retrieved content."""
+        tool = gate_result.requested_tool or client_requested_tool
+        if tool not in TOOLS_REQUIRING_RAG:
             return gate_result
+        if gate_result.route == "rag":
+            return GateResult(
+                route=gate_result.route,
+                reason=gate_result.reason,
+                reply=gate_result.reply,
+                requested_tool=tool,
+                llm_call=gate_result.llm_call,
+            )
         return GateResult(
             route="rag",
-            reason=f"Client tool requires RAG: {client_requested_tool}",
+            reason=(
+                f"{gate_result.reason} "
+                f"({tool} requires retrieval before document generation.)"
+            ),
             reply=None,
-            requested_tool=client_requested_tool,
+            requested_tool=tool,
             llm_call=gate_result.llm_call,
         )
 
