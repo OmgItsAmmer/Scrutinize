@@ -6,7 +6,6 @@ import { ConversationChatView } from "./components/ConversationChatView";
 import { ProjectWorkspace } from "./components/ProjectWorkspace";
 import { Sidebar } from "./components/Sidebar";
 import { AuthView } from "./components/AuthView";
-import { PdfDrawer } from "./components/PdfDrawer";
 
 function MainView() {
   const { state } = useApp();
@@ -34,7 +33,7 @@ export default function App() {
 
   return (
     <div className="flex h-[100dvh] bg-[var(--chatly-bg)] text-[var(--chatly-text-primary)]">
-      <Sidebar compact={state.pdfDrawer.open} />
+      <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileHeader />
         
@@ -79,7 +78,6 @@ export default function App() {
         </main>
         <MobileNav />
       </div>
-      <PdfDrawer />
     </div>
   );
 }

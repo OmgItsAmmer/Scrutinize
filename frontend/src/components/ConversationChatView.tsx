@@ -16,13 +16,12 @@ import {
 } from "../lib/pipelineAgents";
 import {
   CHAT_TOOLS,
-  extractPdfLink,
-  filenameFromPdfUrl,
-  pdfPreviewUrl,
+  parseMessageWithPdf,
   type ChatToolId,
 } from "../lib/chatTools";
 import type { ConversationScope, PersistedMessage, SearchSource } from "../types/api";
 import { ChatInput } from "./ChatInput";
+import { PdfDownloadButton } from "./PdfDownloadButton";
 import { renderMarkdown, SourcePreviewModal } from "./SourceCard";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { ToolButtons } from "./ToolButtons";
@@ -54,45 +53,49 @@ function MessageBubble({
   message,
   streaming = false,
   onSourceClick,
-  onLinkClick,
 }: {
   message: PersistedMessage;
   streaming?: boolean;
   onSourceClick: (source: SearchSource, index: number) => void;
-  onLinkClick?: (href: string) => void;
 }) {
   const isUser = message.role === "user";
   const sources = sourcesFromMessage(message);
+  const { displayText, pdfDownload } = parseMessageWithPdf(message.content);
 
   if (isUser && !message.content.trim()) {
     return null;
   }
 
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl bg-zinc-100 px-4 py-2.5 text-[15px] leading-relaxed text-zinc-900">
+          <p className="whitespace-pre-wrap">{message.content}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <article
-      className={
-        isUser
-          ? "ml-auto max-w-[76%] rounded-lg rounded-tr-sm border border-[var(--app-border)] bg-[var(--app-chat-user)] px-3 py-2 text-sm leading-6 text-[var(--app-text)] shadow-sm backdrop-blur-xl"
-          : "mr-auto max-w-[76%] rounded-lg rounded-tl-sm border border-[var(--app-border)] bg-[var(--app-chat-assistant)] px-3 py-2 text-sm leading-6 text-[var(--app-text)] shadow-sm backdrop-blur-xl"
-      }
-    >
-      {isUser ? (
-        <p className="whitespace-pre-wrap">{message.content}</p>
-      ) : (
-        <div className="space-y-1">
-          {renderMarkdown(message.content, sources, onSourceClick, onLinkClick)}
+    <div className="text-[15px] leading-relaxed text-zinc-900">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1 space-y-2">
+          {renderMarkdown(displayText, sources, onSourceClick)}
           {streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-zinc-900 align-middle" />
           )}
         </div>
-      )}
+        {pdfDownload && !streaming && (
+          <PdfDownloadButton href={pdfDownload.href} filename={pdfDownload.filename} />
+        )}
+      </div>
       {message.status === "failed" && <span className="mt-2 block text-xs text-rose-500">Failed</span>}
-    </article>
+    </div>
   );
 }
 
 export function ConversationChatView({ scope }: { scope: ConversationScope }) {
-  const { state, selectConversation, openPdfDrawer } = useApp();
+  const { state, selectConversation } = useApp();
   const projectId = scope === "project" ? state.project?.projectId : undefined;
   const [conversationId, setConversationId] = useState<string | null>(state.activeConversationId);
   const [messages, setMessages] = useState<PersistedMessage[]>([]);
@@ -122,19 +125,22 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
   }, [state.activeConversationId]);
 
   useEffect(() => {
+    if (loading) return;
+
     if (!conversationId) {
       setMessages([]);
       setAgentOutputs([]);
       setSources([]);
       return;
     }
+
     fetchConversationMessages(conversationId)
       .then((result) => setMessages(result.messages))
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Failed to load messages"));
     fetchConversationSources(conversationId)
       .then((result) => setSources(result.sources))
       .catch(() => setSources([]));
-  }, [conversationId]);
+  }, [conversationId, loading]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -151,25 +157,6 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
-
-  function handlePdfLinkClick(href: string) {
-    if (!href.includes("/v2/pdf/download/")) {
-      window.open(href, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const url = pdfPreviewUrl(href);
-    openPdfDrawer({
-      url,
-      title: "Generated PDF",
-      filename: filenameFromPdfUrl(url),
-    });
-  }
-
-  function maybeOpenPdfFromContent(content: string) {
-    const link = extractPdfLink(content);
-    if (!link) return;
-    handlePdfLinkClick(link.href);
-  }
 
   function notifyConversationListChanged() {
     window.dispatchEvent(
@@ -276,7 +263,6 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
             event.data.assistant_message,
           ]);
           setStreamingText("");
-          maybeOpenPdfFromContent(event.data.assistant_message.content);
           notifyConversationListChanged();
         }
         if (event.event === "error") setError(event.data.message);
@@ -361,7 +347,9 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
         <div className="flex w-full max-w-3xl flex-col items-center">
           {attachmentChips}
           <ChatInput {...inputProps} />
-          {toolButtons}
+          <div className="pt-3">
+            {toolButtons}
+          </div>
         </div>
       </div>
 
@@ -376,10 +364,8 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
               key={message.id}
               message={message}
               onSourceClick={(source, index) => setActiveSource({ source, index })}
-              onLinkClick={handlePdfLinkClick}
             />
           ))}
-          <ThinkingPanel outputs={agentOutputs} loading={loading} />
           {streamingText && (
             <MessageBubble
               message={{
@@ -394,7 +380,6 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
               }}
               streaming
               onSourceClick={(source, index) => setActiveSource({ source, index })}
-              onLinkClick={handlePdfLinkClick}
             />
           )}
           {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
@@ -408,8 +393,13 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
       >
         <div className="mx-auto w-full max-w-3xl">
           {attachmentChips}
-          {toolButtons}
-          <ChatInput {...inputProps} />
+          <ThinkingPanel outputs={agentOutputs} loading={loading} />
+          <div className="pt-2">
+            <ChatInput {...inputProps} />
+          </div>
+          <div className="pt-3">
+            {toolButtons}
+          </div>
         </div>
       </div>
       {activeSource && (

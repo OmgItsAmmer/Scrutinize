@@ -499,14 +499,14 @@ class PipelineOrchestrator:
         return generic_result.answer
 
     def _attach_pdf_to_answer(self, query: str, answer: str) -> str:
-        if answer.startswith("PDF generated successfully:"):
+        if "/v2/pdf/download/" in answer:
             return answer
         try:
             maybe_pdf = self._generate_pdf_from_answer(query, answer)
             if not maybe_pdf:
                 raise RuntimeError("MCP PDF Server is unavailable or disabled.")
             filename, download_url = maybe_pdf
-            return self._build_pdf_success_message(filename, download_url)
+            return self._append_pdf_download_link(answer, filename, download_url)
         except Exception as exc:
             return f"Failed to generate PDF: {exc}"
 
@@ -514,8 +514,20 @@ class PipelineOrchestrator:
         base_url = os.getenv("VITE_API_URL", "http://localhost:8000").rstrip("/")
         return f"{base_url}/v2/pdf/download/{filename}"
 
+    def _append_pdf_download_link(
+        self, answer: str, filename: str, download_url: str
+    ) -> str:
+        body = answer.strip()
+        if "/v2/pdf/download/" in body:
+            return body
+        if body.startswith("PDF generated successfully:"):
+            body = "Your document is ready."
+        elif not body:
+            body = "Your document is ready."
+        return f"{body}\n\n[Download PDF]({download_url})"
+
     def _build_pdf_success_message(self, filename: str, download_url: str) -> str:
-        return f"PDF generated successfully: [{filename}]({download_url})"
+        return self._append_pdf_download_link("", filename, download_url)
 
     def _slugify_pdf_title(self, value: str) -> str:
         cleaned_chars = [
@@ -756,8 +768,10 @@ class PipelineOrchestrator:
                                         "step": "tool_call_end",
                                         "message": f"PDF generated successfully: {filename}"
                                     })
-                                    answer = self._build_pdf_success_message(filename, download_url)
                                     pdf_result = (filename, download_url)
+                                    answer = self._append_pdf_download_link(
+                                        synthesis_result.answer, filename, download_url
+                                    )
                                 except Exception as e:
                                     answer = f"Failed to generate PDF: {e}"
                                     synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
@@ -778,7 +792,7 @@ class PipelineOrchestrator:
                                 "step": "tool_call_end",
                                 "message": f"PDF generated successfully: {filename}"
                             })
-                            answer = self._build_pdf_success_message(filename, download_url)
+                            answer = self._append_pdf_download_link(answer, filename, download_url)
                         except Exception as exc:
                             answer = f"Failed to generate PDF: {exc}"
                         synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
@@ -1119,19 +1133,19 @@ class PipelineOrchestrator:
                                 filepath = self._mcp_manager.call_tool(tool_call.name, tool_call.arguments)
                                 filename = os.path.basename(str(filepath).strip())
                                 download_url = self._build_pdf_download_url(filename)
-                                answer = self._build_pdf_success_message(filename, download_url)
+                                answer = self._append_pdf_download_link(answer, filename, download_url)
                                 synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
                             except Exception as e:
                                 answer = f"Failed to generate PDF: {e}"
                                 synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
                             break
-                if pdf_requested and not answer.startswith("PDF generated successfully:"):
+                if pdf_requested and "/v2/pdf/download/" not in answer:
                     try:
                         maybe_pdf = self._generate_pdf_from_answer(stripped, answer)
                         if not maybe_pdf:
                             raise RuntimeError("MCP PDF Server is unavailable or disabled.")
                         filename, download_url = maybe_pdf
-                        answer = self._build_pdf_success_message(filename, download_url)
+                        answer = self._append_pdf_download_link(answer, filename, download_url)
                     except Exception as exc:
                         answer = f"Failed to generate PDF: {exc}"
                     synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)

@@ -282,7 +282,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
             )}
           </div>
         </section>
-        <section className="mt-5 border-t border-[var(--app-border)] pt-4">
+        {/* <section className="mt-5 border-t border-[var(--app-border)] pt-4">
           <div className="flex items-center justify-between px-3 pb-2">
             <button onClick={() => setChatsExpanded((value) => !value)} aria-expanded={chatsExpanded} className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-faint)]">Chats {chatsExpanded ? "Open" : "Closed"}</button>
             <button onClick={() => selectConversation(null, "general-chat")} className="flex h-5 w-5 items-center justify-center rounded bg-[var(--app-primary)] text-[var(--app-primary-text)]" title="New web chat"><IconPlus className="h-3 w-3" /></button>
@@ -313,7 +313,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
               );
             })}
           </div>}
-        </section>
+        </section> */}
         </div>}
         <div className="mt-auto border-t border-[var(--app-border)] p-4">
           {!compact && (

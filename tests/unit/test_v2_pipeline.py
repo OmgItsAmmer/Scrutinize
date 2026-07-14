@@ -291,8 +291,9 @@ def test_pipeline_pdf_intent_uses_rewritten_topic_and_calls_mcp_without_discover
     )
     response = orchestrator.search("generate me pdf on openai news")
 
-    assert response.answer.startswith("PDF generated successfully:")
-    assert "openai-news-updates.pdf" in response.answer
+    assert "OpenAI announced new Academy courses." in response.answer
+    assert "/v2/pdf/download/" in response.answer
+    assert "Download PDF" in response.answer
     assert synthesis.synthesize.call_args.args[0] == "OpenAI news updates and announcements."
     assert synthesis.synthesize.call_args.kwargs["tools"] is None
     mcp_manager.list_tools.assert_not_called()
