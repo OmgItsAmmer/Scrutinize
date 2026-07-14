@@ -22,7 +22,7 @@ import {
 import type { ConversationScope, PersistedMessage, SearchSource } from "../types/api";
 import { ChatInput } from "./ChatInput";
 import { PdfDownloadButton } from "./PdfDownloadButton";
-import { renderMarkdown, SourcePreviewModal } from "./SourceCard";
+import { renderMarkdown, SourcePreviewModal, CitationButton } from "./SourceCard";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { ToolButtons } from "./ToolButtons";
 
@@ -78,17 +78,32 @@ function MessageBubble({
 
   return (
     <div className="text-[15px] leading-relaxed text-zinc-900">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1 space-y-2">
+      <div className="inline-flex items-start gap-2.5 max-w-full">
+        <div className="min-w-0 space-y-2">
           {renderMarkdown(displayText, sources, onSourceClick)}
           {streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-zinc-900 align-middle" />
           )}
         </div>
         {pdfDownload && !streaming && (
-          <PdfDownloadButton href={pdfDownload.href} filename={pdfDownload.filename} />
+          <div className="shrink-0 pt-0.5">
+            <PdfDownloadButton href={pdfDownload.href} filename={pdfDownload.filename} />
+          </div>
         )}
       </div>
+      {!streaming && sources.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-zinc-400 self-center mr-1">References:</span>
+          {sources.map((source, idx) => (
+            <CitationButton
+              key={source.segment_id || idx}
+              index={idx}
+              title={source.title}
+              onClick={() => onSourceClick(source, idx)}
+            />
+          ))}
+        </div>
+      )}
       {message.status === "failed" && <span className="mt-2 block text-xs text-rose-500">Failed</span>}
     </div>
   );

@@ -240,10 +240,10 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-faint)]">Projects</p>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="flex h-5 w-5 items-center justify-center rounded bg-[var(--app-primary)] text-[var(--app-primary-text)] transition-colors hover:bg-[var(--app-primary-hover)]"
+              className="flex h-7 w-7 items-center justify-center rounded-lg bg-transparent text-zinc-950 transition-colors hover:bg-black/5"
               title="Create New Project"
             >
-              <IconPlus className="h-3 w-3 stroke-[2.5]" />
+              <IconPlus className="h-5 w-5 stroke-[2.5]" />
             </button>
           </div>
           <div className="project-hover-card-list">

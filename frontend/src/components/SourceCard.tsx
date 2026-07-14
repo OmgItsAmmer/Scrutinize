@@ -123,7 +123,7 @@ const getCardStyle = (index: number) => {
   };
 };
 
-function CitationButton({
+export function CitationButton({
   index,
   title,
   onClick,
@@ -137,9 +137,9 @@ function CitationButton({
       type="button"
       onClick={onClick}
       title={title}
-      className="inline-flex items-center justify-center gap-1 mx-0.5 px-2 py-0.5 rounded-full text-[11px] font-bold text-zinc-700 dark:text-zinc-300 bg-white/20 dark:bg-white/10 border border-white/40 dark:border-white/15 shadow-sm backdrop-blur-md transition-all duration-200 hover:scale-105 hover:bg-white/35 dark:hover:bg-white/20 hover:border-white/60 cursor-pointer active:scale-95 select-none"
+      className="inline-flex items-center justify-center gap-1 mx-0.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold text-zinc-950 bg-white/50 border border-white/75 shadow-sm backdrop-blur-md transition-all duration-200 hover:scale-105 hover:bg-white/80 hover:border-white cursor-pointer active:scale-95 select-none"
     >
-      <IconDocument className="h-3 w-3 shrink-0 opacity-80" />
+      <IconDocument className="h-3 w-3 shrink-0 opacity-100" />
       <span className="leading-none">{index + 1}</span>
     </button>
   );

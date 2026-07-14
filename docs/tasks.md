@@ -33,6 +33,8 @@ RAG pipeline documentation
 
 
 
+
+
 EXTRAS:
 
 doclink
@@ -62,4 +64,13 @@ whats going on in the world
 
 spawm uploading of same source
 
+
+
+issues:
+
+web search broken
+
+context managment broken
+
+wrong fetching
 
