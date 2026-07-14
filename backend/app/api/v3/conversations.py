@@ -380,6 +380,29 @@ def stream_message(
             service.complete(assistant, answer, citations)
             session.refresh(assistant)
             session.refresh(conversation)
+
+            if conversation.project_id:
+                from sqlalchemy import func
+                try:
+                    completed_count = session.scalar(
+                        select(func.count(ChatMessage.id))
+                        .join(ChatConversation, ChatMessage.conversation_id == ChatConversation.id)
+                        .where(ChatConversation.project_id == conversation.project_id)
+                        .where(ChatMessage.role == "assistant")
+                        .where(ChatMessage.status == "completed")
+                    )
+                    if completed_count and completed_count > 0 and completed_count % 5 == 0:
+                        from app.services.v2.prompt_generator import recreate_project_svg
+                        recreate_project_svg(
+                            project_id=conversation.project_id,
+                            session=session,
+                            settings=settings,
+                            llm=llm,
+                        )
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).error("Failed to update project SVG on 5th message: %s", exc)
+
             yield _sse(
                 "message.completed",
                 {

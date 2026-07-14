@@ -1,14 +1,17 @@
 import logging
+from uuid import UUID
+from sqlmodel import Session, select
 
 from app.core.config import Settings
 from app.services.v2.json_utils import parse_json_object
 from app.services.v2.llm_clients.cloud import CloudLlmClient
 from app.services.v2.llm_clients.local import LocalLlmClient
 from app.services.v2.prompts import load_prompt
+from app.services.v2.llm_clients import BaseLlmClient
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_KEYS = ("gate", "rewriter", "generic", "synthesis", "decision")
+_REQUIRED_KEYS = ("gate", "rewriter", "generic", "synthesis", "decision", "visual_svg")
 
 AVAILABLE_TOOLS = (
     "- generate_pdf: Create a downloadable PDF document from synthesized project content. "
@@ -55,7 +58,18 @@ def _build_system_instruction(name: str, description: str) -> str:
         "The decision prompt MUST explain how to evaluate PDF/document/tool requests and when to "
         "retry with correct_route \"rag\".\n\n"
         "You MUST return a JSON object with exactly the keys: 'gate', 'rewriter', 'generic', "
-        "'synthesis', 'decision'. Each value must be the full system prompt string for that agent."
+        "'synthesis', 'decision', 'visual_svg'. Each value must be the full system prompt string for that agent, "
+        "except 'visual_svg' which must be a valid, raw, modern, beautiful, and self-contained SVG code "
+        "representing the project visually based on the project name and description.\n"
+        "SVG Design Guidelines:\n"
+        "- Must use viewBox='0 0 200 150' to fit the card header aspect ratio.\n"
+        "- Do NOT draw simple shapes or plain text. Create a professional, modern vector illustration or abstract logo.\n"
+        "- Use rich, vibrant gradients (define <linearGradient> or <radialGradient> in a <defs> block) instead of flat, solid colors.\n"
+        "- Use deep background colors (e.g., dark blues, deep purples, slate graces) with bright, glowing accent colors (cyan, magenta, gold, emerald) to create high contrast.\n"
+        "- Use organic curves and paths (<path d='...' />) to draw custom shapes rather than basic rectangles and circles.\n"
+        "- Use visual metaphors: a glowing rocket/constellation for space, a steaming dish/pan/flame for cooking, a stylized outline face or silhouette for personality sketches, gear/connection nodes for AI, etc.\n"
+        "- Implement layering, opacity, and subtle drop shadows (using <filter> with <feDropShadow>) to add depth and dimension.\n"
+        "- Do not wrap the SVG string in markdown code block ticks inside the JSON value."
     )
 
 
@@ -70,7 +84,7 @@ def generate_project_prompts(
     Tries the local LLM 'qwen3.5:2b' first, falling back to cloud OpenAI 'gpt-4o-mini'.
     """
     system_instruction = _build_system_instruction(name, description)
-    user_prompt = "Generate the JSON object containing the five system prompts."
+    user_prompt = "Generate the JSON object containing the five system prompts and the visual SVG."
 
     if settings.local_llm_base_url:
         try:
@@ -91,10 +105,10 @@ def generate_project_prompts(
             logger.warning("Failed to generate prompts using local LLM: %s. Falling back to cloud LLM...", exc)
 
     try:
-        logger.info("Attempting to generate project prompts using cloud LLM 'gpt-4o-mini'...")
+        logger.info("Attempting to generate project prompts using cloud LLM 'gpt-4o'...")
         cloud_client = CloudLlmClient(settings)
         response = cloud_client.generate(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             system=system_instruction,
             user=user_prompt,
             json_mode=True,
@@ -107,3 +121,90 @@ def generate_project_prompts(
     except Exception as exc:
         logger.error("Failed to generate prompts using cloud LLM fallback: %s", exc)
         raise RuntimeError(f"Could not generate project prompts from LLMs: {exc}") from exc
+
+
+def recreate_project_svg(
+    project_id: UUID,
+    session: Session,
+    settings: Settings,
+    llm: BaseLlmClient,
+) -> None:
+    """
+    Fetches context (recent messages) in this project and triggers LLM to
+    regenerate a new visual SVG representation, saving it to project settings.
+    """
+    from app.models.project import Project
+    from app.models.conversation import ChatConversation, ChatMessage
+
+    project = session.get(Project, project_id)
+    if not project:
+        logger.warning("Project %s not found for SVG recreation", project_id)
+        return
+
+    # Get the last 10 messages for context
+    recent_messages = session.exec(
+        select(ChatMessage)
+        .join(ChatConversation, ChatMessage.conversation_id == ChatConversation.id)
+        .where(ChatConversation.project_id == project_id)
+        .where(ChatMessage.status == "completed")
+        .where(ChatMessage.role.in_(["user", "assistant"]))
+        .order_by(ChatMessage.created_at.desc())
+        .limit(10)
+    ).all()
+
+    # Reverse to chronological order
+    recent_messages.reverse()
+
+    # Build context string
+    history_text = "\n".join(f"{m.role}: {m.content}" for m in recent_messages)
+
+    system_instruction = (
+        "You are a professional designer. Your task is to generate a beautiful, modern, clean, "
+        "and self-contained SVG image that visually represents a project based on its title, "
+        "description, and recent chat history.\n\n"
+        "Project details:\n"
+        f"- Project Name: {project.name}\n"
+        f"- Project Description: {project.settings.get('description', '')}\n\n"
+        "Recent conversation context to inspire the design update:\n"
+        f"{history_text}\n\n"
+        "SVG Requirements:\n"
+        "- Must be valid, raw, modern, beautiful, and clean SVG code.\n"
+        "- Must use viewBox='0 0 200 150' to fit the card header aspect ratio.\n"
+        "- Do NOT draw simple shapes or plain text. Create a professional, modern vector illustration or abstract logo.\n"
+        "- Use rich, vibrant gradients (define <linearGradient> or <radialGradient> in a <defs> block) instead of flat, solid colors.\n"
+        "- Use deep background colors (e.g., dark blues, deep purples, slate graces) with bright, glowing accent colors (cyan, magenta, gold, emerald) to create high contrast.\n"
+        "- Use organic curves and paths (<path d='...' />) to draw custom shapes rather than basic rectangles and circles.\n"
+        "- Use visual metaphors: a glowing rocket/constellation for space, a steaming dish/pan/flame for cooking, a stylized outline face or silhouette for personality sketches, gear/connection nodes for AI, etc.\n"
+        "- Implement layering, opacity, and subtle drop shadows (using <filter> with <feDropShadow>) to add depth and dimension.\n"
+        "- Do not include markdown code block formatting (such as ```xml or ```svg).\n"
+        "- Output ONLY the raw SVG code. No explanations, no JSON, no prefix, no suffix."
+    )
+
+    try:
+        logger.info("Attempting to regenerate visual SVG using LLM...")
+        # Fallback default model for prompt generation is gpt-4o
+        response = llm.generate(
+            model="gpt-4o",
+            system=system_instruction,
+            user="Generate the new updated visual SVG representation.",
+        )
+        svg_code = response.content.strip()
+        # Clean up code blocks if LLM accidentally wrapped it
+        if "```" in svg_code:
+            lines = svg_code.splitlines()
+            cleaned_lines = [l for l in lines if not l.strip().startswith("```")]
+            svg_code = "\n".join(cleaned_lines).strip()
+    except Exception as exc:
+        logger.error("Failed to regenerate SVG: %s", exc)
+        return
+
+    if svg_code.startswith("<svg") and "</svg>" in svg_code:
+        project_settings = dict(project.settings)
+        project_settings["visual_svg"] = svg_code
+        project.settings = project_settings
+        session.add(project)
+        session.commit()
+        logger.info("Successfully updated visual SVG for project %s", project_id)
+    else:
+        logger.warning("Generated text does not seem to contain a valid SVG: %s", svg_code[:100])
+

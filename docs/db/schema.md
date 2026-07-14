@@ -1,4 +1,84 @@
 [{
+  "table_name": "chat_conversations",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "owner_user_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "project_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "scope",
+  "data_type": "text"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "retrieval_policy",
+  "data_type": "text"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "title",
+  "data_type": "character varying"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "updated_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "chat_conversations",
+  "column_name": "archived_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "conversation_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "role",
+  "data_type": "character varying"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "content",
+  "data_type": "text"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "status",
+  "data_type": "text"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "client_message_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "citations",
+  "data_type": "jsonb"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "pipeline_run_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "error_code",
+  "data_type": "character varying"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "created_at",
+  "data_type": "timestamp with time zone"
+}, {
+  "table_name": "chat_messages",
+  "column_name": "completed_at",
+  "data_type": "timestamp with time zone"
+}, {
   "table_name": "files",
   "column_name": "id",
   "data_type": "uuid"
@@ -33,6 +113,10 @@
 }, {
   "table_name": "files",
   "column_name": "project_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "files",
+  "column_name": "conversation_id",
   "data_type": "uuid"
 }, {
   "table_name": "migration_history",
@@ -253,6 +337,10 @@
 }, {
   "table_name": "segments",
   "column_name": "project_id",
+  "data_type": "uuid"
+}, {
+  "table_name": "segments",
+  "column_name": "conversation_id",
   "data_type": "uuid"
 }, {
   "table_name": "users",

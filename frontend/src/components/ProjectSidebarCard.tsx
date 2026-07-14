@@ -63,7 +63,14 @@ export function ProjectSidebarCard({
             className="project-hover-card__hero-button"
             aria-label={`Open project ${project.name}`}
           >
-            <RonaldoProjectIcon className="project-hover-card__image" />
+            {project.settings?.visual_svg ? (
+              <div
+                className="project-hover-card__image flex items-center justify-center overflow-hidden bg-zinc-900 [&>svg]:w-full [&>svg]:h-full [&>svg]:object-cover"
+                dangerouslySetInnerHTML={{ __html: project.settings.visual_svg }}
+              />
+            ) : (
+              <RonaldoProjectIcon className="project-hover-card__image" />
+            )}
             <div className="project-hover-card__hero-overlay" />
             <h3 className="project-hover-card__hero-title">{project.name}</h3>
           </button>

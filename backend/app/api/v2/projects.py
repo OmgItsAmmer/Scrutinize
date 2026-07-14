@@ -77,8 +77,17 @@ def create_user_project(
         settings=settings,
     )
 
+    DEFAULT_SVG = (
+        '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+        '<rect width="100" height="100" rx="15" fill="#1f2937"/>'
+        '<circle cx="50" cy="50" r="30" fill="#4b5563"/>'
+        '<text x="50" y="55" font-family="system-ui" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">PROJ</text>'
+        '</svg>'
+    )
+
     project_settings = body.settings or {}
     project_settings["description"] = body.description.strip()
+    project_settings["visual_svg"] = prompts.get("visual_svg") or DEFAULT_SVG
     project_settings["system_prompt_overrides"] = {
         "gate": prompts["gate"],
         "rewriter": prompts["rewriter"],

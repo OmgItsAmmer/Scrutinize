@@ -411,25 +411,90 @@ body {
   border: 1px solid transparent;
   background: transparent;
   transition:
-    border-color 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.5s cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background-color 0.25s ease;
 }
 
-.project-hover-card:hover,
-.project-hover-card:focus-within {
-  border-color: rgba(255, 255, 255, 0.92);
+/* Pseudo element for delayed solid black background and glowing white border */
+.project-hover-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.92);
   background: #050505;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+/* 1. IMMEDIATE Hover State: Glassmorphism */
+.project-hover-card:hover,
+.project-hover-card:focus-within {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: var(--app-bg-glass-strong);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   z-index: 20;
 }
 
+/* 2. DELAYED Hover State: Fade in Solid Black/Border/Shadow after 1s */
+.project-hover-card:hover::before,
+.project-hover-card:focus-within::before {
+  opacity: 1;
+  transition-delay: 1s;
+}
+
 .project-hover-card--selected .project-hover-card__collapsed {
-  background: var(--app-primary);
-  color: var(--app-primary-text);
+  max-height: 0 !important;
+  opacity: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  pointer-events: none !important;
+}
+
+.project-hover-card--selected .project-hover-card__expanded {
+  grid-template-rows: 1fr !important;
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+  pointer-events: auto !important;
+}
+
+.project-hover-card--selected .project-hover-card__image {
+  transform: scale(1) !important;
+}
+
+.project-hover-card--selected .project-hover-card__hero-overlay {
+  opacity: 1 !important;
+}
+
+.project-hover-card--selected .project-hover-card__hero-title {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+}
+
+.project-hover-card--selected .project-hover-card__panel {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+  pointer-events: auto !important;
+}
+
+/* Selected state: immediate solid black background and white border */
+.project-hover-card--selected::before {
+  opacity: 1 !important;
+  transition-delay: 0s !important;
+}
+
+/* Ensure no transition delays are applied when selected card transitions */
+.project-hover-card--selected * {
+  transition-delay: 0s !important;
 }
 
 .project-hover-card__collapsed {
+  position: relative;
+  z-index: 2;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -465,9 +530,12 @@ body {
   padding-top: 0;
   padding-bottom: 0;
   pointer-events: none;
+  transition-delay: 1s;
 }
 
 .project-hover-card__expanded {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
@@ -485,6 +553,7 @@ body {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+  transition-delay: 1s;
 }
 
 .project-hover-card__expanded-inner {
@@ -556,6 +625,7 @@ body {
 .project-hover-card:hover .project-hover-card__image,
 .project-hover-card:focus-within .project-hover-card__image {
   transform: scale(1);
+  transition-delay: 1s;
 }
 
 .project-hover-card__hero-overlay {
@@ -570,6 +640,7 @@ body {
 .project-hover-card:hover .project-hover-card__hero-overlay,
 .project-hover-card:focus-within .project-hover-card__hero-overlay {
   opacity: 1;
+  transition-delay: 1s;
 }
 
 .project-hover-card__hero-title {
@@ -597,6 +668,7 @@ body {
 .project-hover-card:focus-within .project-hover-card__hero-title {
   opacity: 1;
   transform: translateY(0);
+  transition-delay: 1s;
 }
 
 .project-hover-card__panel {
@@ -618,6 +690,7 @@ body {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+  transition-delay: 1s;
 }
 
 .project-hover-card__chats-label {
