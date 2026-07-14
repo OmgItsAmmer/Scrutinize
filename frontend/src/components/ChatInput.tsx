@@ -20,6 +20,9 @@ type ChatInputProps = {
   loading?: boolean;
   showNewSession?: boolean;
   webOnly?: boolean;
+  onAttach?: (file: File) => void;
+  attachments?: { file_id: string; filename: string; status: string }[];
+  attachDisabled?: boolean;
 };
 
 export function ChatInput({
@@ -30,10 +33,13 @@ export function ChatInput({
   loading,
   showNewSession = false,
   webOnly = false,
+  onAttach,
+  attachDisabled,
 }: ChatInputProps) {
   const { state: { search }, setWebSearchMode, clearSearch } = useApp();
   const [webSearchOpen, setWebSearchOpen] = useState(false);
   const webSearchRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const showAnimatedPlaceholder = !value && !disabled;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -79,7 +85,7 @@ export function ChatInput({
       )}
 
       <div
-        className="relative w-full rounded-2xl border border-black/80 bg-transparent transition-all duration-300 focus-within:border-black focus-within:bg-white/25 focus-within:backdrop-blur-2xl"
+        className="relative w-full rounded-2xl border border-black/80 bg-transparent transition-all duration-300 focus-within:border-black focus-within:bg-white/25 focus-within:backdrop-blur-2xl hover:shadow-md hover:-translate-y-0.5"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 sm:px-4 sm:py-3.5">
           <div className="relative min-h-[44px] min-w-0 w-full">
@@ -103,6 +109,33 @@ export function ChatInput({
           
           <div className="flex items-center justify-between pt-2 border-t border-[var(--chatly-border)]/40 mt-1">
             <div className="flex items-center gap-2">
+              {onAttach && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.txt,.md,.doc,.docx,.csv,.json"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) onAttach(file);
+                      event.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={disabled || loading || attachDisabled}
+                    className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-glass)] text-[var(--app-text-soft)] transition hover:bg-[var(--app-bg-glass-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Attach document"
+                    aria-label="Attach document"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </>
+              )}
               <ModelSelector disabled={disabled || loading} />
               {webOnly ? (
                 <span className="flex items-center gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] px-2.5 py-1 text-xs font-medium text-[var(--app-text-soft)]">

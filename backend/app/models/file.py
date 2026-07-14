@@ -24,6 +24,9 @@ class File(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     # Multi-tenant: link to owning project. Nullable for legacy rows.
     project_id: UUID | None = Field(default=None, foreign_key="projects.id", index=True)
+    conversation_id: UUID | None = Field(
+        default=None, foreign_key="chat_conversations.id", index=True
+    )
     filename: str
     modality: FileModality
     storage_path: str

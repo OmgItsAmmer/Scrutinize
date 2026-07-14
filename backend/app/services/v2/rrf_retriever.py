@@ -39,6 +39,8 @@ class RrfRetriever:
         project_id: UUID,  # Mandatory — enforce per-project document isolation.
         modality_filter: FileModality | None = None,
         top_k: int | None = None,
+        conversation_id: UUID | None = None,
+        include_project_wide: bool = True,
     ) -> RetrieveResult:
         query = rewritten_query.strip()
         if not query:
@@ -57,6 +59,8 @@ class RrfRetriever:
             modality=modality,
             query_sparse_vector=sparse_emb,
             rrf_k=self._settings.v2_rrf_k,
+            conversation_id=conversation_id,
+            include_project_wide=include_project_wide,
         )
         sources = [hit_to_source(hit) for hit in hybrid.hits]
         source_rank_fields = [source_log_fields(hit) for hit in hybrid.hits]

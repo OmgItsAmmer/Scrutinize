@@ -41,7 +41,15 @@ def list_user_projects(
         .order_by(Project.created_at.desc())
     ).all()
     return UserProjectListResponse(projects=[
-        UserProjectResponse(project_id=project.id, name=project.name, role=member.role, client_key=project.client_key, created_at=project.created_at.isoformat())
+        UserProjectResponse(
+            project_id=project.id,
+            name=project.name,
+            role=member.role,
+            client_key=project.client_key,
+            created_at=project.created_at.isoformat(),
+            api_key=project.api_key,
+            settings=project.settings
+        )
         for project, member in rows
     ])
 
@@ -51,12 +59,38 @@ def create_user_project(
     body: UserCreateProjectRequest,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_app_settings),
 ) -> UserProjectResponse:
-    project = ProjectService(session).create_project(body.name.strip(), body.settings, allow_duplicate_name=True)
+    from app.services.v2.prompt_generator import generate_project_prompts
+    prompts = generate_project_prompts(
+        name=body.name.strip(),
+        description=body.description.strip(),
+        settings=settings,
+    )
+
+    project_settings = body.settings or {}
+    project_settings["description"] = body.description.strip()
+    project_settings["system_prompt_overrides"] = {
+        "gate": prompts["gate"],
+        "rewriter": prompts["rewriter"],
+        "generic": prompts["generic"],
+        "synthesis": prompts["synthesis"],
+        "decision": prompts["decision"]
+    }
+    
+    project = ProjectService(session).create_project(body.name.strip(), project_settings, allow_duplicate_name=True)
     member = ProjectMember(user_id=user.id, project_id=project.id, role="owner")
     session.add(member)
     session.commit()
-    return UserProjectResponse(project_id=project.id, name=project.name, role=member.role, client_key=project.client_key, created_at=project.created_at.isoformat())
+    return UserProjectResponse(
+        project_id=project.id,
+        name=project.name,
+        role=member.role,
+        client_key=project.client_key,
+        created_at=project.created_at.isoformat(),
+        api_key=project.api_key,
+        settings=project.settings
+    )
 
 
 @router.post("", response_model=CreateProjectResponse, status_code=201)

@@ -42,8 +42,15 @@ class ConversationList(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    content: str = Field(min_length=1, max_length=32000)
+    content: str = Field(default="", max_length=32000)
     client_message_id: UUID
+    requested_tool: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_content_or_tool(self):
+        if not self.content.strip() and not self.requested_tool:
+            raise ValueError("Either content or requested_tool is required")
+        return self
 
 
 class MessageRead(BaseModel):
@@ -59,4 +66,17 @@ class MessageRead(BaseModel):
 
 class MessageList(BaseModel):
     messages: list[MessageRead]
+    total: int
+
+
+class ConversationSourceRead(BaseModel):
+    file_id: UUID
+    filename: str
+    modality: str
+    status: str
+    uploaded_at: datetime
+
+
+class ConversationSourceList(BaseModel):
+    sources: list[ConversationSourceRead]
     total: int

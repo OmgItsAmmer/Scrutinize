@@ -5,6 +5,7 @@ import pytest
 
 from app.core.config import Settings, get_settings
 from app.services.v2.llm_clients.base import LlmResponse
+from app.services.v2.llm_clients.cloud import CloudLlmClient, _ensure_json_mode_hint
 from app.services.v2.llm_clients.local import LocalLlmClient, LocalLlmError
 
 
@@ -153,3 +154,54 @@ def test_local_llm_client_requires_base_url(monkeypatch):
         LocalLlmClient(settings)
 
     get_settings.cache_clear()
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_ensure_json_mode_hint_appends_when_missing():
+    messages = [
+        {"role": "system", "content": "Classify the query."},
+        {"role": "user", "content": "hello"},
+    ]
+    _ensure_json_mode_hint(messages)
+    assert "json" in messages[0]["content"].lower()
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_ensure_json_mode_hint_noop_when_present():
+    messages = [{"role": "system", "content": "Return JSON only."}]
+    before = messages[0]["content"]
+    _ensure_json_mode_hint(messages)
+    assert messages[0]["content"] == before
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+def test_cloud_llm_client_json_mode_injects_hint():
+    settings = get_settings()
+    settings.openai_api_key = "sk-test"
+    client = CloudLlmClient(settings)
+
+    mock_message = MagicMock()
+    mock_message.content = '{"route":"generic"}'
+    mock_message.tool_calls = None
+
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+
+    with patch.object(client._client.chat.completions, "create", return_value=mock_response) as create:
+        resp = client.generate(
+            "gpt-4o-mini",
+            "Classify the query.",
+            "how do I cook pasta?",
+            json_mode=True,
+        )
+
+    assert resp.content == '{"route":"generic"}'
+    sent_messages = create.call_args.kwargs["messages"]
+    assert any("json" in msg["content"].lower() for msg in sent_messages)
+    assert create.call_args.kwargs["response_format"] == {"type": "json_object"}

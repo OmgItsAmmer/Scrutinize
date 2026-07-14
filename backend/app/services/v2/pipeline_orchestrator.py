@@ -20,6 +20,7 @@ from app.services.v2.generic_agent import GenericAgent
 from app.services.v2.pipeline_logger import PipelineLogger
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import GateResult, RagGate
+from app.services.v2.retrieval_precheck import RetrievalPrecheck
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent, SynthesisResult as RagSynthesisResult
 from app.services.v2.rrf_retriever import RrfRetriever
 from app.services.v2.mcp_manager import McpClientManager
@@ -31,6 +32,8 @@ NO_INDEXED_CONTENT = "No matching indexed content found."
 LOW_CONFIDENCE_DISCLAIMER = "Note: answer may vary — retrieval confidence was low."
 PDF_TITLE_FALLBACK = "generated-document"
 PDF_TOOL_NAME = "generate_pdf"
+# Tools that may bypass gate routing and force RAG in the future (none active yet).
+TOOLS_REQUIRING_RAG: frozenset[str] = frozenset()
 
 
 class PipelineOrchestrator:
@@ -48,6 +51,7 @@ class PipelineOrchestrator:
         settings: Settings,
         web_search: WebSearchService | None = None,
         mcp_manager: McpClientManager | None = None,
+        retrieval_precheck: RetrievalPrecheck | None = None,
         session: Session | None = None,
     ) -> None:
         self._rewriter = rewriter
@@ -59,6 +63,7 @@ class PipelineOrchestrator:
         self._memory = conversation_memory
         self._web_search = web_search
         self._mcp_manager = mcp_manager
+        self._precheck = retrieval_precheck
         self._settings = settings
         self._db_logger = PipelineLogger(session)
 
@@ -71,6 +76,9 @@ class PipelineOrchestrator:
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
         web_search_mode: str = "auto",
+        client_requested_tool: str | None = None,
+        conversation_id: UUID | None = None,
+        has_corpus: bool = True,
     ) -> SearchV2Response:
         logger.info("web_search_mode received in search: %s", web_search_mode)
         stripped = query.strip()
@@ -82,14 +90,13 @@ class PipelineOrchestrator:
             conversation_context=conversation_context,
         )
 
-        gate_result = self._gate.classify(
+        gate_result = self._classify_route(
             stripped,
-            model=project_ctx.gate_model if project_ctx else None,
-            system_override=(
-                project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
-            ),
+            project_ctx=project_ctx,
             conversation_context=conversation_context,
-            tool_context=self._build_gate_tool_context(),
+            client_requested_tool=client_requested_tool,
+            conversation_id=conversation_id,
+            has_corpus=has_corpus,
         )
 
         if web_search_mode == "always":
@@ -138,6 +145,7 @@ class PipelineOrchestrator:
                 modality_filter=modality_filter,
                 project_ctx=project_ctx,
                 web_search_mode=web_search_mode,
+                conversation_id=conversation_id,
             )
 
         self._db_logger.end_run(
@@ -158,6 +166,9 @@ class PipelineOrchestrator:
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
         web_search_mode: str = "auto",
+        client_requested_tool: str | None = None,
+        conversation_id: UUID | None = None,
+        has_corpus: bool = True,
     ) -> typing.Generator[str, None, None]:
         import json
         from uuid import UUID
@@ -178,22 +189,26 @@ class PipelineOrchestrator:
                 conversation_context=conversation_context,
             )
 
+            yield emit("status", {
+                "step": "precheck",
+                "message": "Running retrieval pre-check..."
+            })
+
+            gate_result = self._classify_route(
+                stripped,
+                project_ctx=project_ctx,
+                conversation_context=conversation_context,
+                client_requested_tool=client_requested_tool,
+                conversation_id=conversation_id,
+                has_corpus=has_corpus,
+            )
+
             gate_model = project_ctx.gate_model if project_ctx else self._settings.local_llm_gate_model
             yield emit("status", {
                 "step": "gate",
                 "model": gate_model,
                 "message": "Classifying query route..."
             })
-
-            gate_result = self._gate.classify(
-                stripped,
-                model=project_ctx.gate_model if project_ctx else None,
-                system_override=(
-                    project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
-                ),
-                conversation_context=conversation_context,
-                tool_context=self._build_gate_tool_context(),
-            )
 
             if web_search_mode == "always":
                 from app.services.v2.rag_gate import GateResult
@@ -297,6 +312,7 @@ class PipelineOrchestrator:
                         reason=(
                             f"Escalated from generic gate: {decision.feedback or gate_result.reason}"
                         ),
+                        requested_tool=gate_result.requested_tool,
                         llm_call=None,
                     )
                     self._db_logger.log_gate(
@@ -317,6 +333,7 @@ class PipelineOrchestrator:
                         project_ctx=project_ctx,
                         emit=emit,
                         web_search_mode=web_search_mode,
+                        conversation_id=conversation_id,
                     )
                     return
 
@@ -355,6 +372,7 @@ class PipelineOrchestrator:
                     project_ctx=project_ctx,
                     emit=emit,
                     web_search_mode=web_search_mode,
+                    conversation_id=conversation_id,
                 )
         except Exception as exc:
             logger.exception("v2 stream failed: %s", exc)
@@ -384,6 +402,102 @@ class PipelineOrchestrator:
     @staticmethod
     def _requested_pdf(gate_result: GateResult) -> bool:
         return gate_result.requested_tool == PDF_TOOL_NAME
+
+    @staticmethod
+    def _maybe_force_rag_for_tool(
+        gate_result: GateResult,
+        client_requested_tool: str | None,
+    ) -> GateResult:
+        """Placeholder: only tools listed in TOOLS_REQUIRING_RAG may override gate routing."""
+        if not client_requested_tool or client_requested_tool not in TOOLS_REQUIRING_RAG:
+            return gate_result
+        return GateResult(
+            route="rag",
+            reason=f"Client tool requires RAG: {client_requested_tool}",
+            reply=None,
+            requested_tool=client_requested_tool,
+            llm_call=gate_result.llm_call,
+        )
+
+    def _classify_route(
+        self,
+        query: str,
+        *,
+        project_ctx: ProjectContext | None,
+        conversation_context: str,
+        client_requested_tool: str | None,
+        conversation_id: UUID | None,
+        has_corpus: bool,
+    ) -> GateResult:
+        project_id = project_ctx.project_id if project_ctx else None
+        enable_web = self._settings.enable_web_search
+
+        if self._precheck is not None:
+            precheck = self._precheck.evaluate(
+                query,
+                project_id=project_id,
+                conversation_id=conversation_id,
+                has_corpus=has_corpus,
+                client_requested_tool=client_requested_tool,
+                enable_web_search=enable_web,
+            )
+            if precheck.action == "route_rag":
+                return GateResult(route="rag", reason=precheck.reason, llm_call=None)
+            if precheck.action == "route_web":
+                return GateResult(route="web", reason=precheck.reason, llm_call=None)
+            if precheck.action == "route_generic":
+                return GateResult(route="generic", reason=precheck.reason, llm_call=None)
+
+        gate_result = self._gate.classify(
+            query,
+            model=project_ctx.gate_model if project_ctx else None,
+            system_override=(
+                project_ctx.system_prompt_overrides.get("gate") if project_ctx else None
+            ),
+            conversation_context=conversation_context,
+            tool_context=self._build_gate_tool_context(),
+            client_requested_tool=client_requested_tool,
+        )
+        return self._maybe_force_rag_for_tool(gate_result, client_requested_tool)
+
+    def _draft_document_content(
+        self,
+        query: str,
+        *,
+        conversation_context: str,
+        sources: list[SearchSource] | None = None,
+        project_ctx: ProjectContext | None = None,
+    ) -> str:
+        if sources:
+            synthesis_result = self._rag_synthesis.synthesize(
+                query,
+                sources,
+                model=project_ctx.synthesis_model if project_ctx else None,
+                system_override=(
+                    project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
+                ),
+                conversation_context=conversation_context,
+            )
+            return synthesis_result.answer
+
+        generic_result = self._generic.reply(
+            query,
+            system_override=project_ctx.system_prompt_overrides.get("generic") if project_ctx else None,
+            conversation_context=conversation_context,
+        )
+        return generic_result.answer
+
+    def _attach_pdf_to_answer(self, query: str, answer: str) -> str:
+        if answer.startswith("PDF generated successfully:"):
+            return answer
+        try:
+            maybe_pdf = self._generate_pdf_from_answer(query, answer)
+            if not maybe_pdf:
+                raise RuntimeError("MCP PDF Server is unavailable or disabled.")
+            filename, download_url = maybe_pdf
+            return self._build_pdf_success_message(filename, download_url)
+        except Exception as exc:
+            return f"Failed to generate PDF: {exc}"
 
     def _build_pdf_download_url(self, filename: str) -> str:
         base_url = os.getenv("VITE_API_URL", "http://localhost:8000").rstrip("/")
@@ -474,6 +588,7 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None,
         emit,
         web_search_mode: str = "auto",
+        conversation_id: UUID | None = None,
     ) -> typing.Generator[str, None, None]:
         max_attempts = (
             project_ctx.max_attempts if project_ctx else max(1, self._settings.v2_max_pipeline_attempts)
@@ -528,6 +643,7 @@ class PipelineOrchestrator:
                 modality_filter=modality_filter,
                 route=gate_result.route,
                 web_search_mode=web_search_mode,
+                conversation_id=conversation_id,
             )
             self._db_logger.log_retrieval(
                 run_id=run_id,
@@ -548,17 +664,40 @@ class PipelineOrchestrator:
             })
 
             if not sources:
-                answer = NO_INDEXED_CONTENT
-                yield emit("status", {
-                    "step": "synthesis",
-                    "message": "No documents found. Synthesizing default response..."
-                })
-                yield emit("chunk", {"text": answer})
-                self._db_logger.log_synthesis(
-                    run_id=run_id,
-                    attempt=attempt,
-                    synthesis_result=RagSynthesisResult(answer=answer, llm_call=None),
-                )
+                pdf_requested = self._requested_pdf(gate_result)
+                if pdf_requested:
+                    yield emit("status", {
+                        "step": "synthesis",
+                        "message": "Drafting document for PDF export...",
+                    })
+                    answer = self._draft_document_content(
+                        stripped,
+                        conversation_context=conversation_context,
+                        project_ctx=project_ctx,
+                    )
+                    yield emit("status", {
+                        "step": "tool_call",
+                        "message": "Running tool: generate_pdf...",
+                    })
+                    answer = self._attach_pdf_to_answer(stripped, answer)
+                    yield emit("chunk", {"text": answer})
+                    self._db_logger.log_synthesis(
+                        run_id=run_id,
+                        attempt=attempt,
+                        synthesis_result=RagSynthesisResult(answer=answer, llm_call=None),
+                    )
+                else:
+                    answer = NO_INDEXED_CONTENT
+                    yield emit("status", {
+                        "step": "synthesis",
+                        "message": "No documents found. Synthesizing default response...",
+                    })
+                    yield emit("chunk", {"text": answer})
+                    self._db_logger.log_synthesis(
+                        run_id=run_id,
+                        attempt=attempt,
+                        synthesis_result=RagSynthesisResult(answer=answer, llm_call=None),
+                    )
             else:
                 synthesis_model = project_ctx.synthesis_model if project_ctx else self._settings.local_llm_rewriter_model
                 yield emit("status", {
@@ -822,6 +961,7 @@ class PipelineOrchestrator:
                 reason=(
                     f"Escalated from generic gate: {decision.feedback or gate_result.reason}"
                 ),
+                requested_tool=gate_result.requested_tool,
                 llm_call=None,
             )
             self._db_logger.log_gate(
@@ -864,6 +1004,7 @@ class PipelineOrchestrator:
         modality_filter: FileModality | None,
         project_ctx: ProjectContext | None = None,
         web_search_mode: str = "auto",
+        conversation_id: UUID | None = None,
     ) -> SearchV2Response:
         max_attempts = (
             project_ctx.max_attempts if project_ctx else max(1, self._settings.v2_max_pipeline_attempts)
@@ -901,6 +1042,7 @@ class PipelineOrchestrator:
                 modality_filter=modality_filter,
                 route=gate_result.route,
                 web_search_mode=web_search_mode,
+                conversation_id=conversation_id,
             )
             self._db_logger.log_retrieval(
                 run_id=run_id,
@@ -914,13 +1056,28 @@ class PipelineOrchestrator:
             )
 
             if not sources:
-                answer = NO_INDEXED_CONTENT
-                mock_result = RagSynthesisResult(answer=answer, llm_call=None)
-                self._db_logger.log_synthesis(
-                    run_id=run_id,
-                    attempt=attempt,
-                    synthesis_result=mock_result,
-                )
+                pdf_requested = self._requested_pdf(gate_result)
+                if pdf_requested:
+                    answer = self._draft_document_content(
+                        stripped,
+                        conversation_context=conversation_context,
+                        project_ctx=project_ctx,
+                    )
+                    answer = self._attach_pdf_to_answer(stripped, answer)
+                    mock_result = RagSynthesisResult(answer=answer, llm_call=None)
+                    self._db_logger.log_synthesis(
+                        run_id=run_id,
+                        attempt=attempt,
+                        synthesis_result=mock_result,
+                    )
+                else:
+                    answer = NO_INDEXED_CONTENT
+                    mock_result = RagSynthesisResult(answer=answer, llm_call=None)
+                    self._db_logger.log_synthesis(
+                        run_id=run_id,
+                        attempt=attempt,
+                        synthesis_result=mock_result,
+                    )
             else:
                 pdf_requested = self._requested_pdf(gate_result)
                 tools = (
@@ -1100,6 +1257,7 @@ class PipelineOrchestrator:
         modality_filter: FileModality | None,
         route: str,
         web_search_mode: str = "auto",
+        conversation_id: UUID | None = None,
     ) -> tuple[list[SearchSource], Any, list[Any], int]:
         import time
         from app.services.v2.retrieval_utils import RetrievalStats
@@ -1119,6 +1277,8 @@ class PipelineOrchestrator:
             rewritten_text,
             project_id=project_id,
             modality_filter=modality_filter,
+            conversation_id=conversation_id,
+            include_project_wide=True,
         )
         sources = retrieval.sources
         stats = retrieval.stats

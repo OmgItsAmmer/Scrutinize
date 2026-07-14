@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     v2_rrf_top_k: int = 5
     v2_rrf_k: int = 60
     v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
+    v2_retrieval_precheck_high_score: float = 0.025
+    v2_retrieval_precheck_low_score: float = 0.012
 
     # MCP Configurations
     mcp_pdf_server_enabled: bool = True

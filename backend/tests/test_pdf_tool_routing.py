@@ -23,7 +23,7 @@ class FakeSettings:
     local_llm_gate_model = "fake-gate"
 
 
-def test_gate_tool_request_forces_rag_route():
+def test_gate_tool_request_preserves_gate_route():
     client = FakeGateClient(
         """
         {
@@ -41,8 +41,8 @@ def test_gate_tool_request_forces_rag_route():
         tool_context="- generate_pdf: Create a downloadable PDF document.",
     )
 
-    assert result.route == "rag"
-    assert result.reply is None
+    assert result.route == "generic"
+    assert result.reply == "I cannot create PDFs."
     assert result.requested_tool == "generate_pdf"
     assert "generate_pdf" in client.system
 

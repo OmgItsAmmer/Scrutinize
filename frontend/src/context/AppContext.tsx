@@ -727,12 +727,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "AUTH_LOGOUT" });
   }, []);
 
-  const selectProject = useCallback((project: { project_id: string; name: string; client_key: string }) => {
+  const selectProject = useCallback((project: { project_id: string; name: string; client_key: string; api_key?: string; settings?: Record<string, any> }) => {
     localStorage.setItem("scrutinize_project_id", project.project_id);
     localStorage.setItem("scrutinize_project_name", project.name);
     localStorage.setItem("scrutinize_client_key", project.client_key);
-    localStorage.removeItem("scrutinize_admin_key");
-    dispatch({ type: "AUTH_SUCCESS", project: { projectId: project.project_id, projectName: project.name, apiKey: "", clientKey: project.client_key } });
+    if (project.api_key) {
+      localStorage.setItem("scrutinize_admin_key", project.api_key);
+    } else {
+      localStorage.removeItem("scrutinize_admin_key");
+    }
+    dispatch({
+      type: "AUTH_SUCCESS",
+      project: {
+        projectId: project.project_id,
+        projectName: project.name,
+        apiKey: project.api_key || "",
+        clientKey: project.client_key,
+        settings: project.settings
+      }
+    });
     dispatch({ type: "SELECT_CONVERSATION", conversationId: null, view: "project" });
   }, []);
 

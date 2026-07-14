@@ -25,7 +25,7 @@ export function ProjectWorkspace() {
 
   return (
     <section className="flex h-full min-h-0 flex-col">
-      <header className="shrink-0 px-3 py-2 sm:px-4">
+      <header className="relative z-20 shrink-0 px-3 py-2 sm:px-4">
         <div className="flex min-h-11 items-center justify-center">
           <div
             role="tablist"

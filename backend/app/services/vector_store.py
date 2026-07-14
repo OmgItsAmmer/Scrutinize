@@ -10,6 +10,7 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    MatchAny,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -37,6 +38,7 @@ class VectorSegment:
     content: str
     source_path: str
     title: str
+    conversation_id: str = ""  # Empty string = project-wide; set for chat attachments.
     start_time: float | None = None
     end_time: float | None = None
     created_at: datetime | None = None
@@ -112,7 +114,7 @@ class VectorStore:
         if not self.collection_exists():
             return
 
-        for field_name in ("file_id", "modality", "project_id"):  # project_id indexed for tenant isolation
+        for field_name in ("file_id", "modality", "project_id", "conversation_id"):
             try:
                 self._client.create_payload_index(
                     collection_name=self._collection,
@@ -181,6 +183,7 @@ class VectorStore:
                     payload={
                         "file_id": str(segment.file_id),
                         "project_id": str(segment.project_id),  # tenant isolation key
+                        "conversation_id": segment.conversation_id or "",
                         "modality": segment.modality,
                         "content": segment.content,
                         "start_time": segment.start_time,
@@ -201,10 +204,27 @@ class VectorStore:
         *,
         project_id: UUID,
         modality: str | None,
+        conversation_id: UUID | None = None,
+        include_project_wide: bool = True,
     ) -> Filter:
         must_conditions: list[FieldCondition] = [
             FieldCondition(key="project_id", match=MatchValue(value=str(project_id)))
         ]
+        if conversation_id is not None:
+            if include_project_wide:
+                must_conditions.append(
+                    FieldCondition(
+                        key="conversation_id",
+                        match=MatchAny(any=[str(conversation_id), ""]),
+                    )
+                )
+            else:
+                must_conditions.append(
+                    FieldCondition(
+                        key="conversation_id",
+                        match=MatchValue(value=str(conversation_id)),
+                    )
+                )
         if modality is not None:
             must_conditions.append(
                 FieldCondition(key="modality", match=MatchValue(value=modality))
@@ -242,9 +262,16 @@ class VectorStore:
         top_k: int = 10,
         modality: str | None = None,
         query_sparse_vector: SparseVector | dict[str, Any] | None = None,
+        conversation_id: UUID | None = None,
+        include_project_wide: bool = True,
     ) -> list[dict[str, Any]]:
         self.ensure_collection()
-        query_filter = self._build_query_filter(project_id=project_id, modality=modality)
+        query_filter = self._build_query_filter(
+            project_id=project_id,
+            modality=modality,
+            conversation_id=conversation_id,
+            include_project_wide=include_project_wide,
+        )
 
         if query_sparse_vector is not None:
             sv = self._normalize_sparse_vector(query_sparse_vector)
@@ -288,12 +315,19 @@ class VectorStore:
         modality: str | None = None,
         query_sparse_vector: SparseVector | dict[str, Any],
         rrf_k: int = 60,
+        conversation_id: UUID | None = None,
+        include_project_wide: bool = True,
     ) -> HybridSearchResult:
         """Run separate dense and sparse prefetches, fuse with RRF, return all lists."""
         from app.services.v2.retrieval_utils import fuse_rrf_hits
 
         self.ensure_collection()
-        query_filter = self._build_query_filter(project_id=project_id, modality=modality)
+        query_filter = self._build_query_filter(
+            project_id=project_id,
+            modality=modality,
+            conversation_id=conversation_id,
+            include_project_wide=include_project_wide,
+        )
         sv = self._normalize_sparse_vector(query_sparse_vector)
 
         dense_response = self._client.query_points(

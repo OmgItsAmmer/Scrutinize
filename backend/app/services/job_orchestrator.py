@@ -23,6 +23,7 @@ class JobOrchestrator:
         size_bytes: int | None = None,
         duration_seconds: float | None = None,
         project_id: UUID | None = None,
+        conversation_id: UUID | None = None,
     ) -> File:
         file_record = File(
             filename=filename,
@@ -32,6 +33,7 @@ class JobOrchestrator:
             duration_seconds=duration_seconds,
             status=FileStatus.UPLOADED,
             project_id=project_id,
+            conversation_id=conversation_id,
         )
         self.session.add(file_record)
         self.session.commit()
@@ -102,6 +104,7 @@ class JobOrchestrator:
         end_time: float | None = None,
         segment_id: UUID | None = None,
         project_id: UUID | None = None,
+        conversation_id: UUID | None = None,
     ) -> Segment:
         segment = Segment(
             id=segment_id or uuid4(),
@@ -111,6 +114,7 @@ class JobOrchestrator:
             start_time=start_time,
             end_time=end_time,
             project_id=project_id,
+            conversation_id=conversation_id,
         )
         self.session.add(segment)
         self.session.commit()

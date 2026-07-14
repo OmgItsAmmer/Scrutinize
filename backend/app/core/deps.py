@@ -22,6 +22,7 @@ from app.services.v2.mcp_manager import McpClientManager
 from app.services.v2.pipeline_orchestrator import PipelineOrchestrator
 from app.services.v2.query_rewriter import QueryRewriter
 from app.services.v2.rag_gate import RagGate
+from app.services.v2.retrieval_precheck import RetrievalPrecheck
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 from app.services.v2.rrf_retriever import RrfRetriever
 from app.services.vector_store import VectorStore
@@ -117,6 +118,13 @@ def get_web_search_service(
     return WebSearchService(settings)
 
 
+def get_retrieval_precheck(
+    retriever: RrfRetriever = Depends(get_rrf_retriever),
+    settings: Settings = Depends(get_app_settings),
+) -> RetrievalPrecheck:
+    return RetrievalPrecheck(retriever, settings)
+
+
 def get_pipeline_orchestrator(
     rewriter: QueryRewriter = Depends(get_query_rewriter),
     gate: RagGate = Depends(get_rag_gate),
@@ -127,6 +135,7 @@ def get_pipeline_orchestrator(
     conversation_memory: ConversationMemory = Depends(get_conversation_memory),
     web_search_service: WebSearchService = Depends(get_web_search_service),
     mcp_manager: McpClientManager = Depends(get_mcp_manager),
+    retrieval_precheck: RetrievalPrecheck = Depends(get_retrieval_precheck),
     settings: Settings = Depends(get_app_settings),
     session: Session = Depends(get_db_session),
 ) -> PipelineOrchestrator:
@@ -141,6 +150,7 @@ def get_pipeline_orchestrator(
         web_search=web_search_service,
         settings=settings,
         mcp_manager=mcp_manager,
+        retrieval_precheck=retrieval_precheck,
         session=session,
     )
 

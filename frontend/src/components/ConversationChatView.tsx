@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   createConversation,
   fetchConversationMessages,
+  fetchConversationSources,
   streamConversationMessage,
+  uploadConversationSource,
+  type ConversationSource,
 } from "../api/client";
 import { useApp } from "../context/AppContext";
 import {
@@ -11,10 +14,18 @@ import {
   completeAgentOutput,
   type AgentOutput,
 } from "../lib/pipelineAgents";
+import {
+  CHAT_TOOLS,
+  extractPdfLink,
+  filenameFromPdfUrl,
+  pdfPreviewUrl,
+  type ChatToolId,
+} from "../lib/chatTools";
 import type { ConversationScope, PersistedMessage, SearchSource } from "../types/api";
 import { ChatInput } from "./ChatInput";
 import { renderMarkdown, SourcePreviewModal } from "./SourceCard";
 import { ThinkingPanel } from "./ThinkingPanel";
+import { ToolButtons } from "./ToolButtons";
 
 function citationToSource(citation: Record<string, unknown>, index: number): SearchSource {
   const title = String(citation.title ?? `Source ${index + 1}`);
@@ -43,13 +54,19 @@ function MessageBubble({
   message,
   streaming = false,
   onSourceClick,
+  onLinkClick,
 }: {
   message: PersistedMessage;
   streaming?: boolean;
   onSourceClick: (source: SearchSource, index: number) => void;
+  onLinkClick?: (href: string) => void;
 }) {
   const isUser = message.role === "user";
   const sources = sourcesFromMessage(message);
+
+  if (isUser && !message.content.trim()) {
+    return null;
+  }
 
   return (
     <article
@@ -63,7 +80,7 @@ function MessageBubble({
         <p className="whitespace-pre-wrap">{message.content}</p>
       ) : (
         <div className="space-y-1">
-          {renderMarkdown(message.content, sources, onSourceClick)}
+          {renderMarkdown(message.content, sources, onSourceClick, onLinkClick)}
           {streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-zinc-900 align-middle" />
           )}
@@ -75,17 +92,30 @@ function MessageBubble({
 }
 
 export function ConversationChatView({ scope }: { scope: ConversationScope }) {
-  const { state, selectConversation } = useApp();
+  const { state, selectConversation, openPdfDrawer } = useApp();
   const projectId = scope === "project" ? state.project?.projectId : undefined;
   const [conversationId, setConversationId] = useState<string | null>(state.activeConversationId);
   const [messages, setMessages] = useState<PersistedMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [selectedTool, setSelectedTool] = useState<ChatToolId | null>(null);
+  const [sources, setSources] = useState<ConversationSource[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [agentOutputs, setAgentOutputs] = useState<AgentOutput[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeSource, setActiveSource] = useState<{ source: SearchSource; index: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  const funnyLines = [
+    "Let's build something awesome (or just write code we'll rewrite later).",
+    "Ready to look extremely productive while we over-analyze things?",
+    "What conspiracy theories or complex code are we scrutinizing today?",
+    "Ask me anything. I promise not to tell your boss.",
+    "Let's solve some problems that probably didn't exist five minutes ago.",
+    "Let's make today count. Or, you know, we can just ask AI to do it.",
+  ];
+  const [catchyLine] = useState(() => funnyLines[Math.floor(Math.random() * funnyLines.length)]);
 
   useEffect(() => {
     setConversationId(state.activeConversationId);
@@ -95,16 +125,51 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
     if (!conversationId) {
       setMessages([]);
       setAgentOutputs([]);
+      setSources([]);
       return;
     }
     fetchConversationMessages(conversationId)
       .then((result) => setMessages(result.messages))
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Failed to load messages"));
+    fetchConversationSources(conversationId)
+      .then((result) => setSources(result.sources))
+      .catch(() => setSources([]));
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const pending = sources.some((source) => source.status !== "indexed" && source.status !== "failed");
+    if (!pending) return;
+    const timer = window.setInterval(() => {
+      fetchConversationSources(conversationId)
+        .then((result) => setSources(result.sources))
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [conversationId, sources]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
+
+  function handlePdfLinkClick(href: string) {
+    if (!href.includes("/v2/pdf/download/")) {
+      window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const url = pdfPreviewUrl(href);
+    openPdfDrawer({
+      url,
+      title: "Generated PDF",
+      filename: filenameFromPdfUrl(url),
+    });
+  }
+
+  function maybeOpenPdfFromContent(content: string) {
+    const link = extractPdfLink(content);
+    if (!link) return;
+    handlePdfLinkClick(link.href);
+  }
 
   function notifyConversationListChanged() {
     window.dispatchEvent(
@@ -114,27 +179,59 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
     );
   }
 
-  async function submit() {
-    const content = draft.trim();
-    if (!content || loading) return;
+  async function ensureConversationId(): Promise<string> {
+    if (conversationId) return conversationId;
+    const created = await createConversation(scope, projectId);
+    setConversationId(created.id);
+    selectConversation(created.id, scope === "general" ? "general-chat" : "project");
+    notifyConversationListChanged();
+    return created.id;
+  }
+
+  async function handleAttach(file: File) {
+    if (uploading) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const id = await ensureConversationId();
+      await uploadConversationSource(id, file);
+      const result = await fetchConversationSources(id);
+      setSources(result.sources);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function toggleTool(toolId: ChatToolId) {
+    if (loading) return;
+    setSelectedTool((current) => (current === toolId ? null : toolId));
+  }
+
+  async function runStream(
+    content: string,
+    options?: { requestedTool?: string; silentUserMessage?: boolean },
+  ) {
     setLoading(true);
     setError(null);
-    setDraft("");
     setStreamingText("");
     setAgentOutputs([]);
 
     const clientMessageId = crypto.randomUUID();
-    const optimistic: PersistedMessage = {
-      id: clientMessageId,
-      conversation_id: conversationId ?? "pending",
-      role: "user",
-      content,
-      status: "completed",
-      citations: [],
-      created_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-    };
-    setMessages((current) => [...current, optimistic]);
+    if (!options?.silentUserMessage) {
+      const optimistic: PersistedMessage = {
+        id: clientMessageId,
+        conversation_id: conversationId ?? "pending",
+        role: "user",
+        content,
+        status: "completed",
+        citations: [],
+        created_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      };
+      setMessages((current) => [...current, optimistic]);
+    }
 
     try {
       let id = conversationId;
@@ -148,6 +245,9 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
 
       await streamConversationMessage(id, content, clientMessageId, (event) => {
         if (event.event === "message.accepted" && event.data.user_message) {
+          if (options?.silentUserMessage) {
+            return;
+          }
           setMessages((current) =>
             current.map((message) => (message.id === clientMessageId ? event.data.user_message! : message)),
           );
@@ -171,12 +271,16 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
           setAgentOutputs((current) =>
             completeAgentOutput(current, "synthesis", null, event.data.assistant_message.content),
           );
-          setMessages((current) => [...current.filter((message) => message.id !== event.data.assistant_message.id), event.data.assistant_message]);
+          setMessages((current) => [
+            ...current.filter((message) => message.id !== event.data.assistant_message.id),
+            event.data.assistant_message,
+          ]);
           setStreamingText("");
+          maybeOpenPdfFromContent(event.data.assistant_message.content);
           notifyConversationListChanged();
         }
         if (event.event === "error") setError(event.data.message);
-      });
+      }, options?.requestedTool ? { requestedTool: options.requestedTool } : undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Message failed");
     } finally {
@@ -187,17 +291,54 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
     }
   }
 
-  const active = messages.length > 0 || Boolean(conversationId);
+  async function submit() {
+    const content = draft.trim();
+    if (!content || loading) return;
+    const requestedTool = selectedTool
+      ? CHAT_TOOLS.find((entry) => entry.id === selectedTool)?.requestedTool
+      : undefined;
+    setDraft("");
+    setSelectedTool(null);
+    await runStream(content, requestedTool ? { requestedTool } : undefined);
+  }
+
+  const active = messages.some((message) => message.role === "user" && message.content.trim()) || Boolean(conversationId);
   const composerDocked = active || loading;
   const contextLabel = scope === "general" ? "Web chat" : state.project?.projectName ?? "Project chat";
   const inputProps = {
     value: draft,
     onChange: setDraft,
     onSubmit: () => void submit(),
+    onAttach: (file: File) => {
+      void handleAttach(file);
+    },
+    attachments: sources,
+    attachDisabled: uploading || !state.apiConnected,
     loading,
     disabled: !state.apiConnected,
     webOnly: scope === "general",
   };
+  const toolButtons = (
+    <ToolButtons
+      selectedTool={selectedTool}
+      disabled={!state.apiConnected || loading}
+      onSelect={toggleTool}
+    />
+  );
+  const attachmentChips = sources.length > 0 && (
+    <div className="mb-2 flex flex-wrap gap-2">
+      {sources.map((source) => (
+        <span
+          key={source.file_id}
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] px-2.5 py-1 text-xs text-[var(--app-text-soft)]"
+          title={source.filename}
+        >
+          <span className="max-w-[12rem] truncate">{source.filename}</span>
+          <span className="text-[10px] uppercase tracking-wide opacity-70">{source.status}</span>
+        </span>
+      ))}
+    </div>
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-[var(--app-chat-bg)]">
@@ -209,14 +350,18 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
         }`}
         aria-hidden={composerDocked}
       >
-        <div className="mb-8 text-center">
-          <span className="inline-flex rounded-full bg-black/5 px-3 py-1 text-xs font-medium text-zinc-600">
+        <div className="mb-8 max-w-2xl px-4 text-center">
+          <span className="mb-4 inline-flex rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
             {contextLabel}
           </span>
-          <p className="mt-3 text-sm text-zinc-500">Start a new conversation from the box below.</p>
+          <h1 className="text-3xl font-bold leading-tight tracking-tight text-[var(--app-text)] sm:text-4xl">
+            {catchyLine}
+          </h1>
         </div>
-        <div className="w-full max-w-3xl">
+        <div className="flex w-full max-w-3xl flex-col items-center">
+          {attachmentChips}
           <ChatInput {...inputProps} />
+          {toolButtons}
         </div>
       </div>
 
@@ -231,6 +376,7 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
               key={message.id}
               message={message}
               onSourceClick={(source, index) => setActiveSource({ source, index })}
+              onLinkClick={handlePdfLinkClick}
             />
           ))}
           <ThinkingPanel outputs={agentOutputs} loading={loading} />
@@ -248,6 +394,7 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
               }}
               streaming
               onSourceClick={(source, index) => setActiveSource({ source, index })}
+              onLinkClick={handlePdfLinkClick}
             />
           )}
           {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
@@ -256,10 +403,12 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
       </div>
       <div
         className={`shrink-0 overflow-visible px-4 pb-6 pt-2 transition-all duration-500 ease-out ${
-          composerDocked ? "chat-dock-enter max-h-[18rem]" : "max-h-0 overflow-hidden pb-0 pt-0 opacity-0"
+          composerDocked ? "chat-dock-enter max-h-[22rem]" : "max-h-0 overflow-hidden pb-0 pt-0 opacity-0"
         }`}
       >
         <div className="mx-auto w-full max-w-3xl">
+          {attachmentChips}
+          {toolButtons}
           <ChatInput {...inputProps} />
         </div>
       </div>

@@ -44,6 +44,7 @@ def index_segments(
             end_time=segment.end_time,
             segment_id=segment_id,
             project_id=file_record.project_id,
+            conversation_id=file_record.conversation_id,
         )
         vector_segments.append(
             VectorSegment(
@@ -51,6 +52,7 @@ def index_segments(
                 vector=vector,
                 file_id=file_record.id,
                 project_id=project_id,
+                conversation_id=str(file_record.conversation_id) if file_record.conversation_id else "",
                 modality=modality.value,
                 content=segment.content,
                 source_path=file_record.storage_path,

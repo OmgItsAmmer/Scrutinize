@@ -122,6 +122,8 @@ class UserProjectResponse(BaseModel):
     role: str
     client_key: str
     created_at: str
+    api_key: str | None = None
+    settings: dict[str, Any] | None = None
 
 
 class UserProjectListResponse(BaseModel):
@@ -130,5 +132,5 @@ class UserProjectListResponse(BaseModel):
 
 class UserCreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(..., min_length=1)
     settings: dict[str, Any] = Field(default_factory=dict)
-

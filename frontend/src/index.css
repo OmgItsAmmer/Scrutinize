@@ -278,4 +278,333 @@ body {
   background-clip: padding-box;
 }
 
+/* Sidebar project hover cards */
+.project-hover-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.project-hover-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  transition:
+    border-color 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.project-hover-card:hover,
+.project-hover-card:focus-within {
+  border-color: rgba(255, 255, 255, 0.92);
+  background: #050505;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+
+.project-hover-card--selected .project-hover-card__collapsed {
+  background: var(--app-primary);
+  color: var(--app-primary-text);
+}
+
+.project-hover-card__collapsed {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  border: 0;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--app-text-soft);
+  background: transparent;
+  cursor: pointer;
+  max-height: 2.5rem;
+  opacity: 1;
+  overflow: hidden;
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    max-height 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    padding 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.project-hover-card:not(.project-hover-card--selected) .project-hover-card__collapsed:hover {
+  background: var(--app-bg-glass-strong);
+}
+
+.project-hover-card:hover .project-hover-card__collapsed,
+.project-hover-card:focus-within .project-hover-card__collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+}
+
+.project-hover-card__expanded {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-0.4rem);
+  pointer-events: none;
+  transition:
+    grid-template-rows 0.62s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.48s cubic-bezier(0.22, 1, 0.36, 1) 0.06s,
+    transform 0.58s cubic-bezier(0.16, 1, 0.3, 1) 0.04s;
+}
+
+.project-hover-card:hover .project-hover-card__expanded,
+.project-hover-card:focus-within .project-hover-card__expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.project-hover-card__expanded-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.project-hover-card__hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  background: #050505;
+}
+
+.project-hover-card__image {
+  display: block;
+  width: 100%;
+  height: 7.5rem;
+  object-fit: cover;
+  transform: scale(1.06);
+  transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.project-hover-card:hover .project-hover-card__image,
+.project-hover-card:focus-within .project-hover-card__image {
+  transform: scale(1);
+}
+
+.project-hover-card__hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.78) 100%);
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.project-hover-card:hover .project-hover-card__hero-overlay,
+.project-hover-card:focus-within .project-hover-card__hero-overlay {
+  opacity: 1;
+}
+
+.project-hover-card__hero-title {
+  position: absolute;
+  left: 0.85rem;
+  right: 0.85rem;
+  bottom: 0.7rem;
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(0.35rem);
+  transition:
+    opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.14s,
+    transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s;
+}
+
+.project-hover-card:hover .project-hover-card__hero-title,
+.project-hover-card:focus-within .project-hover-card__hero-title {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.project-hover-card__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #050505;
+  opacity: 0;
+  transform: translateY(0.5rem);
+  pointer-events: none;
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.16s,
+    transform 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.14s;
+}
+
+.project-hover-card:hover .project-hover-card__panel,
+.project-hover-card:focus-within .project-hover-card__panel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.project-hover-card__chats-label {
+  margin: 0 0 0.15rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.project-hover-card__chats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 12.5rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.project-hover-card__chats::-webkit-scrollbar {
+  width: 4px;
+}
+
+.project-hover-card__chats::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 9999px;
+}
+
+.project-hover-card__status {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.6875rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.project-hover-card__chat-tile {
+  width: 100%;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.project-hover-card__chat-tile:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.project-hover-card__chat-tile--active {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.project-hover-card__show-more {
+  width: 100%;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease;
+}
+
+.project-hover-card__show-more:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.project-hover-card__cta {
+  width: 100%;
+  border: 0;
+  border-radius: 9999px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #050505;
+  background: #fff;
+  cursor: pointer;
+  transition: background-color 0.18s ease, transform 0.18s ease;
+}
+
+.project-hover-card__cta:hover {
+  background: #e4e4e7;
+}
+
+.project-hover-card__cta:active {
+  transform: scale(0.98);
+}
+
+@media (hover: none) {
+  .project-hover-card:focus-within {
+    border-color: rgba(255, 255, 255, 0.92);
+    background: #050505;
+  }
+
+  .project-hover-card:focus-within .project-hover-card__collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    pointer-events: none;
+  }
+
+  .project-hover-card:focus-within .project-hover-card__expanded {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .project-hover-card:focus-within .project-hover-card__hero-title,
+  .project-hover-card:focus-within .project-hover-card__image {
+    opacity: 1;
+    transform: none;
+  }
+
+  .project-hover-card:focus-within .project-hover-card__panel {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-hover-card,
+  .project-hover-card__collapsed,
+  .project-hover-card__expanded,
+  .project-hover-card__image,
+  .project-hover-card__hero-overlay,
+  .project-hover-card__hero-title,
+  .project-hover-card__panel {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
 

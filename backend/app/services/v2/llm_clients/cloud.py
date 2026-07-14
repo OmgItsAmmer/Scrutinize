@@ -10,6 +10,19 @@ from app.services.v2.llm_clients.base import BaseLlmClient, LlmResponse
 
 logger = logging.getLogger(__name__)
 
+_JSON_MODE_HINT = "Respond with a valid JSON object only."
+
+
+def _ensure_json_mode_hint(messages: list[dict[str, str]]) -> None:
+    """OpenAI requires the word 'json' in messages when using json_object format."""
+    if any("json" in msg["content"].lower() for msg in messages):
+        return
+    if messages and messages[0]["role"] == "system":
+        messages[0]["content"] = f"{messages[0]['content'].rstrip()}\n\n{_JSON_MODE_HINT}"
+    else:
+        messages.insert(0, {"role": "system", "content": _JSON_MODE_HINT})
+
+
 class CloudLlmError(Exception):
     """Raised when the cloud LLM endpoint fails."""
     pass
@@ -47,7 +60,9 @@ class CloudLlmClient(BaseLlmClient):
             "messages": messages,
         }
         if json_mode:
+            _ensure_json_mode_hint(messages)
             kwargs["response_format"] = {"type": "json_object"}
+            kwargs["messages"] = messages
         if tools:
             kwargs["tools"] = tools
             

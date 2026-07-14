@@ -2,15 +2,14 @@ import { useEffect, useState } from "react";
 import { fetchUserProjects, createUserProject, fetchCurrentUser, fetchConversations } from "../api/client";
 import { useApp } from "../context/AppContext";
 import type { ConversationItem, UserProject } from "../types/api";
-import { IconChevronDown, IconPlus, IconSettings, IconX } from "./icons";
+import { IconPlus, IconSettings, IconX } from "./icons";
+import { ProjectSidebarCard } from "./ProjectSidebarCard";
 
 export function Sidebar({ compact = false }: { compact?: boolean }) {
-  const { state, setView, logout, selectProject, selectConversation } = useApp();
+  const { state, setView, setProjectChoice, logout, selectProject, selectConversation } = useApp();
   const [projects, setProjects] = useState<UserProject[]>([]);
-  const [expanded, setExpanded] = useState(false);
   const [chatsExpanded, setChatsExpanded] = useState(true);
   const [chats, setChats] = useState<ConversationItem[]>([]);
-  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [projectChats, setProjectChats] = useState<Record<string, ConversationItem[]>>({});
   const [projectChatsLoading, setProjectChatsLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
@@ -19,6 +18,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
   // Project Creation Modal State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectDescription, setNewProjectDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -68,11 +68,8 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
 
   useEffect(() => {
     if (!state.project?.projectId) return;
-    setExpandedProjects((current) => ({ ...current, [state.project!.projectId]: true }));
     void loadProjectChats(state.project.projectId);
   }, [state.project?.projectId]);
-
-  const shown = expanded ? projects : projects.slice(0, 3);
 
   async function loadProjectChats(projectId: string) {
     if (projectChatsLoading[projectId]) return;
@@ -87,19 +84,9 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
     }
   }
 
-  function toggleProject(project: UserProject) {
-    const nextExpanded = !expandedProjects[project.project_id];
-    setExpandedProjects((current) => ({ ...current, [project.project_id]: nextExpanded }));
-    selectProject(project);
-    if (nextExpanded || !projectChats[project.project_id]) {
-      void loadProjectChats(project.project_id);
-    }
-  }
-
   function openProjectChat(project: UserProject, conversationId: string | null) {
     selectProject(project);
     selectConversation(conversationId, "project");
-    setExpandedProjects((current) => ({ ...current, [project.project_id]: true }));
     if (!projectChats[project.project_id]) {
       void loadProjectChats(project.project_id);
     }
@@ -107,17 +94,22 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
 
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
-    if (!newProjectName.trim()) return;
+    if (!newProjectName.trim() || !newProjectDescription.trim()) return;
     setCreating(true);
     setCreateError(null);
     try {
-      const newProj = await createUserProject(newProjectName.trim());
+      const newProj = await createUserProject(
+        newProjectName.trim(),
+        newProjectDescription.trim()
+      );
       // Refresh project list
       await loadProjects();
       // Select the new project
       selectProject(newProj);
+      setProjectChoice("settings");
       // Reset and close
       setNewProjectName("");
+      setNewProjectDescription("");
       setShowCreateModal(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create project");
@@ -142,79 +134,37 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
               <IconPlus className="h-3 w-3 stroke-[2.5]" />
             </button>
           </div>
-          <div className="space-y-1">
-            {shown.map((project) => {
+          <div className="project-hover-card-list">
+            {projects.map((project) => {
               const selected = state.project?.projectId === project.project_id;
-              const projectOpen = Boolean(expandedProjects[project.project_id]);
               const recent = projectChats[project.project_id] ?? [];
               const chatsLoading = Boolean(projectChatsLoading[project.project_id]);
 
               return (
-                <div key={project.project_id} className="rounded-xl">
-                  <div
-                    className={`flex items-center gap-1 rounded-xl ${
-                      selected ? "bg-[var(--app-primary)] text-[var(--app-primary-text)]" : "text-[var(--app-text-soft)] hover:bg-[var(--app-bg-glass-strong)]"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleProject(project)}
-                      className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm"
-                    >
-                      <IconChevronDown
-                        className={`h-3.5 w-3.5 shrink-0 transition-transform ${
-                          projectOpen ? "rotate-0" : "-rotate-90"
-                        }`}
-                      />
-                      <span className="truncate">{project.name}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openProjectChat(project, null)}
-                      className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
-                        selected ? "text-[var(--app-primary-text)] hover:bg-white/10" : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)]"
-                      }`}
-                      title="New project chat"
-                    >
-                      <IconPlus className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  {projectOpen && (
-                    <div className="ml-6 mt-1 space-y-0.5 border-l border-[var(--app-border-strong)] pl-2">
-                      {chatsLoading && (
-                        <p className="px-2 py-1.5 text-xs text-[var(--app-text-faint)]">Loading chats...</p>
-                      )}
-                      {!chatsLoading && recent.length === 0 && (
-                        <button
-                          type="button"
-                          onClick={() => openProjectChat(project, null)}
-                          className="w-full truncate rounded-lg px-2 py-1.5 text-left text-xs text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)]"
-                        >
-                          New chat
-                        </button>
-                      )}
-                      {recent.slice(0, 8).map((chat) => (
-                        <button
-                          key={chat.id}
-                          type="button"
-                          onClick={() => openProjectChat(project, chat.id)}
-                          className={`w-full truncate rounded-lg px-2 py-1.5 text-left text-xs ${
-                            state.activeConversationId === chat.id && selected
-                              ? "bg-white/15 text-[var(--app-primary-text)]"
-                              : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)] hover:text-[var(--app-text)]"
-                          }`}
-                        >
-                          {chat.title}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <ProjectSidebarCard
+                  key={project.project_id}
+                  project={project}
+                  selected={selected}
+                  chats={recent}
+                  chatsLoading={chatsLoading}
+                  activeConversationId={state.activeConversationId}
+                  onHover={() => {
+                    if (!projectChats[project.project_id] && !projectChatsLoading[project.project_id]) {
+                      void loadProjectChats(project.project_id);
+                    }
+                  }}
+                  onSelectProject={() => selectProject(project)}
+                  onOpenChat={(conversationId) => openProjectChat(project, conversationId)}
+                />
               );
             })}
+            {loading && projects.length === 0 && (
+              <p className="px-3 py-2 text-xs text-[var(--app-text-faint)]">Loading projects...</p>
+            )}
+            {!loading && projects.length === 0 && (
+              <p className="px-3 py-2 text-xs text-[var(--app-text-faint)]">No projects yet</p>
+            )}
           </div>
-          {projects.length > 3 && <button onClick={() => { const next=!expanded; setExpanded(next); if(next) void loadProjects(); }} className="w-full px-3 py-2 text-left text-xs font-medium text-[var(--app-text-muted)]">{loading ? "Loading..." : expanded ? "Show less" : "Expand all"}</button>}
         </section>
         <section className="mt-5 border-t border-[var(--app-border)] pt-4">
           <div className="flex items-center justify-between px-3 pb-2">
@@ -256,9 +206,11 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                 onClick={() => {
                   setShowCreateModal(false);
                   setNewProjectName("");
+                  setNewProjectDescription("");
                   setCreateError(null);
                 }}
-                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                disabled={creating}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-900 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <IconX className="h-5 w-5" />
               </button>
@@ -282,6 +234,22 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                 />
               </div>
 
+              <div>
+                <label htmlFor="projectDescription" className="block text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                  Project Description
+                </label>
+                <textarea
+                  id="projectDescription"
+                  required
+                  rows={2}
+                  placeholder="e.g. Analysis of tech news and AI research. Only answer questions related to AI trends, startup funding, and engineering news."
+                  value={newProjectDescription}
+                  onChange={(e) => setNewProjectDescription(e.target.value)}
+                  className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 resize-none"
+                  disabled={creating}
+                />
+              </div>
+
               {createError && (
                 <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-xs text-red-400">
                   {createError}
@@ -294,6 +262,8 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                   onClick={() => {
                     setShowCreateModal(false);
                     setNewProjectName("");
+                    setNewProjectDescription("");
+                    setNewProjectInScope("");
                     setCreateError(null);
                   }}
                   className="rounded-lg border border-zinc-800 px-4 py-2 text-xs font-semibold hover:bg-zinc-900 transition-colors"
@@ -304,15 +274,15 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                 <button
                   type="submit"
                   className="rounded-lg bg-white px-4 py-2 text-xs font-semibold text-black hover:bg-zinc-200 transition-colors flex items-center gap-1.5"
-                  disabled={creating || !newProjectName.trim()}
+                  disabled={creating || !newProjectName.trim() || !newProjectDescription.trim()}
                 >
                   {creating ? (
                     <>
                       <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black border-t-transparent"></div>
-                      Creating...
+                      Generating Project...
                     </>
                   ) : (
-                    "Create Project"
+                    "Generate Project"
                   )}
                 </button>
               </div>

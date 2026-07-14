@@ -133,3 +133,52 @@ class TestSearchAuth:
         call_kwargs = mock_orch.search.call_args.kwargs
         assert call_kwargs["project_ctx"] is not None
         assert call_kwargs["project_ctx"].project_id is not None
+
+
+# ---------------------------------------------------------------------------
+# POST /v2/projects/mine — User Project Creation with Prompt Generation
+# ---------------------------------------------------------------------------
+
+
+class TestUserCreateProject:
+    @patch("app.services.v2.prompt_generator.generate_project_prompts")
+    def test_create_user_project_success_and_saves_settings(self, mock_gen, client, session):
+        mock_gen.return_value = {
+            "gate": "custom gate prompt for tests",
+            "rewriter": "custom rewriter prompt for tests",
+            "generic": "custom generic prompt for tests",
+            "synthesis": "custom synthesis prompt for tests",
+            "decision": "custom decision prompt for tests",
+        }
+
+        # Google auth signup/login
+        login_res = client.post("/v2/auth/google", json={"id_token": "mock_token_creator@example.com"})
+        assert login_res.status_code == 200
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Create user project
+        resp = client.post(
+            "/v2/projects/mine",
+            headers=headers,
+            json={
+                "name": "My Medical Summarizer",
+                "description": "Medical clinical trials analysis. Only answer medical-related questions.",
+                "settings": {}
+            }
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == "My Medical Summarizer"
+        assert "project_id" in data
+        project_id = data["project_id"]
+
+        # Check DB to verify description and generated prompts are stored
+        from app.models.project import Project
+        from uuid import UUID
+        db_project = session.get(Project, UUID(project_id))
+        assert db_project is not None
+        assert db_project.settings["description"] == "Medical clinical trials analysis. Only answer medical-related questions."
+        assert db_project.settings["system_prompt_overrides"]["gate"] == "custom gate prompt for tests"
+        assert db_project.settings["system_prompt_overrides"]["decision"] == "custom decision prompt for tests"
+

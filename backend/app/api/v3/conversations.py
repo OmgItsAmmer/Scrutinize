@@ -2,13 +2,16 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from app.core.config import Settings
 from app.core.deps import (
     get_app_settings,
+    get_cloudinary_storage,
     get_current_user,
     get_db_session,
     get_pipeline_orchestrator,
@@ -16,7 +19,10 @@ from app.core.deps import (
     get_web_search_service,
 )
 from app.models.conversation import ChatConversation, ChatMessage, RetrievalPolicy
+from app.models.file import FileStatus
+from app.models.processing_job import JobStatus
 from app.models.user import User
+from app.schemas.upload import UploadResponse
 from app.schemas.v2.search import SearchV2Response
 from app.schemas.v2.search import ChatMessage as PipelineMessage
 from app.schemas.v2.search import ConversationState
@@ -28,14 +34,42 @@ from app.schemas.v3.conversation import (
     MessageCreate,
     MessageList,
     MessageRead,
+    ConversationSourceList,
+    ConversationSourceRead,
 )
+from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.conversation_service import ConversationService
+from app.services.fly_scaler import trigger_worker_wakeup
+from app.services.job_orchestrator import JobOrchestrator
 from app.services.project_service import ProjectService
+from app.services.upload_utils import (
+    ALL_ALLOWED_EXTENSIONS,
+    cloudinary_resource_type,
+    detect_modality,
+    ingestion_stage,
+    validate_content_type,
+)
 from app.services.v2.llm_clients import BaseLlmClient
 from app.services.v2.pipeline_orchestrator import PipelineOrchestrator
 from app.services.web_search import WebSearchService
+from app.workers.tasks import process_audio, process_text, process_video
 
 router = APIRouter(prefix="/conversations", tags=["v3-conversations"])
+
+PDF_TOOL_NAME = "generate_pdf"
+PDF_TOOL_DEFAULT_QUERY = (
+    "Generate a PDF document summarizing the conversation context and the most relevant "
+    "information available from project sources and the web."
+)
+TOOL_TITLE_HINTS = {
+    PDF_TOOL_NAME: "Draft Document",
+}
+
+TASK_BY_MODALITY = {
+    "text": process_text,
+    "audio": process_audio,
+    "video": process_video,
+}
 
 
 def _conversation_read(item: ChatConversation) -> ConversationRead:
@@ -48,6 +82,14 @@ def _message_read(item: ChatMessage) -> MessageRead:
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _resolve_turn(body: MessageCreate) -> tuple[str, str | None, str | None]:
+    requested_tool = body.requested_tool.strip() if body.requested_tool else None
+    content = body.content.strip()
+    if requested_tool == PDF_TOOL_NAME and not content:
+        content = PDF_TOOL_DEFAULT_QUERY
+    return content, requested_tool, TOOL_TITLE_HINTS.get(requested_tool or "")
 
 
 def _parse_v2_sse(block: str) -> dict | None:
@@ -128,6 +170,92 @@ def list_messages(
     return MessageList(messages=[_message_read(item) for item in items], total=len(items))
 
 
+@router.get("/{conversation_id}/sources", response_model=ConversationSourceList)
+def list_conversation_sources(
+    conversation_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+) -> ConversationSourceList:
+    files = ConversationService(session).list_sources(user, conversation_id)
+    return ConversationSourceList(
+        sources=[
+            ConversationSourceRead(
+                file_id=item.id,
+                filename=item.filename,
+                modality=item.modality.value,
+                status=item.status.value,
+                uploaded_at=item.uploaded_at,
+            )
+            for item in files
+        ],
+        total=len(files),
+    )
+
+
+@router.post("/{conversation_id}/sources", response_model=UploadResponse, status_code=202)
+async def upload_conversation_source(
+    conversation_id: UUID,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+    storage: CloudinaryStorage = Depends(get_cloudinary_storage),
+    settings: Settings = Depends(get_app_settings),
+) -> UploadResponse:
+    service = ConversationService(session)
+    conversation = service.get(user, conversation_id)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    safe_filename = Path(file.filename).name
+    modality = detect_modality(safe_filename)
+    if modality is None:
+        allowed = ", ".join(sorted(ALL_ALLOWED_EXTENSIONS))
+        raise HTTPException(status_code=415, detail=f"Unsupported file type. Allowed: {allowed}")
+
+    if not validate_content_type(modality, file.content_type):
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported content type for {modality.value}: {file.content_type}",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(data) > settings.max_upload_bytes:
+        raise HTTPException(status_code=413, detail="File exceeds maximum upload size")
+
+    upload_result = storage.upload_bytes(
+        data,
+        filename=safe_filename,
+        modality=modality.value,
+        resource_type=cloudinary_resource_type(modality),
+    )
+
+    orchestrator = JobOrchestrator(session)
+    file_record = orchestrator.create_file(
+        filename=safe_filename,
+        modality=modality,
+        storage_path=upload_result.secure_url,
+        size_bytes=len(data),
+        project_id=conversation.project_id,
+        conversation_id=conversation.id,
+    )
+    job = orchestrator.create_job(file_id=file_record.id, stage=ingestion_stage(modality))
+    orchestrator.mark_file_status(file_record.id, FileStatus.PROCESSING)
+
+    task = TASK_BY_MODALITY[modality.value]
+    trigger_worker_wakeup()
+    task.delay(str(job.id))
+
+    return UploadResponse(
+        file_id=file_record.id,
+        job_id=job.id,
+        filename=file_record.filename,
+        modality=file_record.modality,
+        status=JobStatus.PENDING,
+    )
+
+
 @router.post("/{conversation_id}/messages/stream")
 def stream_message(
     conversation_id: UUID,
@@ -140,8 +268,20 @@ def stream_message(
     orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator),
 ) -> StreamingResponse:
     service = ConversationService(session)
+    turn_content, requested_tool, title_hint = _resolve_turn(body)
+    user_display_content = (
+        "" if requested_tool and not body.content.strip() else turn_content
+    )
     conversation, user_message, assistant = service.begin_turn(
-        user, conversation_id, body.content, body.client_message_id
+        user,
+        conversation_id,
+        user_display_content,
+        body.client_message_id,
+        title_hint=title_hint,
+    )
+    has_corpus = service.has_indexed_sources(
+        conversation_id,
+        conversation.project_id,
     )
 
     def generate():
@@ -157,9 +297,13 @@ def stream_message(
         answer = ""
         citations: list[dict] = []
         try:
-            if conversation.retrieval_policy == RetrievalPolicy.WEB_ONLY:
+            use_pipeline = (
+                conversation.retrieval_policy != RetrievalPolicy.WEB_ONLY
+                or has_corpus
+            )
+            if not use_pipeline:
                 yield _sse("status", {"phase": "web_search", "step": "web_search", "label": "Searching the web"})
-                results = asyncio.run(web.search(body.content, limit=5))
+                results = asyncio.run(web.search(turn_content, limit=5))
                 citations = [
                     {
                         "title": item.get("title", "Web result"),
@@ -184,7 +328,7 @@ def stream_message(
                 ) or "No web results were available. Be transparent about this."
                 history_text = "\n".join(f"{m.role}: {m.content}" for m in history[-10:])
                 prompt = (
-                    f"Conversation:\n{history_text}\n\nUser: {body.content}"
+                    f"Conversation:\n{history_text}\n\nUser: {turn_content}"
                     f"\n\nWeb results:\n{web_context}"
                 )
                 system = (
@@ -197,18 +341,22 @@ def stream_message(
                     answer += chunk
                     yield _sse("delta", {"assistant_message_id": assistant.id, "text": chunk})
             else:
-                if conversation.project_id is None:
-                    raise RuntimeError("Project conversation is missing project_id")
-                project = ProjectService(session).get_by_id(conversation.project_id)
-                if project is None:
-                    raise RuntimeError("Project not found")
-                project_ctx = ProjectService(session).resolve_context(project, settings)
+                project_ctx = None
+                if conversation.project_id is not None:
+                    project = ProjectService(session).get_by_id(conversation.project_id)
+                    if project is None:
+                        raise RuntimeError("Project not found")
+                    project_ctx = ProjectService(session).resolve_context(project, settings)
                 result: SearchV2Response | None = None
+                web_search_mode = "auto"
                 for block in orchestrator.search_stream(
-                    body.content,
+                    turn_content,
                     project_ctx=project_ctx,
                     conversation=ConversationState(messages=history),
-                    web_search_mode="auto",
+                    web_search_mode=web_search_mode,
+                    client_requested_tool=requested_tool,
+                    conversation_id=conversation.id,
+                    has_corpus=has_corpus,
                 ):
                     event = _parse_v2_sse(block)
                     if not event:

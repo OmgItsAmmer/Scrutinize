@@ -272,11 +272,11 @@ export function fetchUserProjects(): Promise<{ projects: UserProject[] }> {
   return request("/v2/projects");
 }
 
-export function createUserProject(name: string, settings: Record<string, any> = {}): Promise<UserProject> {
+export function createUserProject(name: string, description: string, settings: Record<string, any> = {}): Promise<UserProject> {
   return request<UserProject>("/v2/projects/mine", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, settings }),
+    body: JSON.stringify({ name, description, settings }),
   });
 }
 
@@ -353,6 +353,33 @@ export function fetchConversationMessages(conversationId: string): Promise<{ mes
   return request(`/v3/conversations/${conversationId}/messages`);
 }
 
+export type ConversationSource = {
+  file_id: string;
+  filename: string;
+  modality: string;
+  status: string;
+  uploaded_at: string;
+};
+
+export function fetchConversationSources(conversationId: string): Promise<{ sources: ConversationSource[]; total: number }> {
+  return request(`/v3/conversations/${conversationId}/sources`);
+}
+
+export async function uploadConversationSource(conversationId: string, file: File): Promise<{ file_id: string; job_id: string; filename: string; status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const token = localStorage.getItem("scrutinize_access_token");
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_URL}/v3/conversations/${conversationId}/sources`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!response.ok) throw new ApiError(await parseError(response), response.status);
+  return response.json();
+}
+
 export type ConversationStreamEvent =
   | { event: "message.accepted"; data: { user_message?: import("../types/api").PersistedMessage } }
   | { event: "status"; data: { phase?: string; label?: string; step?: string; message?: string; model?: string | null; route?: string; rewritten?: string; sources_count?: number; sources?: Array<{ title?: string }>; confidence?: number; verdict?: string; feedback?: string } }
@@ -365,14 +392,19 @@ export async function streamConversationMessage(
   content: string,
   clientMessageId: string,
   onEvent: (event: ConversationStreamEvent) => void,
+  options?: { requestedTool?: string },
 ): Promise<void> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = localStorage.getItem("scrutinize_access_token");
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  const body: Record<string, unknown> = { content, client_message_id: clientMessageId };
+  if (options?.requestedTool) {
+    body.requested_tool = options.requestedTool;
+  }
   const response = await fetch(`${API_URL}/v3/conversations/${conversationId}/messages/stream`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ content, client_message_id: clientMessageId }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) throw new ApiError(await parseError(response), response.status);
   const reader = response.body?.getReader();

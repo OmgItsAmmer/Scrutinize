@@ -40,12 +40,18 @@ class RagGate:
         system_override: str | None = None,
         conversation_context: str = "",
         tool_context: str = "",
+        client_requested_tool: str | None = None,
     ) -> GateResult:
         effective_model = model or self._model
         effective_system = system_override or self._system
         if tool_context.strip():
             effective_system = f"{effective_system}\n\nAvailable application tools:\n{tool_context.strip()}"
         user_lines = [f"Current user query: {original.strip()}"]
+        if client_requested_tool:
+            user_lines.append(
+                f"User selected tool in UI: {client_requested_tool.strip()} "
+                "(consider this when choosing route and requested_tool)."
+            )
         append_conversation_context(user_lines, conversation_context)
 
         llm_response = None
@@ -76,9 +82,6 @@ class RagGate:
                 if requested_tool_raw not in (None, "", "null")
                 else None
             )
-            if requested_tool == "generate_pdf":
-                route = "rag"
-                reply = None
             if route == "generic" and not reply:
                 reply = None
             return GateResult(

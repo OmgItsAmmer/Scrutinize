@@ -126,3 +126,6 @@ class McpClientManager:
                 raise
             logger.warning("MCP package is unavailable; using local PDF fallback.")
             return self._call_local_pdf_tool(tool_name, arguments)
+        except Exception as exc:
+            logger.warning("MCP call_tool failed; using local PDF fallback: %s", exc)
+            return self._call_local_pdf_tool(tool_name, arguments)

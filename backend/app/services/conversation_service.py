@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, or_, select
 
 from app.models.conversation import (
     ChatConversation,
@@ -14,6 +14,7 @@ from app.models.conversation import (
     RetrievalPolicy,
 )
 from app.models.user import ProjectMember, User
+from app.models.file import File, FileStatus
 
 
 class ConversationService:
@@ -109,6 +110,8 @@ class ConversationService:
         conversation_id: UUID,
         content: str,
         client_message_id: UUID,
+        *,
+        title_hint: str | None = None,
     ) -> tuple[ChatConversation, ChatMessage, ChatMessage]:
         conversation = self.get(user, conversation_id)
         existing = self.session.exec(
@@ -143,7 +146,8 @@ class ConversationService:
             status=MessageStatus.STREAMING,
         )
         if conversation.title == "New chat":
-            conversation.title = content.strip()[:80]
+            title_source = (title_hint or content.strip() or "New chat")
+            conversation.title = title_source[:80]
         conversation.updated_at = now
         self.session.add(user_message)
         self.session.add(assistant)
@@ -171,3 +175,26 @@ class ConversationService:
         assistant.completed_at = datetime.now(UTC)
         self.session.add(assistant)
         self.session.commit()
+
+    def has_indexed_sources(
+        self, conversation_id: UUID, project_id: UUID | None = None
+    ) -> bool:
+        conditions = [File.conversation_id == conversation_id]
+        if project_id is not None:
+            conditions.append(File.project_id == project_id)
+        statement = (
+            select(File.id)
+            .where(File.status == FileStatus.INDEXED)
+            .where(or_(*conditions))
+            .limit(1)
+        )
+        return self.session.exec(statement).first() is not None
+
+    def list_sources(self, user: User, conversation_id: UUID) -> list[File]:
+        conversation = self.get(user, conversation_id)
+        statement = (
+            select(File)
+            .where(File.conversation_id == conversation.id)
+            .order_by(File.uploaded_at.desc())
+        )
+        return list(self.session.exec(statement).all())

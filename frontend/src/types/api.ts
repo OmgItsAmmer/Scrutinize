@@ -153,7 +153,7 @@ export type ProjectAuthResponse = {
 };
 
 export type AuthTokenResponse = { access_token: string; token_type: string };
-export type UserProject = { project_id: string; name: string; role: string; client_key: string; created_at: string };
+export type UserProject = { project_id: string; name: string; role: string; client_key: string; created_at: string; api_key?: string; settings?: Record<string, any> };
 
 export type ProjectInfo = {
   project_id: string;

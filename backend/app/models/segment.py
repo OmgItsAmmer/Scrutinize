@@ -14,6 +14,9 @@ class Segment(SQLModel, table=True):
     # Multi-tenant: denormalized for fast per-project DB queries (avoid join through files).
     # Nullable for legacy rows that predate multi-tenancy.
     project_id: UUID | None = Field(default=None, foreign_key="projects.id", index=True)
+    conversation_id: UUID | None = Field(
+        default=None, foreign_key="chat_conversations.id", index=True
+    )
     modality: FileModality
     content: str
     start_time: float | None = None
