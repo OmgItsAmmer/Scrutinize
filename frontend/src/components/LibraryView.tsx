@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
+import { useConfirm } from "./ConfirmDialogProvider";
 import { formatDateTime, formatDurationSeconds } from "../lib/format";
 import type { FileModality, FileStatus, LibraryFileItem } from "../types/api";
 import { IconDocument, IconFilm, IconTrash, IconWaveform } from "./icons";
@@ -138,14 +139,18 @@ function LibraryFileCard({ file, deleting, onPreview, onDelete }: LibraryItemPro
 
 export function LibraryView() {
   const { state, refreshLibrary, deleteLibraryFile } = useApp();
+  const confirm = useConfirm();
   const { library } = state;
   const [previewFile, setPreviewFile] = useState<LibraryFileItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function handleDelete(file: LibraryFileItem) {
-    const confirmed = window.confirm(
-      `Delete "${file.filename}"? This removes the file from Cloudinary, Qdrant, and Neon.`,
-    );
+    const confirmed = await confirm({
+      title: "Delete file",
+      description: `Delete "${file.filename}"? This removes the file from Cloudinary, Qdrant, and Neon.`,
+      confirmLabel: "Delete file",
+      tone: "danger",
+    });
     if (!confirmed) {
       return;
     }

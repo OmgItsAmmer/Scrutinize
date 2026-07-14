@@ -20,6 +20,7 @@ import {
   uploadFile,
   fetchProjectInfo as fetchProjectInfoApi,
   updateProjectSettings as updateProjectSettingsApi,
+  fetchUserProjects,
 } from "../api/client";
 import type {
   AppView,
@@ -90,6 +91,7 @@ type AppState = {
   upload: UploadState;
   library: LibraryState;
   project: ProjectSessionState;
+  isAuthenticated: boolean;
 };
 
 type Action =
@@ -118,7 +120,9 @@ type Action =
   | { type: "LIBRARY_ERROR"; error: string }
   | { type: "LIBRARY_FILE_REMOVED"; fileId: string }
   | { type: "AUTH_SUCCESS"; project: NonNullable<ProjectSessionState> }
+  | { type: "SESSION_AUTHENTICATED" }
   | { type: "AUTH_LOGOUT" }
+  | { type: "CLEAR_PROJECT" }
   | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any>; apiKey?: string; clientKey?: string }
   | { type: "OPEN_PDF_DRAWER"; url: string; title: string; filename: string }
   | { type: "CLOSE_PDF_DRAWER" };
@@ -171,6 +175,7 @@ const initialState: AppState = {
         clientKey: localStorage.getItem("scrutinize_client_key")!,
       }
     : null,
+  isAuthenticated: Boolean(localStorage.getItem("scrutinize_access_token")),
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -178,6 +183,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "AUTH_SUCCESS":
       return {
         ...state,
+        isAuthenticated: true,
         project: action.project,
         search: {
           ...initialState.search,
@@ -190,14 +196,35 @@ function reducer(state: AppState, action: Action): AppState {
           ...initialState.upload,
         },
       };
+    case "SESSION_AUTHENTICATED":
+      return {
+        ...state,
+        isAuthenticated: true,
+      };
     case "AUTH_LOGOUT":
       return {
         ...state,
+        isAuthenticated: false,
         project: null,
+        activeConversationId: null,
+        view: "general-chat",
         search: {
           ...initialState.search,
           conversation: emptyConversation(),
         },
+        library: {
+          ...initialState.library,
+        },
+        upload: {
+          ...initialState.upload,
+        },
+      };
+    case "CLEAR_PROJECT":
+      return {
+        ...state,
+        project: null,
+        activeConversationId: null,
+        view: "general-chat",
         library: {
           ...initialState.library,
         },
@@ -459,8 +486,10 @@ type AppContextValue = {
   deleteLibraryFile: (fileId: string) => Promise<void>;
   dismissUploadJob: (jobId: string) => void;
   login: (projectName: string, apiKey: string, clientKey: string, projectId: string, settings?: Record<string, any>) => void;
+  completeAuthentication: () => void;
   logout: () => void;
   selectProject: (project: { project_id: string; name: string; client_key: string }) => void;
+  clearProject: () => void;
   updateSettings: (settings: Record<string, any>) => Promise<void>;
   fetchSettings: () => Promise<void>;
   openPdfDrawer: (payload: { url: string; title: string; filename: string }) => void;
@@ -683,6 +712,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const completeAuthentication = useCallback(() => {
+    dispatch({ type: "SESSION_AUTHENTICATED" });
+  }, []);
+
   const fetchSettings = useCallback(async () => {
     try {
       const response = await fetchProjectInfoApi();
@@ -749,6 +782,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SELECT_CONVERSATION", conversationId: null, view: "project" });
   }, []);
 
+  const clearProject = useCallback(() => {
+    localStorage.removeItem("scrutinize_project_id");
+    localStorage.removeItem("scrutinize_project_name");
+    localStorage.removeItem("scrutinize_admin_key");
+    localStorage.removeItem("scrutinize_client_key");
+    dispatch({ type: "CLEAR_PROJECT" });
+  }, []);
+
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+
+    void fetchUserProjects()
+      .then(({ projects }) => {
+        if (projects.length === 0) {
+          if (state.project) {
+            clearProject();
+          }
+          dispatch({ type: "SELECT_CONVERSATION", conversationId: null, view: "general-chat" });
+          return;
+        }
+
+        const activeId = state.project?.projectId ?? localStorage.getItem("scrutinize_project_id");
+        const activeProject = projects.find((project) => project.project_id === activeId) ?? projects[0];
+        if (activeProject.project_id !== state.project?.projectId) {
+          selectProject(activeProject);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to restore session projects", error);
+      });
+  // Reconcile local project selection with the server once per authenticated session boot.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const value = useMemo<AppContextValue>(
     () => ({
       state,
@@ -767,14 +834,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteLibraryFile,
       dismissUploadJob: (jobId) => dispatch({ type: "UPLOAD_JOB_REMOVE", jobId }),
       login,
+      completeAuthentication,
       logout,
       selectProject,
+      clearProject,
       updateSettings,
       fetchSettings,
       openPdfDrawer: (payload) => dispatch({ type: "OPEN_PDF_DRAWER", ...payload }),
       closePdfDrawer: () => dispatch({ type: "CLOSE_PDF_DRAWER" }),
     }),
-    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, logout, selectProject, updateSettings, fetchSettings],
+    [deleteLibraryFile, refreshLibrary, runSearch, state, uploadFilesHandler, login, completeAuthentication, logout, selectProject, clearProject, updateSettings, fetchSettings],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

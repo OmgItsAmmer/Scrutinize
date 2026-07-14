@@ -14,6 +14,7 @@ def main() -> int:
     print(f"  QDRANT_API_KEY={'set' if settings.qdrant_api_key else 'not set'}")
     print(f"  REDIS_URL={settings.redis_url}")
     print(f"  CELERY_TASK_ALWAYS_EAGER={settings.task_always_eager}")
+    print(f"  WORKER_IDLE_TIMEOUT_SECONDS={settings.resolved_worker_idle_timeout_seconds}")
 
     try:
         store = VectorStore(settings)

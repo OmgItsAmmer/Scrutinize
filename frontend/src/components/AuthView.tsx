@@ -3,7 +3,7 @@ import { fetchUserProjects, loginWithGoogle } from "../api/client";
 import { useApp } from "../context/AppContext";
 
 export function AuthView() {
-  const { login } = useApp();
+  const { login, completeAuthentication } = useApp();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -11,8 +11,11 @@ export function AuthView() {
     localStorage.setItem("scrutinize_access_token", token);
     const { projects } = await fetchUserProjects();
     const project = projects[0];
-    if (!project) throw new Error("Your account has no project.");
-    login(project.name, "", project.client_key, project.project_id);
+    if (!project) {
+      completeAuthentication();
+      return;
+    }
+    login(project.name, project.api_key ?? "", project.client_key, project.project_id, project.settings);
   }
 
   async function handleCredentialResponse(response: any) {

@@ -1,12 +1,22 @@
 import { useEffect, useState } from "react";
-import { fetchUserProjects, createUserProject, fetchCurrentUser, fetchConversations } from "../api/client";
+import { deleteConversation, deleteUserProject, fetchUserProjects, createUserProject, fetchCurrentUser, fetchConversations } from "../api/client";
 import { useApp } from "../context/AppContext";
 import type { ConversationItem, UserProject } from "../types/api";
-import { IconPlus, IconSettings, IconX } from "./icons";
+import { IconPlus, IconSettings, IconTrash, IconX } from "./icons";
 import { ProjectSidebarCard } from "./ProjectSidebarCard";
+import { useConfirm } from "./ConfirmDialogProvider";
+
+function notifyConversationsChanged(scope?: "general" | "project", projectId?: string) {
+  window.dispatchEvent(
+    new CustomEvent("scrutinize:conversations-changed", {
+      detail: { scope, projectId },
+    }),
+  );
+}
 
 export function Sidebar({ compact = false }: { compact?: boolean }) {
-  const { state, setView, setProjectChoice, logout, selectProject, selectConversation } = useApp();
+  const { state, setView, setProjectChoice, logout, selectProject, selectConversation, clearProject } = useApp();
+  const confirm = useConfirm();
   const [projects, setProjects] = useState<UserProject[]>([]);
   const [chatsExpanded, setChatsExpanded] = useState(true);
   const [chats, setChats] = useState<ConversationItem[]>([]);
@@ -21,10 +31,18 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
   const [newProjectDescription, setNewProjectDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
 
   async function loadProjects() {
     setLoading(true);
-    try { setProjects((await fetchUserProjects()).projects); } finally { setLoading(false); }
+    try {
+      setProjects((await fetchUserProjects()).projects);
+    } catch (err) {
+      console.error("Failed to load projects", err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function loadGeneralChats() {
@@ -92,6 +110,100 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
     }
   }
 
+  async function handleDeleteProject(projectId: string, projectName: string) {
+    if (deletingProjectId) return;
+    const confirmed = await confirm({
+      title: "Delete project",
+      description: `Delete "${projectName}"? This removes the project, its chats, and all uploaded sources. This cannot be undone.`,
+      confirmLabel: "Delete project",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+
+    setDeletingProjectId(projectId);
+    try {
+      await deleteUserProject(projectId);
+      const refreshed = await fetchUserProjects();
+      setProjects(refreshed.projects);
+      setProjectChats((current) => {
+        const next = { ...current };
+        delete next[projectId];
+        return next;
+      });
+      await loadGeneralChats();
+
+      if (state.project?.projectId === projectId) {
+        const remaining = refreshed.projects;
+        if (remaining.length > 0) {
+          selectProject(remaining[0]);
+        } else {
+          clearProject();
+          selectConversation(null, "general-chat");
+        }
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to delete project");
+      await loadProjects();
+      await loadGeneralChats();
+    } finally {
+      setDeletingProjectId(null);
+    }
+  }
+
+  async function handleDeleteGeneralChat(conversationId: string, title: string) {
+    if (deletingChatId) return;
+    const confirmed = await confirm({
+      title: "Delete chat",
+      description: `Delete "${title}"? This chat will be removed from your history.`,
+      confirmLabel: "Delete chat",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+
+    setDeletingChatId(conversationId);
+    try {
+      await deleteConversation(conversationId);
+      setChats((current) => current.filter((chat) => chat.id !== conversationId));
+      if (state.activeConversationId === conversationId) {
+        selectConversation(null, "general-chat");
+      }
+      notifyConversationsChanged("general");
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to delete chat");
+    } finally {
+      setDeletingChatId(null);
+    }
+  }
+
+  async function handleDeleteProjectChat(projectId: string, conversationId: string) {
+    if (deletingChatId) return;
+    const chat = projectChats[projectId]?.find((item) => item.id === conversationId);
+    const confirmed = await confirm({
+      title: "Delete chat",
+      description: `Delete "${chat?.title ?? "this chat"}"? This chat will be removed from your project history.`,
+      confirmLabel: "Delete chat",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+
+    setDeletingChatId(conversationId);
+    try {
+      await deleteConversation(conversationId);
+      setProjectChats((current) => ({
+        ...current,
+        [projectId]: (current[projectId] ?? []).filter((chat) => chat.id !== conversationId),
+      }));
+      if (state.activeConversationId === conversationId && state.project?.projectId === projectId) {
+        selectConversation(null, "project");
+      }
+      notifyConversationsChanged("project", projectId);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to delete chat");
+    } finally {
+      setDeletingChatId(null);
+    }
+  }
+
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
     if (!newProjectName.trim() || !newProjectDescription.trim()) return;
@@ -148,6 +260,8 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                   chats={recent}
                   chatsLoading={chatsLoading}
                   activeConversationId={state.activeConversationId}
+                  deletingProjectId={deletingProjectId}
+                  deletingChatId={deletingChatId}
                   onHover={() => {
                     if (!projectChats[project.project_id] && !projectChatsLoading[project.project_id]) {
                       void loadProjectChats(project.project_id);
@@ -155,6 +269,8 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                   }}
                   onSelectProject={() => selectProject(project)}
                   onOpenChat={(conversationId) => openProjectChat(project, conversationId)}
+                  onDeleteProject={(projectId) => handleDeleteProject(projectId, project.name)}
+                  onDeleteChat={handleDeleteProjectChat}
                 />
               );
             })}
@@ -173,7 +289,29 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
           </div>
           {chatsExpanded && <div className="space-y-1">
             <button onClick={() => selectConversation(null, "general-chat")} className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--app-text-soft)] hover:bg-[var(--app-bg-glass-strong)]">New chat</button>
-            {chats.map((chat) => <button key={chat.id} onClick={() => selectConversation(chat.id, "general-chat")} className={`w-full truncate rounded-xl px-3 py-2 text-left text-sm ${state.activeConversationId === chat.id && state.view === "general-chat" ? "bg-[var(--app-primary)] text-[var(--app-primary-text)]" : "text-[var(--app-text-muted)] hover:bg-[var(--app-bg-glass-strong)]"}`}>{chat.title}</button>)}
+            {chats.map((chat) => {
+              const selected = state.activeConversationId === chat.id && state.view === "general-chat";
+              return (
+                <div key={chat.id} className="sidebar-chat-row group/chat">
+                  <button
+                    onClick={() => selectConversation(chat.id, "general-chat")}
+                    className={`sidebar-chat-row__title ${selected ? "sidebar-chat-row__title--active" : ""}`}
+                  >
+                    {chat.title}
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-chat-row__delete"
+                    aria-label={`Delete chat ${chat.title}`}
+                    title="Delete chat"
+                    disabled={deletingChatId === chat.id}
+                    onClick={() => void handleDeleteGeneralChat(chat.id, chat.title)}
+                  >
+                    <IconTrash className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>}
         </section>
         </div>}
@@ -263,7 +401,6 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
                     setShowCreateModal(false);
                     setNewProjectName("");
                     setNewProjectDescription("");
-                    setNewProjectInScope("");
                     setCreateError(null);
                   }}
                   className="rounded-lg border border-zinc-800 px-4 py-2 text-xs font-semibold hover:bg-zinc-900 transition-colors"

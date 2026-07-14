@@ -16,6 +16,7 @@
 # OPTION A — Full stack in Docker (simplest; backend + worker in containers)
 #   Terminal 1:  make up-build
 #   Terminal 2:  make frontend-dev
+#   Do NOT also run make worker-dev — Docker already includes a worker service.
 #   App:         http://localhost:5173
 #   API docs:    http://localhost:8000/docs
 #

@@ -1,14 +1,19 @@
 """Project management endpoints (multi-tenant registration and info)."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.core.config import Settings
 from app.core.deps import (
     get_app_settings,
+    get_cloudinary_storage,
     get_current_user,
     get_db_session,
+    get_job_orchestrator,
     get_project_from_admin_key,
+    get_vector_store,
 )
 from app.models.project import Project
 from app.models.user import ProjectMember, User
@@ -24,7 +29,11 @@ from app.schemas.v2.project import (
     UserProjectListResponse,
     UserProjectResponse,
 )
+from app.services.cloudinary_storage import CloudinaryStorage
+from app.services.job_orchestrator import JobOrchestrator
+from app.services.project_deletion import ProjectDeletionService
 from app.services.project_service import ProjectService
+from app.services.vector_store import VectorStore
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -90,6 +99,21 @@ def create_user_project(
         created_at=project.created_at.isoformat(),
         api_key=project.api_key,
         settings=project.settings
+    )
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_user_project(
+    project_id: UUID,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+    orchestrator: JobOrchestrator = Depends(get_job_orchestrator),
+    storage: CloudinaryStorage = Depends(get_cloudinary_storage),
+    vector_store: VectorStore = Depends(get_vector_store),
+    settings: Settings = Depends(get_app_settings),
+) -> None:
+    ProjectDeletionService(session, orchestrator, storage, vector_store, settings).delete_for_user(
+        user, project_id
     )
 
 

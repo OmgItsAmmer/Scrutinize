@@ -156,7 +156,7 @@ def delete_conversation(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_db_session),
 ) -> None:
-    ConversationService(session).patch(user, conversation_id, title=None, archived=True)
+    ConversationService(session).delete(user, conversation_id)
 
 
 @router.get("/{conversation_id}/messages", response_model=MessageList)

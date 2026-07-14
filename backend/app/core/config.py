@@ -171,7 +171,7 @@ class Settings(BaseSettings):
     # Fly.io Scaling settings
     fly_worker_app_name: str = ""
     fly_api_token: str = ""
-    worker_idle_timeout_seconds: int = 120
+    worker_idle_timeout_seconds: int | None = None
 
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None
@@ -191,6 +191,13 @@ class Settings(BaseSettings):
         if self.celery_task_always_eager is not None:
             return self.celery_task_always_eager
         return self.environment == "development"
+
+    @property
+    def resolved_worker_idle_timeout_seconds(self) -> int:
+        """Auto-shutdown idle workers (Fly cost saving). Disabled by default in development."""
+        if self.worker_idle_timeout_seconds is not None:
+            return self.worker_idle_timeout_seconds
+        return 0 if self.environment == "development" else 120
 
     @property
     def cloudinary_configured(self) -> bool:

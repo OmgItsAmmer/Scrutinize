@@ -59,6 +59,10 @@ function getProjectKey(path: string): string | null {
   if (
     path.includes("/v2/projects/login")
     || path.includes("/v2/projects/signup")
+    || path === "/v2/projects"
+    || path === "/v2/projects/mine"
+    || /^\/v2\/projects\/[0-9a-f-]{36}$/i.test(path)
+    || path.startsWith("/v3/conversations")
   ) {
     return null;
   }
@@ -84,6 +88,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return response.json() as Promise<T>;
 }
@@ -280,6 +287,10 @@ export function createUserProject(name: string, description: string, settings: R
   });
 }
 
+export function deleteUserProject(projectId: string): Promise<void> {
+  return request<void>(`/v2/projects/${projectId}`, { method: "DELETE" });
+}
+
 export function fetchJobStatus(jobId: string): Promise<JobStatusResponse> {
   return request<JobStatusResponse>(`/status/${jobId}`);
 }
@@ -347,6 +358,10 @@ export function createConversation(scope: ConversationScope, projectId?: string)
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scope, project_id: projectId ?? null }),
   });
+}
+
+export function deleteConversation(conversationId: string): Promise<void> {
+  return request<void>(`/v3/conversations/${conversationId}`, { method: "DELETE" });
 }
 
 export function fetchConversationMessages(conversationId: string): Promise<{ messages: import("../types/api").PersistedMessage[]; total: number }> {

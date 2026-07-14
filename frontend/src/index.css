@@ -99,6 +99,125 @@
   background: var(--app-primary-hover);
 }
 
+.app-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  border-radius: 0.75rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.app-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.app-btn-secondary {
+  border: 1px solid var(--app-border-strong);
+  background: var(--app-bg-glass-strong);
+  color: var(--app-text-soft);
+}
+
+.app-btn-secondary:hover {
+  background: var(--app-bg-elevated);
+}
+
+.app-btn-primary {
+  border: 1px solid transparent;
+  background: var(--app-primary);
+  color: var(--app-primary-text);
+}
+
+.app-btn-primary:hover {
+  background: var(--app-primary-hover);
+}
+
+.app-btn-danger {
+  border: 1px solid transparent;
+  background: var(--app-danger);
+  color: #ffffff;
+}
+
+.app-btn-danger:hover {
+  filter: brightness(0.95);
+}
+
+.confirm-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--app-bg-overlay);
+  backdrop-filter: blur(6px);
+}
+
+.confirm-dialog {
+  width: 100%;
+  max-width: 28rem;
+  border-radius: 1rem;
+  padding: 1.25rem;
+}
+
+.confirm-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.confirm-dialog__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--app-text);
+}
+
+.confirm-dialog__close {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 0.625rem;
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.confirm-dialog__close:hover {
+  background: var(--app-bg-glass-strong);
+  color: var(--app-text);
+}
+
+.confirm-dialog__description {
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--app-text-muted);
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  margin-top: 1.25rem;
+}
+
 body {
   @apply min-h-screen antialiased;
   background:
@@ -375,6 +494,13 @@ body {
 
 .project-hover-card__hero {
   position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #050505;
+}
+
+.project-hover-card__hero-button {
+  position: relative;
   display: block;
   width: 100%;
   overflow: hidden;
@@ -383,6 +509,39 @@ body {
   cursor: pointer;
   text-align: left;
   background: #050505;
+}
+
+.project-hover-card__delete {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  z-index: 2;
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.8);
+  opacity: 0;
+  transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.project-hover-card:hover .project-hover-card__delete,
+.project-hover-card:focus-within .project-hover-card__delete {
+  opacity: 1;
+}
+
+.project-hover-card__delete:hover {
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+}
+
+.project-hover-card__delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .project-hover-card__image {
@@ -518,6 +677,108 @@ body {
 .project-hover-card__chat-tile--active {
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
+}
+
+.project-hover-card__chat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.project-hover-card__chat-row .project-hover-card__chat-tile {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-hover-card__chat-delete {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.project-hover-card__chat-row:hover .project-hover-card__chat-delete,
+.project-hover-card__chat-row:focus-within .project-hover-card__chat-delete {
+  opacity: 1;
+}
+
+.project-hover-card__chat-delete:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.project-hover-card__chat-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.sidebar-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sidebar-chat-row__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-size: 0.875rem;
+  color: var(--app-text-muted);
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.sidebar-chat-row__title:hover {
+  background: var(--app-bg-glass-strong);
+}
+
+.sidebar-chat-row__title--active {
+  background: var(--app-primary);
+  color: var(--app-primary-text);
+}
+
+.sidebar-chat-row__delete {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--app-text-faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.sidebar-chat-row:hover .sidebar-chat-row__delete,
+.sidebar-chat-row:focus-within .sidebar-chat-row__delete {
+  opacity: 1;
+}
+
+.sidebar-chat-row__delete:hover {
+  background: var(--app-danger-bg);
+  color: var(--app-danger);
+}
+
+.sidebar-chat-row__delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .project-hover-card__show-more {

@@ -66,10 +66,10 @@ def _log_worker_config(**_: object) -> None:
         cfg.qdrant_url,
         cfg.redis_url,
     )
-    if cfg.worker_idle_timeout_seconds > 0 and not cfg.task_always_eager:
+    if cfg.resolved_worker_idle_timeout_seconds > 0 and not cfg.task_always_eager:
         t = threading.Thread(
             target=_monitor_idle,
-            args=(cfg.worker_idle_timeout_seconds,),
+            args=(cfg.resolved_worker_idle_timeout_seconds,),
             name="WorkerIdleMonitor",
             daemon=True,
         )

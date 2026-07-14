@@ -4,7 +4,13 @@ from uuid import UUID
 
 from sqlmodel import Session
 
+from app.models.conversation import ChatConversation, ChatMessage  # noqa: F401
+from app.models.file import File  # noqa: F401
+from app.models.pipeline_log import PipelineRun, PipelineStep  # noqa: F401
+from app.models.processing_job import ProcessingJob  # noqa: F401
 from app.models.project import Project  # noqa: F401
+from app.models.segment import Segment  # noqa: F401
+from app.models.user import ProjectMember, User  # noqa: F401
 
 from app.core.config import Settings, reload_settings
 from app.core.database import get_engine

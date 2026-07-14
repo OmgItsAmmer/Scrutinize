@@ -18,6 +18,9 @@ function MainView() {
       return <ConversationChatView scope="general" />;
     case "project":
     default:
+      if (!state.project) {
+        return <ConversationChatView scope="general" />;
+      }
       return <ProjectWorkspace />;
   }
 }
@@ -25,7 +28,7 @@ function MainView() {
 export default function App() {
   const { state } = useApp();
 
-  if (!state.project) {
+  if (!state.isAuthenticated) {
     return <AuthView />;
   }
 

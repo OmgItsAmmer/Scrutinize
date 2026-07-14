@@ -182,3 +182,63 @@ class TestUserCreateProject:
         assert db_project.settings["system_prompt_overrides"]["gate"] == "custom gate prompt for tests"
         assert db_project.settings["system_prompt_overrides"]["decision"] == "custom decision prompt for tests"
 
+
+class TestUserDeleteProject:
+    @patch("app.services.v2.prompt_generator.generate_project_prompts")
+    @patch("app.services.project_deletion.FileDeletionService")
+    def test_delete_user_project_success(self, mock_file_deletion_cls, mock_gen, client, session):
+        mock_gen.return_value = {
+            "gate": "gate",
+            "rewriter": "rewriter",
+            "generic": "generic",
+            "synthesis": "synthesis",
+            "decision": "decision",
+        }
+        mock_file_deletion_cls.return_value.delete_file.return_value = None
+
+        owner_login = client.post("/v2/auth/google", json={"id_token": "mock_token_owner@example.com"})
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        create_res = client.post(
+            "/v2/projects/mine",
+            headers=owner_headers,
+            json={"name": "Delete Me", "description": "Temporary project", "settings": {}},
+        )
+        project_id = create_res.json()["project_id"]
+
+        delete_res = client.delete(f"/v2/projects/{project_id}", headers=owner_headers)
+        assert delete_res.status_code == 204
+
+        from app.models.project import Project
+        from uuid import UUID
+
+        assert session.get(Project, UUID(project_id)) is None
+
+        list_res = client.get("/v2/projects", headers=owner_headers)
+        assert all(item["project_id"] != project_id for item in list_res.json()["projects"])
+
+    @patch("app.services.v2.prompt_generator.generate_project_prompts")
+    def test_delete_user_project_forbidden_for_non_owner(self, mock_gen, client, session):
+        mock_gen.return_value = {
+            "gate": "gate",
+            "rewriter": "rewriter",
+            "generic": "generic",
+            "synthesis": "synthesis",
+            "decision": "decision",
+        }
+
+        owner_login = client.post("/v2/auth/google", json={"id_token": "mock_token_owner2@example.com"})
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+        create_res = client.post(
+            "/v2/projects/mine",
+            headers=owner_headers,
+            json={"name": "Protected Project", "description": "Owner only", "settings": {}},
+        )
+        project_id = create_res.json()["project_id"]
+
+        stranger_login = client.post("/v2/auth/google", json={"id_token": "mock_token_stranger@example.com"})
+        stranger_headers = {"Authorization": f"Bearer {stranger_login.json()['access_token']}"}
+
+        delete_res = client.delete(f"/v2/projects/{project_id}", headers=stranger_headers)
+        assert delete_res.status_code == 404
+

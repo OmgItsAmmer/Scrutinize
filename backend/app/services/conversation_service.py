@@ -94,6 +94,9 @@ class ConversationService:
         self.session.refresh(item)
         return item
 
+    def delete(self, user: User, conversation_id: UUID) -> None:
+        self.patch(user, conversation_id, title=None, archived=True)
+
     def messages(self, user: User, conversation_id: UUID, limit: int = 100) -> list[ChatMessage]:
         self.get(user, conversation_id)
         statement = (

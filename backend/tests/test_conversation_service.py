@@ -76,6 +76,22 @@ def test_conversations_are_private_and_turn_retries_are_idempotent(session: Sess
     assert exc.value.status_code == 404
 
 
+def test_delete_archives_conversation(session: Session):
+    owner = _user(session, "owner3@example.com")
+    service = ConversationService(session)
+    conversation = service.create(owner, scope="general", project_id=None, title="Delete me")
+
+    service.delete(owner, conversation.id)
+
+    archived = session.get(ChatConversation, conversation.id)
+    assert archived is not None
+    assert archived.archived_at is not None
+    with pytest.raises(HTTPException) as exc:
+        service.get(owner, conversation.id)
+    assert exc.value.status_code == 404
+    assert service.list(owner, scope="general") == []
+
+
 def test_conversation_enums_persist_lowercase_values():
     assert ChatConversation.__table__.c.scope.type.enums == ["general", "project"]
     assert ChatConversation.__table__.c.retrieval_policy.type.enums == [

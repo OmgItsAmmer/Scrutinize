@@ -13,6 +13,9 @@ COPY app ./app
 
 RUN pip install --upgrade pip && pip install .
 
+# Pre-download sparse BM25 model so ingestion works offline / without HF DNS at runtime.
+RUN python -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding(model_name='Qdrant/bm25')"
+
 EXPOSE 8000
 
 # PORT is set in fly.toml; default 8000 for local Docker.
