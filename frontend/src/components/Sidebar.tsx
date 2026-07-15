@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { deleteConversation, deleteUserProject, fetchUserProjects, createUserProject, fetchCurrentUser, fetchConversations } from "../api/client";
 import { useApp } from "../context/AppContext";
 import type { ConversationItem, UserProject } from "../types/api";
-import { IconPlus, IconSettings, IconTrash, IconX } from "./icons";
+import { IconPlus, IconSettings, IconX } from "./icons";
 import { ProjectSidebarCard } from "./ProjectSidebarCard";
 import { useConfirm } from "./ConfirmDialogProvider";
 
@@ -18,8 +18,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
   const { state, setView, setProjectChoice, logout, selectProject, selectConversation, clearProject } = useApp();
   const confirm = useConfirm();
   const [projects, setProjects] = useState<UserProject[]>([]);
-  const [chatsExpanded, setChatsExpanded] = useState(true);
-  const [chats, setChats] = useState<ConversationItem[]>([]);
+
   const [projectChats, setProjectChats] = useState<Record<string, ConversationItem[]>>({});
   const [projectChatsLoading, setProjectChatsLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
@@ -45,18 +44,11 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
     }
   }
 
-  async function loadGeneralChats() {
-    try {
-      const result = await fetchConversations("general");
-      setChats(result.conversations);
-    } catch {
-      setChats([]);
-    }
-  }
+
   
   useEffect(() => {
     void loadProjects();
-    void loadGeneralChats();
+
     async function loadUser() {
       try {
         const u = await fetchCurrentUser();
@@ -75,7 +67,6 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
         void loadProjectChats(detail.projectId);
         return;
       }
-      void loadGeneralChats();
     }
 
     window.addEventListener("scrutinize:conversations-changed", handleConversationChange);
@@ -130,7 +121,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
         delete next[projectId];
         return next;
       });
-      await loadGeneralChats();
+
 
       if (state.project?.projectId === projectId) {
         const remaining = refreshed.projects;
@@ -144,36 +135,13 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "Failed to delete project");
       await loadProjects();
-      await loadGeneralChats();
+
     } finally {
       setDeletingProjectId(null);
     }
   }
 
-  async function handleDeleteGeneralChat(conversationId: string, title: string) {
-    if (deletingChatId) return;
-    const confirmed = await confirm({
-      title: "Delete chat",
-      description: `Delete "${title}"? This chat will be removed from your history.`,
-      confirmLabel: "Delete chat",
-      tone: "danger",
-    });
-    if (!confirmed) return;
 
-    setDeletingChatId(conversationId);
-    try {
-      await deleteConversation(conversationId);
-      setChats((current) => current.filter((chat) => chat.id !== conversationId));
-      if (state.activeConversationId === conversationId) {
-        selectConversation(null, "general-chat");
-      }
-      notifyConversationsChanged("general");
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Failed to delete chat");
-    } finally {
-      setDeletingChatId(null);
-    }
-  }
 
   async function handleDeleteProjectChat(projectId: string, conversationId: string) {
     if (deletingChatId) return;
