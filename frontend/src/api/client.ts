@@ -407,7 +407,7 @@ export async function streamConversationMessage(
   content: string,
   clientMessageId: string,
   onEvent: (event: ConversationStreamEvent) => void,
-  options?: { requestedTool?: string },
+  options?: { requestedTool?: string; webSearchMode?: "auto" | "always" | "never" },
 ): Promise<void> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = localStorage.getItem("scrutinize_access_token");
@@ -415,6 +415,9 @@ export async function streamConversationMessage(
   const body: Record<string, unknown> = { content, client_message_id: clientMessageId };
   if (options?.requestedTool) {
     body.requested_tool = options.requestedTool;
+  }
+  if (options?.webSearchMode) {
+    body.web_search_mode = options.webSearchMode;
   }
   const response = await fetch(`${API_URL}/v3/conversations/${conversationId}/messages/stream`, {
     method: "POST",
@@ -426,17 +429,40 @@ export async function streamConversationMessage(
   if (!reader) throw new Error("No response stream available");
   const decoder = new TextDecoder();
   let buffer = "";
+
+  const processBlocks = (isFinal = false) => {
+    const blocks = buffer.split("\n\n");
+    if (isFinal) {
+      buffer = "";
+    } else {
+      buffer = blocks.pop() ?? "";
+    }
+    for (const block of blocks) {
+      if (!block.trim()) continue;
+      const lines = block.split("\n").map((line) => line.trim());
+      const eventName = lines.find((line) => line.startsWith("event: "))?.slice(7);
+      const dataLine = lines.find((line) => line.startsWith("data: "))?.slice(6);
+      if (eventName && dataLine) {
+        try {
+          onEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent);
+        } catch (e) {
+          console.error("Failed to parse SSE data block:", block, e);
+        }
+      }
+    }
+  };
+
   while (true) {
     const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() ?? "";
-    for (const block of blocks) {
-      const eventName = block.split("\n").find((line) => line.startsWith("event: "))?.slice(7);
-      const dataLine = block.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
-      if (eventName && dataLine) onEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent);
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+      processBlocks(false);
     }
     if (done) break;
+  }
+
+  if (buffer.trim()) {
+    processBlocks(true);
   }
 }
 

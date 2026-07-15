@@ -246,6 +246,7 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
       }
 
       await streamConversationMessage(id, content, clientMessageId, (event) => {
+        console.log("ConversationChatView SSE Event:", event);
         if (event.event === "message.accepted" && event.data.user_message) {
           if (options?.silentUserMessage) {
             return;
@@ -281,7 +282,10 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
           notifyConversationListChanged();
         }
         if (event.event === "error") setError(event.data.message);
-      }, options?.requestedTool ? { requestedTool: options.requestedTool } : undefined);
+      }, {
+        requestedTool: options?.requestedTool,
+        webSearchMode: state.search.webSearchMode,
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Message failed");
     } finally {

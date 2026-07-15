@@ -36,7 +36,7 @@ RAG pipeline documentation
 Everyone can continue using their own domain data, such as healthcare, AI, cybersecurity, sports, finance, education, etc.
 
 
-
+<!-- Presnetation content -->
 old implementation
 
 improvments
@@ -55,9 +55,10 @@ real time file indexing
 
 
 future improvments 
+flowchart MCP server
+antix ai api
 knowledge graph context managment
 langsmith
-flowchart MCP server
 doclinq
 
 live demo link

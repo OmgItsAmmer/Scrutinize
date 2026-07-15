@@ -1,0 +1,500 @@
+\documentclass[aspectratio=169,11pt]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{whale}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta,
+  positioning,
+  shapes.geometric,
+  shapes.multipart,
+  fit,
+  backgrounds,
+  calc,
+  shadows
+}
+
+\definecolor{scrutBlue}{HTML}{1A5276}
+\definecolor{scrutTeal}{HTML}{148F77}
+\definecolor{scrutOrange}{HTML}{D35400}
+\definecolor{scrutGray}{HTML}{566573}
+\definecolor{scrutLight}{HTML}{EBF5FB}
+\definecolor{scrutAccent}{HTML}{2E86C1}
+
+\setbeamercolor{structure}{fg=scrutBlue}
+\setbeamercolor{title}{fg=white,bg=scrutBlue}
+\setbeamercolor{frametitle}{fg=white,bg=scrutBlue}
+\setbeamercolor{block title}{bg=scrutTeal,fg=white}
+\setbeamercolor{block body}{bg=scrutLight,fg=black}
+
+\newcommand{\diagrambox}[2][]{%
+  \begin{center}
+  \begin{tikzpicture}[#1]
+    #2
+  \end{tikzpicture}
+  \end{center}
+}
+
+\title{Scrutinize}
+\subtitle{Multi-Modal AI Ingestion, Retrieval \& Agentic Search}
+\author{Ammer Saeed}
+\institute{AI News Project}
+\date{\today}
+
+\begin{document}
+
+% ── Slide 1: Title ──────────────────────────────────────────────
+\begin{frame}
+  \titlepage
+\end{frame}
+
+% ── Slide 2: Overview ───────────────────────────────────────────
+\begin{frame}{What is Scrutinize?}
+  \begin{columns}[T]
+    \column{0.55\textwidth}
+    \begin{itemize}
+      \item Unified platform for \textbf{text, audio, and video} ingestion
+      \item Natural-language Q\&A via \textbf{hybrid RAG + live web search}
+      \item Persistent \textbf{project workspaces} and chat history (V3)
+      \item Agentic pipeline with routing, synthesis, and quality evaluation
+    \end{itemize}
+
+    \vspace{0.4em}
+    \begin{block}{Four Layers}
+      \small
+      Client (React) \textrightarrow{} FastAPI \textrightarrow{} Celery Workers \textrightarrow{} Qdrant + Neon + Cloudinary
+    \end{block}
+
+    \column{0.42\textwidth}
+    \diagrambox[scale=0.78, every node/.style={font=\scriptsize}]{
+      \tikzstyle{layer}=[draw=scrutBlue, fill=scrutLight, rounded corners=3pt,
+        minimum width=3.2cm, minimum height=0.65cm, align=center]
+      \node[layer] (c) at (0,2.4) {React UI};
+      \node[layer] (a) at (0,1.5) {FastAPI /v2 + /v3};
+      \node[layer] (w) at (0,0.6) {Celery Workers};
+      \node[layer] (d) at (0,-0.3) {Qdrant \textbar{} Neon \textbar{} CDN};
+      \draw[-{Stealth[length=2mm]}, thick, scrutBlue] (c) -- (a);
+      \draw[-{Stealth[length=2mm]}, thick, scrutBlue] (a) -- (w);
+      \draw[-{Stealth[length=2mm]}, thick, scrutBlue] (w) -- (d);
+    }
+  \end{columns}
+\end{frame}
+
+% ── Slide 3: Old vs New ─────────────────────────────────────────
+\begin{frame}{Evolution: Old \textrightarrow{} New Implementation}
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+    \begin{block}{Legacy (V1 / early V2)}
+      \small
+      \begin{itemize}
+        \item Single \texttt{POST /v2/search} endpoint
+        \item Non-streaming responses
+        \item Gate-only routing (no precheck)
+        \item Dense-only vector search
+        \item No persistent conversations
+        \item Password auth only
+      \end{itemize}
+    \end{block}
+
+    \column{0.48\textwidth}
+    \begin{block}{Current Stack}
+      \small
+      \begin{itemize}
+        \item V3 SSE streaming chat API
+        \item Retrieval precheck (fast-path routing)
+        \item Hybrid dense + BM25 (RRF fusion)
+        \item MCP tool layer (web search, PDF)
+        \item Google OAuth + JWT sessions
+        \item Project-scoped workspaces + API keys
+      \end{itemize}
+    \end{block}
+  \end{columns}
+
+  \vspace{0.5em}
+  \centering
+  \diagrambox[scale=0.85, every node/.style={font=\scriptsize}]{
+    \node[draw=scrutGray, fill=white, rounded corners, minimum width=1.8cm] (v1) {V1 Search};
+    \node[draw=scrutGray, fill=white, rounded corners, minimum width=1.8cm, right=0.4cm of v1] (v2) {V2 Agentic};
+    \node[draw=scrutTeal, fill=scrutLight, rounded corners, minimum width=2cm, right=0.4cm of v2] (v3) {V3 Chat + SSE};
+    \draw[-{Stealth}, thick] (v1) -- (v2);
+    \draw[-{Stealth}, thick, scrutTeal] (v2) -- (v3);
+    \node[below=0.15cm of v3, font=\tiny, text=scrutGray] {Current entry point};
+  }
+\end{frame}
+
+% ── Slide 4: System Architecture ────────────────────────────────
+\begin{frame}{High-Level System Architecture}
+  \diagrambox[scale=0.62, transform shape, every node/.style={font=\tiny, align=center}]{
+    \tikzstyle{svc}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt, minimum height=0.55cm, inner sep=2pt]
+    \tikzstyle{ext}=[draw=scrutOrange, fill=orange!8, rounded corners=2pt, minimum height=0.5cm, inner sep=2pt]
+    \tikzstyle{data}=[draw=scrutTeal, fill=green!8, rounded corners=2pt, minimum height=0.5cm, inner sep=2pt]
+    \node[svc, minimum width=2.2cm] (ui) at (0,5) {React UI\\ChatInput / Sidebar};
+    \node[svc, minimum width=2.4cm] (api) at (0,3.8) {FastAPI\\auth \textbar{} /v3/conv \textbar{} upload};
+    \node[svc, minimum width=2.6cm] (orch) at (0,2.5) {PipelineOrchestrator\\precheck \textrightarrow{} gate \textrightarrow{} paths};
+    \node[svc, minimum width=1.8cm] (mcp) at (-2.8,1.2) {MCP Layer\\unified\_server};
+    \node[svc, minimum width=1.8cm] (cel) at (2.8,1.2) {Celery\\text/audio/video};
+    \node[data, minimum width=1.4cm] (qd) at (-3.5,-0.3) {Qdrant};
+    \node[data, minimum width=1.4cm] (pg) at (-1.2,-0.3) {Neon PG};
+    \node[data, minimum width=1.4cm] (cdn) at (1.2,-0.3) {Cloudinary};
+    \node[data, minimum width=1.4cm] (rd) at (3.5,-0.3) {Redis};
+    \node[ext, minimum width=1.5cm] (llm) at (5.2,2.5) {LLMs\\Ollama/OpenAI};
+    \node[ext, minimum width=1.5cm] (web) at (-5.2,1.2) {Brave/Tavily\\+ Jina Reader};
+    \draw[-{Stealth}, thick] (ui) -- (api);
+    \draw[-{Stealth}, thick] (api) -- (orch);
+    \draw[-{Stealth}] (orch) -- (mcp);
+    \draw[-{Stealth}] (orch) -- (cel);
+    \draw[-{Stealth}] (orch) -- (qd);
+    \draw[-{Stealth}] (orch) -- (pg);
+    \draw[-{Stealth}] (orch) -- (llm);
+    \draw[-{Stealth}] (mcp) -- (web);
+    \draw[-{Stealth}] (cel) -- (qd);
+    \draw[-{Stealth}] (cel) -- (pg);
+    \draw[-{Stealth}] (api) -- (cdn);
+    \draw[-{Stealth}] (cel) -- (rd);
+  }
+\end{frame}
+
+% ── Slide 5: Spelling / Keyword Normalization ───────────────────
+\begin{frame}{Improvement: Spelling \& Keyword Normalization}
+  \begin{columns}[T]
+    \column{0.52\textwidth}
+    \small
+    \textbf{Keyword Search Normalization} (\texttt{keyword\_search\_utils.py})
+    \begin{itemize}
+      \item \textbf{Unicode NFKC Normalization}: Standardizes character representations and lowercases all inputs.
+      \item \textbf{Punctuation to Spaces}: Replaces hyphens (\texttt{-}) and underscores (\texttt{\_}) with spaces to unify compound words.
+      \item \textbf{Compound Collapsing}: Generates collapsed and expanded variants (e.g., \texttt{open ai} $\leftrightarrow$ \texttt{openai}) for high recall.
+      \item \textbf{Filename Stem Extraction}: Extracts clean, searchable stems from paths and URLs.
+      \item \textbf{Index Enrichment}: Combines raw content, title, and filename variants to build a rich sparse index.
+    \end{itemize}
+
+    \column{0.45\textwidth}
+    \diagrambox[scale=0.7, every node/.style={font=\tiny}]{
+      \tikzstyle{stepbox}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt, minimum width=2.5cm, minimum height=0.45cm, align=center]
+      \tikzstyle{outbox}=[draw=scrutTeal, fill=green!8, rounded corners=2pt, minimum width=1.6cm, minimum height=0.45cm, align=center]
+      \node[stepbox] (raw) at (0,3.6) {Raw Query / Chunk\\``Open-AI''};
+      \node[stepbox] (norm) at (0,2.7) {NFKC + Lowercase\\Punct $\rightarrow$ Space};
+      \node[stepbox] (var) at (0,1.8) {Variant Expansion\\``open ai'' $\leftrightarrow$ ``openai''};
+      \node[outbox] (dense) at (-1.2,0.8) {Dense Embed\\(Semantic)};
+      \node[outbox] (sparse) at (1.2,0.8) {Sparse BM25\\(Lexical)};
+      \node[stepbox, minimum width=2.5cm] (rrf) at (0,-0.2) {RRF Fusion (k=60)};
+      \node[stepbox, minimum width=2.5cm, fill=scrutTeal!15] (top) at (0,-1.1) {Top-k Fused Chunks};
+      \draw[-{Stealth}] (raw) -- (norm);
+      \draw[-{Stealth}] (norm) -- (var);
+      \draw[-{Stealth}] (var.south) -- (dense.north);
+      \draw[-{Stealth}] (var.south) -- (sparse.north);
+      \draw[-{Stealth}] (dense.south) -- (rrf.north);
+      \draw[-{Stealth}] (sparse.south) -- (rrf.north);
+      \draw[-{Stealth}] (rrf) -- (top);
+    }
+  \end{columns}
+\end{frame}
+
+% ── Slide 6: Google Auth JWT Flow ───────────────────────────────
+\begin{frame}{Feature: Google OAuth \& JWT Authentication}
+  \begin{columns}[T]
+    \column{0.50\textwidth}
+    \small
+    \textbf{Authentication \& Session Flow}
+    \begin{itemize}
+      \item \textbf{Frontend Login}: User signs in via Google OAuth in the React UI and receives a secure \texttt{id\_token}.
+      \item \textbf{Backend Verification}: The token is sent to \texttt{POST /v2/auth/google}. FastAPI verifies the token signature and audience with Google's API.
+      \item \textbf{User Provisioning}: \texttt{AuthService} checks Neon Postgres. If the email is new, a user record is created on the fly.
+      \item \textbf{JWT Generation}: A signed HS256 JWT is generated containing user claims (\texttt{sub}, \texttt{email}, \texttt{iat}, \texttt{exp}).
+      \item \textbf{Access Control}: The client attaches the JWT as a Bearer token in the \texttt{Authorization} header for all protected V3 endpoints.
+    \end{itemize}
+
+    \column{0.46\textwidth}
+    \diagrambox[scale=0.68, every node/.style={font=\tiny, align=center}]{
+      \tikzstyle{box}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt, minimum width=2.4cm, minimum height=0.5cm]
+      \tikzstyle{db}=[draw=scrutTeal, fill=green!8, rounded corners=2pt, minimum width=1.8cm, minimum height=0.5cm]
+      \tikzstyle{token}=[draw=scrutOrange, fill=yellow!10, rounded corners=2pt, minimum width=2.2cm, minimum height=0.5cm]
+      \node[box] (ui) {User / React UI};
+      \node[box, below=0.4cm of ui] (api) {FastAPI Endpoint\\{\tiny \texttt{/v2/auth/google}}};
+      \node[box, left=0.3cm of api, minimum width=1.6cm, fill=orange!8] (goog) {Google API\\{\tiny (Verify ID Token)}};
+      \node[box, below=0.4cm of api] (auth) {AuthService};
+      \node[db, right=0.3cm of auth] (neon) {Neon DB\\{\tiny (Users Table)}};
+      \node[token, below=0.4cm of auth] (jwt) {JWT (HS256)\\{\tiny \texttt{sub, email, exp}}};
+      \draw[-{Stealth}, thick] (ui) -- node[right, font=\tiny] {1. id\_token} (api);
+      \draw[-{Stealth}] (api) -- node[above, font=\tiny] {2. Verify} (goog);
+      \draw[-{Stealth}] (api) -- (auth);
+      \draw[-{Stealth}] (auth) -- node[above, font=\tiny] {3. Lookup} (neon);
+      \draw[-{Stealth}, thick, scrutTeal] (auth) -- node[right, font=\tiny] {4. Sign} (jwt);
+      \draw[-{Stealth}, dashed, bend left=45] (jwt.west) to node[left, font=\tiny] {5. Bearer} (ui.west);
+    }
+  \end{columns}
+\end{frame}
+
+% ── Slide 7: Project Management & API Keys ──────────────────────
+\begin{frame}{Feature: Project-Wise Management \& API Key Access}
+  \begin{columns}[T]
+    \column{0.52\textwidth}
+    \textbf{Project CRUD} (Neon Postgres)
+    \small
+    \begin{itemize}
+      \item Create projects with admin \& client API keys
+      \item Upload files scoped to \texttt{project\_id}
+      \item Per-project model overrides (gate, rewriter, decision)
+      \item \texttt{project\_members} for team access
+    \end{itemize}
+
+    \vspace{0.4em}
+    \textbf{Two conversation scopes (V3)}
+    \small
+    \begin{itemize}
+      \item \textbf{general} --- web-only, no project RAG
+      \item \textbf{project} --- full hybrid pipeline + indexed files
+    \end{itemize}
+
+    \column{0.45\textwidth}
+    \diagrambox[scale=0.78, every node/.style={font=\scriptsize}]{
+      \tikzstyle{box}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt,
+        minimum width=2.6cm, minimum height=0.55cm, align=center]
+      \node[box, fill=scrutTeal!20] (admin) {Admin Key\\X-Project-Key header};
+      \node[box, below=0.35cm of admin] (ops) {Create project\\Upload files\\Model config};
+      \node[box, below=0.35cm of ops] (idx) {Celery ingestion\\Qdrant index};
+      \node[box, below=0.35cm of idx, fill=scrutAccent!15] (chat) {V3 project chat\\RAG + web + citations};
+      \draw[-{Stealth}] (admin) -- (ops);
+      \draw[-{Stealth}] (ops) -- (idx);
+      \draw[-{Stealth}] (idx) -- (chat);
+    }
+  \end{columns}
+\end{frame}
+
+% ── Slide 8: MCP Tool Layer ─────────────────────────────────────
+\begin{frame}{Feature: MCP Tool Layer Architecture}
+  \diagrambox[scale=0.68, transform shape, every node/.style={font=\scriptsize, align=center}]{
+    \tikzstyle{box}=[draw=scrutBlue, fill=scrutLight, rounded corners=3pt, minimum height=0.65cm, inner sep=3pt]
+    \tikzstyle{rpc}=[draw=scrutOrange, fill=orange!10, rounded corners=3pt, minimum height=0.55cm, inner sep=3pt]
+    \node[box, minimum width=3cm] (orch) at (0,4) {PipelineOrchestrator};
+    \node[box, minimum width=3cm] (mgr) at (0,2.8) {McpClientManager\\spawn subprocess};
+    \node[rpc, minimum width=2.2cm] (list) at (-2.5,1.5) {tools/list};
+    \node[rpc, minimum width=2.2cm] (call) at (2.5,1.5) {tools/call};
+    \node[box, minimum width=3.4cm, fill=scrutTeal!15] (server) at (0,0.4) {unified\_server.py (FastMCP)\\stdio JSON-RPC};
+    \node[box, minimum width=2.2cm] (pdf) at (-2.8,-1.2) {generate\_pdf\\ReportLab};
+    \node[box, minimum width=2.2cm] (ws) at (2.8,-1.2) {web\_search\\WebSearchService};
+    \node[box, minimum width=2cm, fill=yellow!12] (fb) at (5.5,2.8) {Local fallback\\if MCP pkg missing};
+    \draw[-{Stealth}, thick] (orch) -- (mgr);
+    \draw[-{Stealth}] (mgr) -- (list);
+    \draw[-{Stealth}] (mgr) -- (call);
+    \draw[-{Stealth}, dashed, scrutOrange] (list) -- node[left, font=\tiny] {stdio} (server);
+    \draw[-{Stealth}, dashed, scrutOrange] (call) -- node[right, font=\tiny] {stdio} (server);
+    \draw[-{Stealth}] (server) -- (pdf);
+    \draw[-{Stealth}] (server) -- (ws);
+    \draw[-{Stealth}, dashed] (mgr) -- (fb);
+    \node[below=0.6cm of server, font=\tiny, text=scrutGray, text width=11cm] {
+      Tool schemas injected into Gate LLM system prompt. Results merge with RAG sources and rerank by score.
+    };
+  }
+\end{frame}
+
+% ── Slide 9: Web Search & PDF Tools ─────────────────────────────
+\begin{frame}{Features: Web Search (Tavily) \& PDF Generation}
+  \begin{columns}[T]
+    \column{0.5\textwidth}
+    \textbf{Web Search Pipeline}
+    \diagrambox[scale=0.72, every node/.style={font=\tiny, align=center}]{
+      \tikzstyle{s}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt,
+        minimum width=2.2cm, minimum height=0.5cm]
+      \node[s] (q) {User query};
+      \node[s, below=0.3cm of q] (mcp) {MCP web\_search};
+      \node[s, below=0.3cm of mcp, fill=orange!10] (eng) {Brave \textbar{} Tavily API};
+      \node[s, below=0.3cm of eng] (jina) {Jina Reader scrape\\clean Markdown};
+      \node[s, below=0.3cm of jina, fill=scrutTeal!15] (src) {SearchSource[]\\merged with RAG};
+      \draw[-{Stealth}] (q) -- (mcp) -- (eng) -- (jina) -- (src);
+    }
+
+    \column{0.48\textwidth}
+    \textbf{PDF Generation}
+    \diagrambox[scale=0.72, every node/.style={font=\tiny, align=center}]{
+      \tikzstyle{s}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt,
+        minimum width=2.2cm, minimum height=0.5cm]
+      \node[s] (gate) {Gate selects\\generate\_pdf tool};
+      \node[s, below=0.3cm of gate] (mcp) {MCP call\_tool};
+      \node[s, below=0.3cm of mcp, fill=orange!10] (rl) {ReportLab compile};
+      \node[s, below=0.3cm of rl, fill=scrutTeal!15] (dl) {GET /v2/pdf/download};
+      \draw[-{Stealth}] (gate) -- (mcp) -- (rl) -- (dl);
+    }
+
+    \vspace{0.3em}
+    \small
+    \textbf{web\_search\_mode} toggle: \texttt{auto} \textbar{} \texttt{always} \textbar{} \texttt{never}
+  \end{columns}
+\end{frame}
+
+% ── Slide 10: Real-Time File Indexing ───────────────────────────
+\begin{frame}{Feature: Real-Time File Indexing Pipeline}
+  \diagrambox[scale=0.65, transform shape, every node/.style={font=\tiny, align=center}]{
+    \tikzstyle{s}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt, minimum height=0.55cm, inner sep=2pt]
+    \tikzstyle{mod}=[draw=scrutTeal, fill=green!8, rounded corners=2pt, minimum height=0.5cm, inner sep=2pt]
+    \node[s, minimum width=2.4cm] (up) at (0,3.5) {Upload file\\POST /v2/projects/files};
+    \node[s, minimum width=2cm] (cdn) at (-3,2.3) {Cloudinary\\raw storage};
+    \node[s, minimum width=2cm] (neon) at (3,2.3) {Neon\\file + job rows};
+    \node[s, minimum width=2cm] (redis) at (0,2.3) {Redis\\Celery queue};
+    \node[mod, minimum width=1.5cm] (txt) at (-3.5,0.8) {Text\\chunk + embed};
+    \node[mod, minimum width=1.5cm] (aud) at (0,0.8) {Audio\\Whisper + embed};
+    \node[mod, minimum width=1.5cm] (vid) at (3.5,0.8) {Video\\FFmpeg + vision + embed};
+    \node[s, minimum width=2.6cm, fill=scrutTeal!15] (qd) at (0,-0.5) {Qdrant upsert\\dense + sparse vectors};
+    \node[s, minimum width=2cm] (done) at (0,-1.5) {status = indexed\\ready for RAG};
+    \draw[-{Stealth}] (up) -- (cdn);
+    \draw[-{Stealth}] (up) -- (neon);
+    \draw[-{Stealth}] (up) -- (redis);
+    \draw[-{Stealth}] (redis) -- (txt);
+    \draw[-{Stealth}] (redis) -- (aud);
+    \draw[-{Stealth}] (redis) -- (vid);
+    \draw[-{Stealth}] (txt) -- (qd);
+    \draw[-{Stealth}] (aud) -- (qd);
+    \draw[-{Stealth}] (vid) -- (qd);
+    \draw[-{Stealth}] (qd) -- (done);
+  }
+
+  \vspace{0.3em}
+  \small Async Celery workers process uploads in background; Fly.io scaler wakes workers on demand.
+\end{frame}
+
+% ── Slide 11: Query Routing Pipeline ────────────────────────────
+\begin{frame}{Query Pipeline: Four Routing Paths}
+  \diagrambox[scale=0.62, transform shape, every node/.style={font=\tiny, align=center}]{
+    \tikzstyle{s}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt, minimum height=0.5cm, inner sep=2pt]
+    \tikzstyle{route}=[draw=scrutTeal, fill=green!10, rounded corners=2pt, minimum height=0.5cm, inner sep=2pt]
+    \node[s, minimum width=2.8cm] (req) at (0,4) {POST /v3/.../messages\\SSE stream};
+    \node[s, minimum width=2.4cm] (pre) at (0,3) {RetrievalPrecheck\\embed + top-3 score};
+    \node[s, minimum width=2cm] (gate) at (0,2) {RagGate LLM\\(if ambiguous)};
+    \node[route, minimum width=1.5cm] (rag) at (-4,0.5) {RAG\\rewrite \textrightarrow{} retrieve};
+    \node[route, minimum width=1.5cm] (web) at (-1.3,0.5) {Web\\MCP search};
+    \node[route, minimum width=1.5cm] (hyb) at (1.3,0.5) {Hybrid\\RAG + web merge};
+    \node[route, minimum width=1.5cm] (gen) at (4,0.5) {Generic\\direct reply};
+    \node[s, minimum width=3cm, fill=scrutAccent!12] (syn) at (0,-1) {Synthesis + Decision Agent\\stream chunks via SSE};
+    \node[s, minimum width=2.4cm] (done) at (0,-2) {done event\\answer + citations};
+    \draw[-{Stealth}] (req) -- (pre);
+    \draw[-{Stealth}] (pre) -- (gate);
+    \draw[-{Stealth}] (gate) -- (rag);
+    \draw[-{Stealth}] (gate) -- (web);
+    \draw[-{Stealth}] (gate) -- (hyb);
+    \draw[-{Stealth}] (gate) -- (gen);
+    \draw[-{Stealth}] (rag) -- (syn);
+    \draw[-{Stealth}] (web) -- (syn);
+    \draw[-{Stealth}] (hyb) -- (syn);
+    \draw[-{Stealth}] (gen) -- (syn);
+    \draw[-{Stealth}, thick] (syn) -- (done);
+  }
+\end{frame}
+
+% ── Slide 12: UI Improvements ───────────────────────────────────
+\begin{frame}{Improvement: UI Enhancements}
+  \begin{columns}[T]
+    \column{0.52\textwidth}
+    \small
+    \textbf{Unified Chat \& Workspace UI}
+    \begin{itemize}
+      \item \textbf{ConversationChatView}: SSE stream with live status steps (precheck, gate, rewrite, retrieval, synthesis, evaluation).
+      \item \textbf{Sidebar}: Project workspaces, recent chats, and scope selection (\texttt{general} vs \texttt{project}).
+      \item \textbf{ChatInput}: Three-state web search mode toggle (\texttt{auto}, \texttt{always}, \texttt{never}).
+      \item \textbf{SourceCard}: Clickable citations with direct file playback and seek support.
+      \item \textbf{UploadView / LibraryView}: Multi-modal file management (text, audio, video).
+    \end{itemize}
+
+    \column{0.45\textwidth}
+    \diagrambox[scale=0.7, every node/.style={font=\tiny}]{
+      \tikzstyle{pane}=[draw=scrutBlue, fill=scrutLight, rounded corners=2pt, align=center]
+      
+      % Sidebar on the left
+      \node[pane, fill=scrutTeal!15, minimum width=1.6cm, minimum height=2.4cm] (sb) at (0,0) {Sidebar\\{\tiny Projects}\\{\tiny Recent Chats}\\{\tiny General/Project}};
+      
+      % Chat area in the middle
+      \node[pane, minimum width=2.6cm, minimum height=1.6cm] (chat) at (2.3,0.4) {Chat View\\{\tiny SSE Status Steps}\\{\tiny \texttt{precheck \textrightarrow{} gate \textrightarrow{} syn}}};
+      \node[pane, minimum width=2.6cm, minimum height=0.5cm] (input) at (2.3,-0.95) {ChatInput\\{\tiny Toggle Web Search}};
+      
+      % Citations on the right
+      \node[pane, fill=scrutOrange!8, minimum width=1.8cm, minimum height=2.4cm] (src) at (4.7,0) {Citations\\{\tiny SourceCard}\\{\tiny File Playback}\\{\tiny Seek Support}};
+      
+      % Connections
+      \draw[-{Stealth}] (sb) -- (chat);
+      \draw[-{Stealth}] (chat) -- (input);
+      \draw[-{Stealth}, dashed] (chat) -- (src);
+    }
+  \end{columns}
+\end{frame}
+
+% ── Slide 13: Future Improvements ───────────────────────────────
+\begin{frame}{Future Improvements}
+  \begin{columns}[T]
+    \column{0.48\textwidth}
+    \begin{block}{Planned Enhancements}
+      \small
+      \begin{itemize}
+        \item \textbf{Knowledge graph} context management
+        \item \textbf{LangSmith} --- LLM tracing \& eval
+        \item \textbf{Flowchart MCP server} --- diagram generation tool
+        \item \textbf{DocLinQ} integration
+        \item Native multi-vector points (CLIP visual, CLAP audio)
+      \end{itemize}
+    \end{block}
+
+    \column{0.48\textwidth}
+    \diagrambox[scale=0.78, every node/.style={font=\scriptsize}]{
+      \node[draw=scrutBlue, fill=scrutLight, rounded corners, minimum width=2.8cm] (now) {Current: Hybrid RAG + MCP};
+      \node[draw=scrutOrange, fill=orange!10, rounded corners, minimum width=2.8cm, below=0.5cm of now] (kg) {+ Knowledge Graph};
+      \node[draw=scrutOrange, fill=orange!10, rounded corners, minimum width=2.8cm, below=0.35cm of kg] (obs) {+ LangSmith Observability};
+      \node[draw=scrutTeal, fill=scrutTeal!15, rounded corners, minimum width=2.8cm, below=0.35cm of obs] (mv) {+ Multi-modal Vectors};
+      \draw[-{Stealth}] (now) -- (kg);
+      \draw[-{Stealth}] (kg) -- (obs);
+      \draw[-{Stealth}] (obs) -- (mv);
+    }
+  \end{columns}
+\end{frame}
+
+% ── Slide 14: Live Demo ─────────────────────────────────────────
+\begin{frame}{Live Demo}
+  \centering
+  \Large\textbf{Try Scrutinize}
+
+  \vspace{1em}
+  \begin{block}{Demo Flow}
+    \begin{enumerate}
+      \item Sign in with \textbf{Google OAuth}
+      \item Create a \textbf{project workspace} and upload documents
+      \item Start a \textbf{project-scoped chat} --- ask about your files
+      \item Toggle \textbf{web search mode} and compare RAG vs hybrid answers
+      \item Request a \textbf{PDF report} from the assistant
+      \item Inspect \textbf{citations} and source cards
+    \end{enumerate}
+  \end{block}
+
+  \vspace{0.8em}
+  \href{https://scrutinize.fly.dev}{\large scrutinize.fly.dev}\\[0.3em]
+  {\small\textit{Replace with your deployed URL if different}}
+\end{frame}
+
+% ── Slide 15: Thank You ─────────────────────────────────────────
+\begin{frame}[plain]
+  \centering
+  \vspace{1.5cm}
+  {\Huge\bfseries Thank You}
+
+  \vspace{1.2cm}
+  \begin{quote}
+    \large
+    ``The best way to predict the future is to invent it.''\\[0.4em]
+    \normalsize --- Alan Kay
+  \end{quote}
+
+  \vspace{1.2cm}
+  {\large Ammer Saeed}\\[0.2em]
+  {\normalsize Scrutinize --- Multi-Modal AI Ingestion \& Retrieval}
+
+  \vspace{0.8cm}
+  \small
+  GitHub \textbar{} FastAPI + React + Qdrant + MCP
+\end{frame}
+
+\end{document}
