@@ -19,7 +19,10 @@ AVAILABLE_TOOLS = (
     "report, handout, document, export, downloadable write-up, slides, flowchart artifact, "
     "or any equivalent file and the topic is within the project scope. "
     "For in-scope PDF/export requests, route MUST be \"rag\" (or \"web\"/\"hybrid\" if web data "
-    "is also needed) — never \"generic\"."
+    "is also needed) — never \"generic\".\n"
+    "- web_search: Search the web for real-time technology/AI news, startup funding, or recent tech developments. "
+    "The gate agent must select route as \"web\" or \"hybrid\" (or request tool \"web_search\") when the user query requires "
+    "real-time/recent information not covered in local documents."
 )
 
 

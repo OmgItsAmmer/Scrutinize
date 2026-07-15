@@ -303,7 +303,20 @@ def stream_message(
             )
             if not use_pipeline:
                 yield _sse("status", {"phase": "web_search", "step": "web_search", "label": "Searching the web"})
-                results = asyncio.run(web.search(turn_content, limit=5))
+                import threading
+                results = []
+                exc_to_raise = None
+                def run_search():
+                    nonlocal results, exc_to_raise
+                    try:
+                        results = asyncio.run(web.search(turn_content, limit=5))
+                    except Exception as e:
+                        exc_to_raise = e
+                t = threading.Thread(target=run_search)
+                t.start()
+                t.join()
+                if exc_to_raise:
+                    raise exc_to_raise
                 citations = [
                     {
                         "title": item.get("title", "Web result"),
@@ -348,7 +361,7 @@ def stream_message(
                         raise RuntimeError("Project not found")
                     project_ctx = ProjectService(session).resolve_context(project, settings)
                 result: SearchV2Response | None = None
-                web_search_mode = "auto"
+                web_search_mode = body.web_search_mode
                 for block in orchestrator.search_stream(
                     turn_content,
                     project_ctx=project_ctx,

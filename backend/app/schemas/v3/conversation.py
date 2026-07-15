@@ -45,6 +45,7 @@ class MessageCreate(BaseModel):
     content: str = Field(default="", max_length=32000)
     client_message_id: UUID
     requested_tool: str | None = Field(default=None, max_length=64)
+    web_search_mode: Literal["auto", "always", "never"] = "auto"
 
     @model_validator(mode="after")
     def validate_content_or_tool(self):

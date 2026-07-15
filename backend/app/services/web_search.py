@@ -135,10 +135,21 @@ class WebSearchService:
             logger.warning("Direct scrape failed for %s: %s", url, e)
             return ""
 
+    async def _scrape_url_safe(self, url: str) -> str:
+        try:
+            return await self.scrape_url(url)
+        except Exception as e:
+            logger.warning("scrape_url raised exception for %s: %s", url, e)
+            return ""
+
     async def scrape_urls_parallel(self, urls: list[str]) -> list[str]:
-        """Fetch multiple URLs concurrently."""
-        tasks = [self.scrape_url(url) for url in urls]
-        return await asyncio.gather(*tasks)
+        """Fetch multiple URLs concurrently with a total timeout budget."""
+        tasks = [self._scrape_url_safe(url) for url in urls]
+        try:
+            return await asyncio.wait_for(asyncio.gather(*tasks), timeout=12.0)
+        except asyncio.TimeoutError:
+            logger.warning("scrape_urls_parallel timed out after 12.0 seconds.")
+            return [""] * len(urls)
 
     async def close(self):
         await self.client.aclose()

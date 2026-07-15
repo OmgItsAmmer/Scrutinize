@@ -81,7 +81,7 @@ class DecisionAgent:
             feedback = str(data.get("feedback", "")).strip()
             route_raw = str(data.get("correct_route", "")).strip().lower()
             correct_route: Route | None = None
-            if route_raw in ("rag", "generic"):
+            if route_raw in ("rag", "generic", "web", "hybrid"):
                 correct_route = route_raw  # type: ignore[assignment]
             return DecisionResult(
                 verdict=verdict,

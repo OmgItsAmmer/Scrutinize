@@ -23,27 +23,52 @@ PDF_TOOL_SCHEMA = {
     },
 }
 
+WEB_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "Search the web for real-time technology/AI news, startup funding, or tech events.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 3},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+FALLBACK_SCHEMAS = [PDF_TOOL_SCHEMA, WEB_SEARCH_SCHEMA]
+
+
 class McpClientManager:
-    """Synchronous manager client for the local PDF Generator MCP Server."""
+    """Synchronous manager client for the unified Scrutinize MCP Server."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._enabled = settings.mcp_pdf_server_enabled
         self._python_exe = sys.executable
-        self._pdf_server_args = ["-m", "app.services.v2.mcp_servers.pdf_generator"]
+        self._pdf_server_args = ["-m", "app.services.v2.mcp_servers.unified_server"]
 
     def is_enabled(self) -> bool:
         return self._enabled
 
-    def _call_local_pdf_tool(self, tool_name: str, arguments: dict) -> str:
-        if tool_name != "generate_pdf":
+    def _call_local_tool_fallback(self, tool_name: str, arguments: dict) -> Any:
+        if tool_name == "generate_pdf":
+            from app.services.v2.mcp_servers.pdf_generator import generate_pdf
+            return generate_pdf(
+                title=str(arguments.get("title") or "generated-document"),
+                content=str(arguments.get("content") or ""),
+            )
+        elif tool_name == "web_search":
+            from app.services.v2.mcp_servers.unified_server import web_search
+            return asyncio.run(web_search(
+                query=str(arguments.get("query") or ""),
+                limit=int(arguments.get("limit") or 3)
+            ))
+        else:
             raise RuntimeError(f"Unknown local MCP fallback tool: {tool_name}")
-        from app.services.v2.mcp_servers.pdf_generator import generate_pdf
-
-        return generate_pdf(
-            title=str(arguments.get("title") or "generated-document"),
-            content=str(arguments.get("content") or ""),
-        )
 
     async def _list_tools_async(self) -> list[dict]:
         from mcp import ClientSession, StdioServerParameters
@@ -106,26 +131,54 @@ class McpClientManager:
             logger.error(f"Error calling MCP tool {tool_name}: {e}")
             raise RuntimeError(f"MCP tool execution failed: {e}") from e
 
+    def _run_sync(self, coro):
+        import asyncio
+        import threading
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            result = None
+            exception = None
+
+            def target():
+                nonlocal result, exception
+                try:
+                    result = asyncio.run(coro)
+                except Exception as e:
+                    exception = e
+
+            t = threading.Thread(target=target)
+            t.start()
+            t.join()
+            if exception:
+                raise exception
+            return result
+        else:
+            return asyncio.run(coro)
+
     def list_tools(self) -> list[dict]:
         if not self._enabled:
             return []
         try:
-            tools = asyncio.run(self._list_tools_async())
-            return tools or [PDF_TOOL_SCHEMA]
+            tools = self._run_sync(self._list_tools_async())
+            return tools or FALLBACK_SCHEMAS
         except Exception as e:
             logger.warning("MCP list_tools failed; using local PDF fallback schema: %s", e)
-            return [PDF_TOOL_SCHEMA]
+            return FALLBACK_SCHEMAS
 
     def call_tool(self, tool_name: str, arguments: dict) -> Any:
         if not self._enabled:
-            raise RuntimeError("MCP PDF Server is disabled in config.")
+            raise RuntimeError("MCP Server is disabled in config.")
         try:
-            return asyncio.run(self._call_tool_async(tool_name, arguments))
+            return self._run_sync(self._call_tool_async(tool_name, arguments))
         except ModuleNotFoundError as e:
             if e.name != "mcp":
                 raise
-            logger.warning("MCP package is unavailable; using local PDF fallback.")
-            return self._call_local_pdf_tool(tool_name, arguments)
-        except Exception as exc:
-            logger.warning("MCP call_tool failed; using local PDF fallback: %s", exc)
-            return self._call_local_pdf_tool(tool_name, arguments)
+            logger.info("The 'mcp' package is not installed; attempting local Python fallback for tool: %s", tool_name)
+            return self._call_local_tool_fallback(tool_name, arguments)
+        except Exception as e:
+            logger.warning("MCP tool execution failed; attempting local Python fallback: %s", e)
+            return self._call_local_tool_fallback(tool_name, arguments)

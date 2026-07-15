@@ -98,26 +98,7 @@ class PipelineOrchestrator:
             has_corpus=has_corpus,
         )
 
-        if web_search_mode == "always":
-            from app.services.v2.rag_gate import GateResult
-            new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
-            gate_result = GateResult(
-                route=new_route,
-                reason=f"{gate_result.reason} (Web search mode: ALWAYS)",
-                reply=None if new_route != "generic" else gate_result.reply,
-                requested_tool=gate_result.requested_tool,
-                llm_call=gate_result.llm_call
-            )
-        elif web_search_mode == "never":
-            from app.services.v2.rag_gate import GateResult
-            new_route = "rag" if gate_result.route in ("web", "hybrid") else gate_result.route
-            gate_result = GateResult(
-                route=new_route,
-                reason=f"{gate_result.reason} (Web search mode: NEVER)",
-                reply=gate_result.reply,
-                requested_tool=gate_result.requested_tool,
-                llm_call=gate_result.llm_call
-            )
+        gate_result = self._apply_web_search_mode_override(gate_result, web_search_mode)
 
         self._db_logger.log_gate(
             run_id=run_id,
@@ -209,26 +190,7 @@ class PipelineOrchestrator:
                 "message": "Classifying query route..."
             })
 
-            if web_search_mode == "always":
-                from app.services.v2.rag_gate import GateResult
-                new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
-                gate_result = GateResult(
-                    route=new_route,
-                    reason=f"{gate_result.reason} (Web search mode: ALWAYS)",
-                    reply=None if new_route != "generic" else gate_result.reply,
-                    requested_tool=gate_result.requested_tool,
-                    llm_call=gate_result.llm_call
-                )
-            elif web_search_mode == "never":
-                from app.services.v2.rag_gate import GateResult
-                new_route = "rag" if gate_result.route in ("web", "hybrid") else gate_result.route
-                gate_result = GateResult(
-                    route=new_route,
-                    reason=f"{gate_result.reason} (Web search mode: NEVER)",
-                    reply=gate_result.reply,
-                    requested_tool=gate_result.requested_tool,
-                    llm_call=gate_result.llm_call
-                )
+            gate_result = self._apply_web_search_mode_override(gate_result, web_search_mode)
 
             self._db_logger.log_gate(
                 run_id=run_id,
@@ -391,12 +353,17 @@ class PipelineOrchestrator:
             return
 
     def _build_gate_tool_context(self) -> str:
-        if not self._mcp_manager or not self._mcp_manager.is_enabled():
-            return ""
-        return (
-            "- generate_pdf: Create a downloadable PDF document from synthesized "
-            "project content."
-        )
+        tools = []
+        if self._mcp_manager and self._mcp_manager.is_enabled():
+            tools.append(
+                "- generate_pdf: Create a downloadable PDF document from synthesized "
+                "project content."
+            )
+        if self._settings.enable_web_search:
+            tools.append(
+                "- web_search: Search the web for real-time technology/AI news, startup funding, or recent tech developments."
+            )
+        return "\n".join(tools)
 
     @staticmethod
     def _requested_pdf(gate_result: GateResult) -> bool:
@@ -429,6 +396,30 @@ class PipelineOrchestrator:
             requested_tool=tool,
             llm_call=gate_result.llm_call,
         )
+
+    @staticmethod
+    def _apply_web_search_mode_override(gate_result: GateResult, web_search_mode: str) -> GateResult:
+        if web_search_mode == "always":
+            from app.services.v2.rag_gate import GateResult
+            new_route = "hybrid" if gate_result.route == "rag" else ("web" if gate_result.route == "generic" else gate_result.route)
+            return GateResult(
+                route=new_route,
+                reason=f"{gate_result.reason} (Web search mode: ALWAYS)",
+                reply=None if new_route != "generic" else gate_result.reply,
+                requested_tool=gate_result.requested_tool,
+                llm_call=gate_result.llm_call
+            )
+        elif web_search_mode == "never":
+            from app.services.v2.rag_gate import GateResult
+            new_route = "rag" if gate_result.route in ("web", "hybrid") else gate_result.route
+            return GateResult(
+                route=new_route,
+                reason=f"{gate_result.reason} (Web search mode: NEVER)",
+                reply=gate_result.reply,
+                requested_tool=gate_result.requested_tool,
+                llm_call=gate_result.llm_call
+            )
+        return gate_result
 
     def _classify_route(
         self,
@@ -694,7 +685,7 @@ class PipelineOrchestrator:
                         "message": "Drafting document for PDF export...",
                     })
                     answer = self._draft_document_content(
-                        stripped,
+                        rewritten_text,
                         conversation_context=conversation_context,
                         project_ctx=project_ctx,
                     )
@@ -735,12 +726,13 @@ class PipelineOrchestrator:
                     if (
                         self._mcp_manager
                         and self._mcp_manager.is_enabled()
+                        and not pdf_requested
                     )
                     else None
                 )
                 if tools or pdf_requested:
                     synthesis_result = self._rag_synthesis.synthesize(
-                        stripped,
+                        rewritten_text,
                         sources,
                         model=project_ctx.synthesis_model if project_ctx else None,
                         system_override=(
@@ -801,7 +793,7 @@ class PipelineOrchestrator:
                 else:
                     answer = ""
                     for chunk in self._rag_synthesis.synthesize_stream(
-                        stripped,
+                        rewritten_text,
                         sources,
                         model=project_ctx.synthesis_model if project_ctx else None,
                         system_override=(
@@ -1084,7 +1076,7 @@ class PipelineOrchestrator:
                 pdf_requested = self._requested_pdf(gate_result)
                 if pdf_requested:
                     answer = self._draft_document_content(
-                        stripped,
+                        rewritten_text,
                         conversation_context=conversation_context,
                         project_ctx=project_ctx,
                     )
@@ -1110,11 +1102,12 @@ class PipelineOrchestrator:
                     if (
                         self._mcp_manager
                         and self._mcp_manager.is_enabled()
+                        and not pdf_requested
                     )
                     else None
                 )
                 synthesis_result = self._rag_synthesis.synthesize(
-                    stripped,
+                    rewritten_text,
                     sources,
                     model=project_ctx.synthesis_model if project_ctx else None,
                     system_override=(
@@ -1187,7 +1180,7 @@ class PipelineOrchestrator:
                         "verdict": decision.verdict,
                         "correct_route": decision.correct_route,
                         "source_count": len(sources),
-                        "retrieval": retrieval.stats.to_dict(),
+                        "retrieval": stats.to_dict(),
                     }
                 ),
             )
@@ -1322,72 +1315,100 @@ class PipelineOrchestrator:
             sources = web_sources
             latency_ms += int((time.monotonic() - started_web) * 1000)
 
+        # Rerank combined results to put the best on top
+        sources.sort(key=lambda s: s.score, reverse=True)
+
         return sources, stats, rank_fields, latency_ms
 
     def _retrieve_web(self, query: str) -> list[SearchSource]:
-        if not self._web_search:
-            return []
-
-        # 1. Search the web
-        web_results = self._run_async(self._web_search.search, query, limit=3)
-        if not web_results:
-            return []
-
-        # 2. Extract URLs, titles, and snippets
-        urls = [res["url"] for res in web_results]
-        titles = [res["title"] for res in web_results]
-        snippets = [res["snippet"] for res in web_results]
-
-        # 3. Scrape the content in parallel
-        scraped_contents = self._run_async(self._web_search.scrape_urls_parallel, urls)
-
-        # 4. Convert to SearchSource objects
+        import json
         import uuid
         from app.models.file import FileModality
 
+        web_results = []
+        if self._mcp_manager and self._mcp_manager.is_enabled():
+            try:
+                raw_json = self._mcp_manager.call_tool("web_search", {"query": query})
+                web_results = json.loads(raw_json)
+            except Exception as e:
+                logger.warning("MCP web_search tool call failed; falling back to direct web search service: %s", e)
+
+        # Fallback to direct service if MCP search returned empty or failed
+        if not web_results and self._web_search:
+            direct_results = self._run_async(self._web_search.search, query, limit=3)
+            if direct_results:
+                urls = [res["url"] for res in direct_results]
+                scraped_contents = self._run_async(self._web_search.scrape_urls_parallel, urls)
+                for i, res in enumerate(direct_results):
+                    content = scraped_contents[i].strip() if i < len(scraped_contents) else ""
+                    if not content:
+                        content = res.get("snippet", "")
+                    if len(content) > 8000:
+                        content = content[:8000] + "..."
+                    web_results.append({
+                        "title": res.get("title", "Web Result"),
+                        "url": res.get("url", ""),
+                        "snippet": res.get("snippet", ""),
+                        "content": content
+                    })
+
+        if not web_results:
+            return []
+
         sources = []
-        for i, url in enumerate(urls):
+        for i, res in enumerate(web_results):
+            url = res.get("url", "")
+            title = res.get("title", "Web Result")
+            content = res.get("content", "")
+            snippet = res.get("snippet", "")
+            
             # Generate deterministic UUIDs from URL to maintain consistency
             ns = uuid.NAMESPACE_URL
             seg_id = uuid.uuid5(ns, url)
             file_id = uuid.uuid5(ns, url + "/file")
             
-            content = scraped_contents[i].strip() if i < len(scraped_contents) else ""
-            # Fall back to snippet if scraping yielded no content
-            if not content:
-                content = snippets[i]
-
-            # Limit length to avoid breaking context window
-            if len(content) > 8000:
-                content = content[:8000] + "..."
+            final_content = content.strip() if content else snippet.strip()
+            if len(final_content) > 8000:
+                final_content = final_content[:8000] + "..."
 
             sources.append(
                 SearchSource(
                     segment_id=seg_id,
                     file_id=file_id,
                     modality=FileModality.TEXT,
-                    title=titles[i] or "Web Result",
-                    content=content,
+                    title=title,
+                    content=final_content,
                     source_path=url,
-                    score=1.0 - (i * 0.1),
+                    score=0.016 - (i * 0.002),
                 )
             )
         return sources
 
     def _run_async(self, func, *args, **kwargs):
         import asyncio
-        try:
-            from anyio.from_thread import run as anyio_run
-            return anyio_run(func, *args, **kwargs)
-        except Exception:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
+        import threading
 
-            if loop and loop.is_running():
-                import concurrent.futures
-                future = asyncio.run_coroutine_threadsafe(func(*args, **kwargs), loop)
-                return future.result()
-            else:
-                return asyncio.run(func(*args, **kwargs))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            result = None
+            exception = None
+
+            def target():
+                nonlocal result, exception
+                try:
+                    result = asyncio.run(func(*args, **kwargs))
+                except Exception as e:
+                    exception = e
+
+            t = threading.Thread(target=target)
+            t.start()
+            t.join()
+            if exception:
+                raise exception
+            return result
+        else:
+            return asyncio.run(func(*args, **kwargs))

@@ -64,7 +64,7 @@ def _orchestrator(
         decision,
         memory,
         _settings(**settings_overrides),
-        mcp_manager,
+        mcp_manager=mcp_manager,
     )
 
 
@@ -250,7 +250,7 @@ def test_pipeline_pdf_intent_uses_rewritten_topic_and_calls_mcp_without_discover
         text="OpenAI news updates and announcements."
     )
     gate = MagicMock()
-    gate.classify.return_value = GateResult(route="rag", reason="OpenAI news request")
+    gate.classify.return_value = GateResult(route="rag", reason="OpenAI news request", requested_tool="generate_pdf")
     generic = MagicMock()
     rrf = MagicMock()
     source = SearchSource(
@@ -312,7 +312,7 @@ def test_streaming_pipeline_pdf_intent_calls_mcp_without_discovery():
     rewriter = MagicMock()
     rewriter.rewrite.return_value = RewrittenQuery(text="OpenAI news updates.")
     gate = MagicMock()
-    gate.classify.return_value = GateResult(route="rag", reason="OpenAI news request")
+    gate.classify.return_value = GateResult(route="rag", reason="OpenAI news request", requested_tool="generate_pdf")
     generic = MagicMock()
     rrf = MagicMock()
     source = SearchSource(

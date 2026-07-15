@@ -6,7 +6,7 @@ Return JSON only:
 {
   "route": "rag" | "web" | "hybrid" | "generic",
   "reason": "a brief explanation of the routing decision",
-  "requested_tool": "generate_pdf" | null,
+  "requested_tool": "generate_pdf" | "web_search" | null,
   "reply": "a conversational reply (ONLY if route is 'generic', otherwise null)"
 }
 
@@ -27,7 +27,7 @@ Tool routing:
   - set requested_tool to "generate_pdf"
   - route to "rag" (or "web"/"hybrid" if live web data is also required)
   - leave "reply" as null
-* PDF/export requests for in-scope topics are NOT generic. Do not route them to "generic" just because the user wants a file — generic is only for greetings and out-of-scope topics.
+* If the user query asks for real-time information, news events, or topics not in local uploads, set requested_tool to "web_search" and route to "web" or "hybrid".
 * If no tool is requested, set requested_tool to null.
 
 When route is "generic":
