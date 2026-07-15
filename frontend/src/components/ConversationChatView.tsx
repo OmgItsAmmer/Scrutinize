@@ -17,6 +17,7 @@ import {
 import {
   CHAT_TOOLS,
   parseMessageWithPdf,
+  pdfPreviewUrl,
   type ChatToolId,
 } from "../lib/chatTools";
 import type { ConversationScope, PersistedMessage, SearchSource } from "../types/api";
@@ -25,6 +26,7 @@ import { PdfDownloadButton } from "./PdfDownloadButton";
 import { renderMarkdown, SourcePreviewModal, CitationButton } from "./SourceCard";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { ToolButtons } from "./ToolButtons";
+import { PdfViewer } from "./PdfViewer";
 
 function citationToSource(citation: Record<string, unknown>, index: number): SearchSource {
   const title = String(citation.title ?? `Source ${index + 1}`);
@@ -108,6 +110,7 @@ function MessageBubble({
   onSourceClick: (source: SearchSource, index: number) => void;
 }) {
   const isUser = message.role === "user";
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
   const sources = sourcesFromMessage(message);
   const { displayText, pdfDownload } = parseMessageWithPdf(message.content);
 
@@ -130,20 +133,46 @@ function MessageBubble({
   }
 
   return (
-    <div className="text-[15px] leading-relaxed text-zinc-900">
-      <div className="inline-flex items-start gap-2.5 max-w-full">
-        <div className="min-w-0 space-y-2">
+    <div className="text-[15px] leading-relaxed text-zinc-900 w-full">
+      <div className="flex items-start justify-between gap-3 w-full">
+        <div className="min-w-0 flex-1 space-y-2">
           {renderMarkdown(displayText, sources, onSourceClick)}
           {streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-zinc-900 align-middle" />
           )}
         </div>
         {pdfDownload && !streaming && (
-          <div className="shrink-0 pt-0.5">
+          <div className="shrink-0 pt-0.5 flex flex-col gap-2">
             <PdfDownloadButton href={pdfDownload.href} filename={pdfDownload.filename} />
+            <button
+              type="button"
+              onClick={() => setShowPdfPreview((prev) => !prev)}
+              className={[
+                "flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0",
+                showPdfPreview
+                  ? "border-blue-400 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-400"
+                  : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800",
+              ].join(" ")}
+              title={showPdfPreview ? "Hide Preview" : "Preview PDF"}
+            >
+              <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                {showPdfPreview ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.43 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                )}
+              </svg>
+            </button>
           </div>
         )}
       </div>
+
+      {showPdfPreview && pdfDownload && !streaming && (
+        <div className="w-full">
+          <PdfViewer fileUrl={pdfPreviewUrl(pdfDownload.href)} />
+        </div>
+      )}
+
       {!streaming && sources.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-zinc-400 self-center mr-1">References:</span>
