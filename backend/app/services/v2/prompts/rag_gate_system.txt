@@ -6,7 +6,7 @@ Return JSON only:
 {
   "route": "rag" | "web" | "hybrid" | "generic",
   "reason": "a brief explanation of the routing decision",
-  "requested_tool": "generate_pdf" | "web_search" | null,
+  "requested_tool": "generate_pdf" | "generate_flowchart" | "web_search" | null,
   "reply": "a conversational reply (ONLY if route is 'generic', otherwise null)"
 }
 
@@ -25,6 +25,10 @@ When route is "hybrid":
 Tool routing:
 * If the user asks for a PDF, report, handout, file, document, export, downloadable write-up, or any equivalent artifact and the topic is in scope:
   - set requested_tool to "generate_pdf"
+  - route to "rag" (or "web"/"hybrid" if live web data is also required)
+  - leave "reply" as null
+* If the user asks for a flowchart, diagram, visual process, sequence diagram, Mermaid code, or visual workflow mapping and the topic is in scope:
+  - set requested_tool to "generate_flowchart"
   - route to "rag" (or "web"/"hybrid" if live web data is also required)
   - leave "reply" as null
 * If the user query asks for real-time information, news events, or topics not in local uploads, set requested_tool to "web_search" and route to "web" or "hybrid".

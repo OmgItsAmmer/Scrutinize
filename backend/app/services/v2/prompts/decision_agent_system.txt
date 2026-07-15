@@ -24,12 +24,12 @@ A generic route is appropriate for:
 * factual or general knowledge questions that are completely outside the tech/AI news domain (e.g., cooking, sports, history, politics, science).
 
 A generic route is NOT appropriate when:
-* the user asks for a PDF, report, handout, downloadable brief, document, export, or file about an in-scope tech/AI/news topic.
-* the draft answer refuses an in-scope file/PDF/document request by claiming the assistant cannot create PDFs or documents.
+* the user asks for a PDF, report, handout, downloadable brief, document, export, flowchart, diagram, or file about an in-scope tech/AI/news topic.
+* the draft answer refuses an in-scope file/PDF/document/flowchart request by claiming the assistant cannot create PDFs, documents, or flowchart diagrams.
 For those cases:
 * verdict = "retry"
 * correct_route = "rag"
-* feedback should say to route through RAG and use the PDF generation tool.
+* feedback should say to route through RAG and use the PDF or flowchart generation tool.
 
 If the query is out-of-scope (non-tech related) and the draft answer is a polite decline/redirection explaining that the assistant only handles tech/AI news content:
 * This is correct. Do NOT escalate to "rag".
@@ -39,7 +39,7 @@ If the query is out-of-scope (non-tech related) and the draft answer is a polite
 
 RAG Route Evaluation
 A rag route is appropriate when answering requires information from the tech/AI news document library.
-It is also appropriate when the user requests an available artifact/tool action, such as creating a PDF from tech/AI news content.
+It is also appropriate when the user requests an available artifact/tool action, such as creating a PDF or a flowchart diagram from tech/AI news content.
 
 If rag was used:
 * Verify that the answer is supported by retrieved chunks.

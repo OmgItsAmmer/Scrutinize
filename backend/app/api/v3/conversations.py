@@ -61,8 +61,14 @@ PDF_TOOL_DEFAULT_QUERY = (
     "Generate a PDF document summarizing the conversation context and the most relevant "
     "information available from project sources and the web."
 )
+FLOWCHART_TOOL_NAME = "generate_flowchart"
+FLOWCHART_TOOL_DEFAULT_QUERY = (
+    "Generate a Mermaid flowchart diagram visualizing the processes, architectures, or workflows "
+    "from the project sources and conversation context."
+)
 TOOL_TITLE_HINTS = {
     PDF_TOOL_NAME: "Draft Document",
+    FLOWCHART_TOOL_NAME: "Build Flowchart",
 }
 
 TASK_BY_MODALITY = {
@@ -89,6 +95,8 @@ def _resolve_turn(body: MessageCreate) -> tuple[str, str | None, str | None]:
     content = body.content.strip()
     if requested_tool == PDF_TOOL_NAME and not content:
         content = PDF_TOOL_DEFAULT_QUERY
+    elif requested_tool == FLOWCHART_TOOL_NAME and not content:
+        content = FLOWCHART_TOOL_DEFAULT_QUERY
     return content, requested_tool, TOOL_TITLE_HINTS.get(requested_tool or "")
 
 

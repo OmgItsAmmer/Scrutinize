@@ -23,6 +23,22 @@ PDF_TOOL_SCHEMA = {
     },
 }
 
+FLOWCHART_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_flowchart",
+        "description": "Generate a Mermaid diagram flowchart from a title and description.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["title", "content"],
+        },
+    },
+}
+
 WEB_SEARCH_SCHEMA = {
     "type": "function",
     "function": {
@@ -39,7 +55,7 @@ WEB_SEARCH_SCHEMA = {
     },
 }
 
-FALLBACK_SCHEMAS = [PDF_TOOL_SCHEMA, WEB_SEARCH_SCHEMA]
+FALLBACK_SCHEMAS = [PDF_TOOL_SCHEMA, FLOWCHART_TOOL_SCHEMA, WEB_SEARCH_SCHEMA]
 
 
 class McpClientManager:
@@ -59,6 +75,12 @@ class McpClientManager:
             from app.services.v2.mcp_servers.pdf_generator import generate_pdf
             return generate_pdf(
                 title=str(arguments.get("title") or "generated-document"),
+                content=str(arguments.get("content") or ""),
+            )
+        elif tool_name == "generate_flowchart":
+            from app.services.v2.mcp_servers.unified_server import generate_flowchart
+            return generate_flowchart(
+                title=str(arguments.get("title") or "flowchart"),
                 content=str(arguments.get("content") or ""),
             )
         elif tool_name == "web_search":

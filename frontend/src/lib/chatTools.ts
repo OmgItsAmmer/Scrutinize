@@ -3,7 +3,7 @@ export type ChatToolId = "draft_document" | "flowchart" | "slides";
 export interface ChatToolConfig {
   id: ChatToolId;
   label: string;
-  requestedTool?: "generate_pdf";
+  requestedTool?: "generate_pdf" | "generate_flowchart";
 }
 
 export const CHAT_TOOLS: ChatToolConfig[] = [
@@ -15,7 +15,7 @@ export const CHAT_TOOLS: ChatToolConfig[] = [
   {
     id: "flowchart",
     label: "Build Flowcharts",
-    requestedTool: "generate_pdf",
+    requestedTool: "generate_flowchart",
   },
   {
     id: "slides",

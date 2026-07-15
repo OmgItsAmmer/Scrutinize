@@ -32,7 +32,8 @@ NO_INDEXED_CONTENT = "No matching indexed content found."
 LOW_CONFIDENCE_DISCLAIMER = "Note: answer may vary — retrieval confidence was low."
 PDF_TITLE_FALLBACK = "generated-document"
 PDF_TOOL_NAME = "generate_pdf"
-TOOLS_REQUIRING_RAG: frozenset[str] = frozenset({PDF_TOOL_NAME})
+FLOWCHART_TOOL_NAME = "generate_flowchart"
+TOOLS_REQUIRING_RAG: frozenset[str] = frozenset({PDF_TOOL_NAME, FLOWCHART_TOOL_NAME})
 
 
 class PipelineOrchestrator:
@@ -370,6 +371,10 @@ class PipelineOrchestrator:
         return gate_result.requested_tool == PDF_TOOL_NAME
 
     @staticmethod
+    def _requested_flowchart(gate_result: GateResult) -> bool:
+        return gate_result.requested_tool == FLOWCHART_TOOL_NAME
+
+    @staticmethod
     def _maybe_force_rag_for_tool(
         gate_result: GateResult,
         client_requested_tool: str | None,
@@ -444,11 +449,20 @@ class PipelineOrchestrator:
                 enable_web_search=enable_web,
             )
             if precheck.action == "route_rag":
-                return GateResult(route="rag", reason=precheck.reason, llm_call=None)
+                return self._maybe_force_rag_for_tool(
+                    GateResult(route="rag", reason=precheck.reason, llm_call=None),
+                    client_requested_tool
+                )
             if precheck.action == "route_web":
-                return GateResult(route="web", reason=precheck.reason, llm_call=None)
+                return self._maybe_force_rag_for_tool(
+                    GateResult(route="web", reason=precheck.reason, llm_call=None),
+                    client_requested_tool
+                )
             if precheck.action == "route_generic":
-                return GateResult(route="generic", reason=precheck.reason, llm_call=None)
+                return self._maybe_force_rag_for_tool(
+                    GateResult(route="generic", reason=precheck.reason, llm_call=None),
+                    client_requested_tool
+                )
 
         gate_result = self._gate.classify(
             query,
@@ -500,6 +514,32 @@ class PipelineOrchestrator:
             return self._append_pdf_download_link(answer, filename, download_url)
         except Exception as exc:
             return f"Failed to generate PDF: {exc}"
+
+    def _attach_flowchart_to_answer(self, query: str, answer: str) -> str:
+        if "```mermaid" in answer:
+            return answer
+        try:
+            mermaid_block = self._generate_flowchart_from_answer(query, answer)
+            if not mermaid_block:
+                raise RuntimeError("MCP Flowchart Server is unavailable or disabled.")
+            return f"{answer.strip()}\n\n{mermaid_block}"
+        except Exception as exc:
+            return f"Failed to generate flowchart: {exc}"
+
+    def _generate_flowchart_from_answer(self, query: str, answer: str) -> str | None:
+        if not self._mcp_manager or not self._mcp_manager.is_enabled():
+            return None
+
+        title_slug = self._slugify_pdf_title(query)
+
+        mermaid_block = self._mcp_manager.call_tool(
+            "generate_flowchart",
+            {
+                "title": title_slug,
+                "content": answer.strip() or query.strip(),
+            },
+        )
+        return str(mermaid_block).strip()
 
     def _build_pdf_download_url(self, filename: str) -> str:
         base_url = os.getenv("VITE_API_URL", "http://localhost:8000").rstrip("/")
@@ -679,6 +719,7 @@ class PipelineOrchestrator:
 
             if not sources:
                 pdf_requested = self._requested_pdf(gate_result)
+                flowchart_requested = self._requested_flowchart(gate_result)
                 if pdf_requested:
                     yield emit("status", {
                         "step": "synthesis",
@@ -694,6 +735,27 @@ class PipelineOrchestrator:
                         "message": "Running tool: generate_pdf...",
                     })
                     answer = self._attach_pdf_to_answer(stripped, answer)
+                    yield emit("chunk", {"text": answer})
+                    self._db_logger.log_synthesis(
+                        run_id=run_id,
+                        attempt=attempt,
+                        synthesis_result=RagSynthesisResult(answer=answer, llm_call=None),
+                    )
+                elif flowchart_requested:
+                    yield emit("status", {
+                        "step": "synthesis",
+                        "message": "Drafting flowchart for visualization...",
+                    })
+                    answer = self._draft_document_content(
+                        rewritten_text,
+                        conversation_context=conversation_context,
+                        project_ctx=project_ctx,
+                    )
+                    yield emit("status", {
+                        "step": "tool_call",
+                        "message": "Running tool: generate_flowchart...",
+                    })
+                    answer = self._attach_flowchart_to_answer(stripped, answer)
                     yield emit("chunk", {"text": answer})
                     self._db_logger.log_synthesis(
                         run_id=run_id,
@@ -721,16 +783,18 @@ class PipelineOrchestrator:
                 })
 
                 pdf_requested = self._requested_pdf(gate_result)
+                flowchart_requested = self._requested_flowchart(gate_result)
                 tools = (
                     self._mcp_manager.list_tools()
                     if (
                         self._mcp_manager
                         and self._mcp_manager.is_enabled()
                         and not pdf_requested
+                        and not flowchart_requested
                     )
                     else None
                 )
-                if tools or pdf_requested:
+                if tools or pdf_requested or flowchart_requested:
                     synthesis_result = self._rag_synthesis.synthesize(
                         rewritten_text,
                         sources,
@@ -744,7 +808,7 @@ class PipelineOrchestrator:
                     answer = synthesis_result.answer
 
                     llm_call = synthesis_result.llm_call
-                    pdf_result = None
+                    tool_result = None
                     if llm_call and llm_call.tool_calls:
                         for tool_call in llm_call.tool_calls:
                             if tool_call.name == "generate_pdf":
@@ -760,17 +824,35 @@ class PipelineOrchestrator:
                                         "step": "tool_call_end",
                                         "message": f"PDF generated successfully: {filename}"
                                     })
-                                    pdf_result = (filename, download_url)
+                                    tool_result = (filename, download_url)
                                     answer = self._append_pdf_download_link(
                                         synthesis_result.answer, filename, download_url
                                     )
                                 except Exception as e:
                                     answer = f"Failed to generate PDF: {e}"
                                     synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
-                                    pdf_result = None
+                                    tool_result = None
+                                break
+                            elif tool_call.name == "generate_flowchart":
+                                try:
+                                    yield emit("status", {
+                                        "step": "tool_call",
+                                        "message": f"Running tool: {tool_call.name}..."
+                                    })
+                                    mermaid_block = self._mcp_manager.call_tool(tool_call.name, tool_call.arguments)
+                                    yield emit("status", {
+                                        "step": "tool_call_end",
+                                        "message": "Flowchart generated successfully."
+                                    })
+                                    tool_result = mermaid_block
+                                    answer = f"{synthesis_result.answer.strip()}\n\n{mermaid_block}"
+                                except Exception as e:
+                                    answer = f"Failed to generate flowchart: {e}"
+                                    synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                                    tool_result = None
                                 break
 
-                    if pdf_requested and pdf_result is None:
+                    if pdf_requested and tool_result is None:
                         try:
                             yield emit("status", {
                                 "step": "tool_call",
@@ -781,12 +863,30 @@ class PipelineOrchestrator:
                                 raise RuntimeError("MCP PDF Server is unavailable or disabled.")
                             filename, download_url = maybe_pdf
                             yield emit("status", {
-                                "step": "tool_call_end",
-                                "message": f"PDF generated successfully: {filename}"
-                            })
+                                        "step": "tool_call_end",
+                                        "message": f"PDF generated successfully: {filename}"
+                                    })
                             answer = self._append_pdf_download_link(answer, filename, download_url)
                         except Exception as exc:
                             answer = f"Failed to generate PDF: {exc}"
+                        synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+
+                    if flowchart_requested and tool_result is None:
+                        try:
+                            yield emit("status", {
+                                "step": "tool_call",
+                                "message": "Running tool: generate_flowchart..."
+                            })
+                            mermaid_block = self._generate_flowchart_from_answer(stripped, answer)
+                            if not mermaid_block:
+                                raise RuntimeError("MCP Flowchart Server is unavailable or disabled.")
+                            yield emit("status", {
+                                        "step": "tool_call_end",
+                                        "message": "Flowchart generated successfully."
+                                    })
+                            answer = f"{answer.strip()}\n\n{mermaid_block}"
+                        except Exception as exc:
+                            answer = f"Failed to generate flowchart: {exc}"
                         synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
 
                     yield emit("chunk", {"text": answer})
@@ -1074,6 +1174,7 @@ class PipelineOrchestrator:
 
             if not sources:
                 pdf_requested = self._requested_pdf(gate_result)
+                flowchart_requested = self._requested_flowchart(gate_result)
                 if pdf_requested:
                     answer = self._draft_document_content(
                         rewritten_text,
@@ -1081,6 +1182,19 @@ class PipelineOrchestrator:
                         project_ctx=project_ctx,
                     )
                     answer = self._attach_pdf_to_answer(stripped, answer)
+                    mock_result = RagSynthesisResult(answer=answer, llm_call=None)
+                    self._db_logger.log_synthesis(
+                        run_id=run_id,
+                        attempt=attempt,
+                        synthesis_result=mock_result,
+                    )
+                elif flowchart_requested:
+                    answer = self._draft_document_content(
+                        rewritten_text,
+                        conversation_context=conversation_context,
+                        project_ctx=project_ctx,
+                    )
+                    answer = self._attach_flowchart_to_answer(stripped, answer)
                     mock_result = RagSynthesisResult(answer=answer, llm_call=None)
                     self._db_logger.log_synthesis(
                         run_id=run_id,
@@ -1097,12 +1211,14 @@ class PipelineOrchestrator:
                     )
             else:
                 pdf_requested = self._requested_pdf(gate_result)
+                flowchart_requested = self._requested_flowchart(gate_result)
                 tools = (
                     self._mcp_manager.list_tools()
                     if (
                         self._mcp_manager
                         and self._mcp_manager.is_enabled()
                         and not pdf_requested
+                        and not flowchart_requested
                     )
                     else None
                 )
@@ -1119,6 +1235,7 @@ class PipelineOrchestrator:
                 answer = synthesis_result.answer
 
                 llm_call = synthesis_result.llm_call
+                tool_result = None
                 if llm_call and llm_call.tool_calls:
                     for tool_call in llm_call.tool_calls:
                         if tool_call.name == "generate_pdf":
@@ -1127,12 +1244,25 @@ class PipelineOrchestrator:
                                 filename = os.path.basename(str(filepath).strip())
                                 download_url = self._build_pdf_download_url(filename)
                                 answer = self._append_pdf_download_link(answer, filename, download_url)
+                                tool_result = (filename, download_url)
                                 synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
                             except Exception as e:
                                 answer = f"Failed to generate PDF: {e}"
                                 synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                                tool_result = None
                             break
-                if pdf_requested and "/v2/pdf/download/" not in answer:
+                        elif tool_call.name == "generate_flowchart":
+                            try:
+                                mermaid_block = self._mcp_manager.call_tool(tool_call.name, tool_call.arguments)
+                                answer = f"{synthesis_result.answer.strip()}\n\n{mermaid_block}"
+                                tool_result = mermaid_block
+                                synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                            except Exception as e:
+                                answer = f"Failed to generate flowchart: {e}"
+                                synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                                tool_result = None
+                            break
+                if pdf_requested and tool_result is None:
                     try:
                         maybe_pdf = self._generate_pdf_from_answer(stripped, answer)
                         if not maybe_pdf:
@@ -1141,6 +1271,15 @@ class PipelineOrchestrator:
                         answer = self._append_pdf_download_link(answer, filename, download_url)
                     except Exception as exc:
                         answer = f"Failed to generate PDF: {exc}"
+                    synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
+                if flowchart_requested and tool_result is None:
+                    try:
+                        mermaid_block = self._generate_flowchart_from_answer(stripped, answer)
+                        if not mermaid_block:
+                            raise RuntimeError("MCP Flowchart Server is unavailable or disabled.")
+                        answer = f"{answer.strip()}\n\n{mermaid_block}"
+                    except Exception as exc:
+                        answer = f"Failed to generate flowchart: {exc}"
                     synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
 
                 self._db_logger.log_synthesis(

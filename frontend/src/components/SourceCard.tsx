@@ -7,6 +7,133 @@ import {
 } from "../lib/format";
 import type { SearchSource, SearchV2Response } from "../types/api";
 import { IconDocument, IconX } from "./icons";
+import mermaid from "mermaid";
+
+try {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "default",
+    securityLevel: "loose",
+  });
+} catch (e) {
+  console.error("Failed to initialize mermaid:", e);
+}
+
+const preprocessMermaid = (code: string): string => {
+  // 1. Extract all double-quoted strings
+  const quotedStrings: string[] = [];
+  // Regex to match double-quoted strings, accounting for escaped quotes
+  const quoteRegex = /"([^"\\]|\\.)*"/g;
+  
+  let placeholderCode = code.replace(quoteRegex, (match) => {
+    quotedStrings.push(match);
+    return `__MERMAID_QUOTE_PLACEHOLDER_${quotedStrings.length - 1}__`;
+  });
+
+  // 2. Process double bracket shapes in placeholderCode: id([text]) -> id(["text"])
+  placeholderCode = placeholderCode.replace(/(\w+)\(\{\{\s*([^"\}]+?)\s*\}\}\)/g, '$1(({"$2"}))');
+  placeholderCode = placeholderCode.replace(/(\w+)\(\[\s*([^"\]]+?)\s*\]\)/g, '$1(["$2"])');
+  placeholderCode = placeholderCode.replace(/(\w+)\(\(\s*([^")]+?)\s*\)\)/g, '$1(("$2"))');
+  placeholderCode = placeholderCode.replace(/(\w+)\s*\[\(\s*([^")]+?)\s*\)\]/g, '$1[("$2")]');
+  placeholderCode = placeholderCode.replace(/(\w+)\s*\[\[\s*([^"\]]+?)\s*\]\]/g, '$1([["$2"]])');
+
+  // 3. Process single bracket shapes (if they contain parentheses/commas/colons/etc. and are not placeholders)
+  placeholderCode = placeholderCode.replace(/(\w+)\s*\[\s*([^"\]]+?)\s*\]/g, (match, id, text) => {
+    if (text.startsWith('__MERMAID_QUOTE_PLACEHOLDER_')) {
+      return match;
+    }
+    if (text.includes('(') || text.includes(')') || text.includes(',') || text.includes(':') || text.includes('&') || text.includes(';')) {
+      return `${id}["${text.trim().replace(/"/g, '\\"')}"]`;
+    }
+    return match;
+  });
+  
+  placeholderCode = placeholderCode.replace(/(\w+)\s*\(\s*([^"\/)]+?)\s*\)/g, (match, id, text) => {
+    if (text.startsWith('__MERMAID_QUOTE_PLACEHOLDER_')) {
+      return match;
+    }
+    const isDirection = ['td', 'lr', 'bt', 'rl', 'tb', 'flowchart', 'graph'].includes(id.toLowerCase()) || 
+                        ['td', 'lr', 'bt', 'rl', 'tb'].includes(text.trim().toLowerCase());
+    if (isDirection) {
+      return match;
+    }
+    if (text.includes('(') || text.includes(')') || text.includes(',') || text.includes(':') || text.includes('&') || text.includes(';') || text.includes(' ')) {
+      return `${id}("${text.trim().replace(/"/g, '\\"')}")`;
+    }
+    return match;
+  });
+
+  placeholderCode = placeholderCode.replace(/(\w+)\s*\{\s*([^"\}]+?)\s*\}/g, (match, id, text) => {
+    if (text.startsWith('__MERMAID_QUOTE_PLACEHOLDER_')) {
+      return match;
+    }
+    if (text.includes('(') || text.includes(')') || text.includes(',') || text.includes(':') || text.includes('&') || text.includes(';') || text.includes(' ')) {
+      return `${id}{"${text.trim().replace(/"/g, '\\"')}"}`;
+    }
+    return match;
+  });
+
+  // 4. Restore the original double-quoted strings
+  const finalCode = placeholderCode.replace(/__MERMAID_QUOTE_PLACEHOLDER_(\d+)__/g, (match, index) => {
+    return quotedStrings[parseInt(index, 10)];
+  });
+
+  return finalCode;
+};
+
+export function MermaidDiagram({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const renderDiagram = async () => {
+      if (!containerRef.current) return;
+      try {
+        setError(null);
+        const cleanedCode = preprocessMermaid(code.trim());
+        const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
+        const { svg: renderedSvg } = await mermaid.render(id, cleanedCode);
+        if (active) {
+          setSvg(renderedSvg);
+        }
+      } catch (err) {
+        console.error("Mermaid rendering failed:", err);
+        if (active) {
+          setError("Failed to render diagram.");
+        }
+      }
+    };
+
+    renderDiagram();
+    return () => {
+      active = false;
+    };
+  }, [code]);
+
+  if (error) {
+    return (
+      <div className="my-2 rounded-xl border border-rose-200 bg-rose-50 p-4 font-mono text-xs text-rose-700">
+        <p className="font-semibold">{error}</p>
+        <pre className="mt-1 overflow-x-auto">{code}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-3 flex justify-center rounded-2xl border border-zinc-200/50 bg-white/40 p-4 shadow-sm backdrop-blur-md dark:bg-zinc-950/20 dark:border-zinc-800/50 overflow-x-auto w-full">
+      <div
+        ref={containerRef}
+        className="w-full flex justify-center [&>svg]:max-w-full [&>svg]:h-auto"
+        dangerouslySetInnerHTML={{
+          __html: svg || '<span className="text-xs text-zinc-400">Rendering flowchart...</span>',
+        }}
+      />
+    </div>
+  );
+}
+
 
 function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
   const styles = {
@@ -229,6 +356,10 @@ export function renderMarkdown(
   const listItems: string[] = [];
   const elements: React.ReactNode[] = [];
 
+  let inCodeBlock = false;
+  let codeBlockContent: string[] = [];
+  let codeBlockLang = "";
+
   const parseInline = (chunk: string): React.ReactNode[] => {
     const parts = chunk.split(/(\[[^\]]+\]\([^)]+\)|\*\*.*?\*\*|`.*?`)/g);
     return parts.flatMap((part, index) => {
@@ -286,6 +417,37 @@ export function renderMarkdown(
 
   lines.forEach((line, idx) => {
     const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (inCodeBlock) {
+        const codeText = codeBlockContent.join("\n");
+        if (codeBlockLang === "mermaid") {
+          elements.push(<MermaidDiagram key={`mermaid-${idx}`} code={codeText} />);
+        } else {
+          elements.push(
+            <pre key={`code-${idx}`} className="my-2 rounded-xl bg-zinc-950 p-4 font-mono text-xs text-zinc-100 overflow-x-auto">
+              <code>{codeText}</code>
+            </pre>
+          );
+        }
+        inCodeBlock = false;
+        codeBlockContent = [];
+        codeBlockLang = "";
+      } else {
+        if (inList) {
+          flushList(idx);
+        }
+        inCodeBlock = true;
+        codeBlockLang = trimmed.slice(3).trim().toLowerCase();
+      }
+      return;
+    }
+
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      return;
+    }
+
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       inList = true;
       listItems.push(trimmed.slice(2));
