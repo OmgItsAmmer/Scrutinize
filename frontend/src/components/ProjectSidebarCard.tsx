@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ConversationItem, UserProject } from "../types/api";
 import { IconTrash } from "./icons";
 import { RonaldoProjectIcon } from "./RonaldoProjectIcon";
@@ -35,19 +35,59 @@ export function ProjectSidebarCard({
   onDeleteChat,
 }: ProjectSidebarCardProps) {
   const [showAllChats, setShowAllChats] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const visibleChats = showAllChats ? chats : chats.slice(0, INITIAL_CHAT_COUNT);
   const hasMoreChats = chats.length > INITIAL_CHAT_COUNT && !showAllChats;
   const deletingProject = deletingProjectId === project.project_id;
 
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsHovered(true);
+      onHover();
+    }, 500);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsHovered(false);
+  };
+
+  const handleSelectProject = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsHovered(false);
+    onSelectProject();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
     <article
-      className={`project-hover-card group ${selected ? "project-hover-card--selected" : ""}`}
-      onMouseEnter={onHover}
-      onFocusCapture={onHover}
+      className={`project-hover-card group ${selected ? "project-hover-card--selected" : ""} ${isHovered ? "project-hover-card--hovered" : ""}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onFocus={handleMouseEnter}
+      onBlur={handleMouseLeave}
     >
       <button
         type="button"
-        onClick={onSelectProject}
+        onClick={handleSelectProject}
         className="project-hover-card__collapsed"
         aria-label={`Open project ${project.name}`}
       >
@@ -59,7 +99,7 @@ export function ProjectSidebarCard({
         <div className="project-hover-card__hero">
           <button
             type="button"
-            onClick={onSelectProject}
+            onClick={handleSelectProject}
             className="project-hover-card__hero-button"
             aria-label={`Open project ${project.name}`}
           >

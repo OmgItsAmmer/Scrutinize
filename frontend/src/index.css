@@ -440,11 +440,9 @@ body {
   z-index: 20;
 }
 
-/* 2. DELAYED Hover State: Fade in Solid Black/Border/Shadow after 1s */
-.project-hover-card:hover::before,
-.project-hover-card:focus-within::before {
+/* 2. DELAYED Hover State: Fade in Solid Black/Border/Shadow */
+.project-hover-card--hovered::before {
   opacity: 1;
-  transition-delay: 1s;
 }
 
 .project-hover-card--selected .project-hover-card__collapsed {
@@ -523,14 +521,12 @@ body {
   background: var(--app-bg-glass-strong);
 }
 
-.project-hover-card:hover .project-hover-card__collapsed,
-.project-hover-card:focus-within .project-hover-card__collapsed {
+.project-hover-card--hovered .project-hover-card__collapsed {
   max-height: 0;
   opacity: 0;
   padding-top: 0;
   padding-bottom: 0;
   pointer-events: none;
-  transition-delay: 1s;
 }
 
 .project-hover-card__expanded {
@@ -547,13 +543,11 @@ body {
     transform 0.58s cubic-bezier(0.16, 1, 0.3, 1) 0.04s;
 }
 
-.project-hover-card:hover .project-hover-card__expanded,
-.project-hover-card:focus-within .project-hover-card__expanded {
+.project-hover-card--hovered .project-hover-card__expanded {
   grid-template-rows: 1fr;
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
-  transition-delay: 1s;
 }
 
 .project-hover-card__expanded-inner {
@@ -622,10 +616,8 @@ body {
   transition: transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.project-hover-card:hover .project-hover-card__image,
-.project-hover-card:focus-within .project-hover-card__image {
+.project-hover-card--hovered .project-hover-card__image {
   transform: scale(1);
-  transition-delay: 1s;
 }
 
 .project-hover-card__hero-overlay {
@@ -637,10 +629,8 @@ body {
   transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.project-hover-card:hover .project-hover-card__hero-overlay,
-.project-hover-card:focus-within .project-hover-card__hero-overlay {
+.project-hover-card--hovered .project-hover-card__hero-overlay {
   opacity: 1;
-  transition-delay: 1s;
 }
 
 .project-hover-card__hero-title {
@@ -664,11 +654,9 @@ body {
     transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s;
 }
 
-.project-hover-card:hover .project-hover-card__hero-title,
-.project-hover-card:focus-within .project-hover-card__hero-title {
+.project-hover-card--hovered .project-hover-card__hero-title {
   opacity: 1;
   transform: translateY(0);
-  transition-delay: 1s;
 }
 
 .project-hover-card__panel {
@@ -685,12 +673,10 @@ body {
     transform 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.14s;
 }
 
-.project-hover-card:hover .project-hover-card__panel,
-.project-hover-card:focus-within .project-hover-card__panel {
+.project-hover-card--hovered .project-hover-card__panel {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
-  transition-delay: 1s;
 }
 
 .project-hover-card__chats-label {
