@@ -408,7 +408,7 @@ export async function streamConversationMessage(
   clientMessageId: string,
   onEvent: (event: ConversationStreamEvent) => void,
   options?: { requestedTool?: string; webSearchMode?: "auto" | "always" | "never" },
-): Promise<void> {
+): Promise<{ completed: boolean }> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = localStorage.getItem("scrutinize_access_token");
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -429,6 +429,18 @@ export async function streamConversationMessage(
   if (!reader) throw new Error("No response stream available");
   const decoder = new TextDecoder();
   let buffer = "";
+  let completed = false;
+
+  const dispatchEvent = (event: ConversationStreamEvent) => {
+    try {
+      onEvent(event);
+    } catch (error) {
+      console.error("Conversation stream event handler failed:", event.event, error);
+    }
+    if (event.event === "message.completed") {
+      completed = true;
+    }
+  };
 
   const processBlocks = (isFinal = false) => {
     const blocks = buffer.split("\n\n");
@@ -444,7 +456,7 @@ export async function streamConversationMessage(
       const dataLine = lines.find((line) => line.startsWith("data: "))?.slice(6);
       if (eventName && dataLine) {
         try {
-          onEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent);
+          dispatchEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent);
         } catch (e) {
           console.error("Failed to parse SSE data block:", block, e);
         }
@@ -464,5 +476,7 @@ export async function streamConversationMessage(
   if (buffer.trim()) {
     processBlocks(true);
   }
+
+  return { completed };
 }
 

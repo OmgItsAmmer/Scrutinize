@@ -49,6 +49,55 @@ function sourcesFromMessage(message: PersistedMessage): SearchSource[] {
   return message.citations.map((citation, index) => citationToSource(citation, index));
 }
 
+function appendAssistantDelta(
+  messages: PersistedMessage[],
+  assistantMessageId: string,
+  conversationId: string,
+  text: string,
+): PersistedMessage[] {
+  const existing = messages.find((message) => message.id === assistantMessageId);
+  if (existing) {
+    return messages.map((message) =>
+      message.id === assistantMessageId
+        ? { ...message, content: message.content + text, status: "streaming" as const }
+        : message,
+    );
+  }
+
+  return [
+    ...messages,
+    {
+      id: assistantMessageId,
+      conversation_id: conversationId,
+      role: "assistant",
+      content: text,
+      status: "streaming",
+      citations: [],
+      created_at: new Date().toISOString(),
+      completed_at: null,
+    },
+  ];
+}
+
+function mergeMessagesPreservingLocalContent(
+  local: PersistedMessage[],
+  remote: PersistedMessage[],
+): PersistedMessage[] {
+  const localById = new Map(local.map((message) => [message.id, message]));
+
+  return remote.map((remoteMessage) => {
+    const localMessage = localById.get(remoteMessage.id);
+    if (
+      localMessage
+      && localMessage.content.length > remoteMessage.content.length
+      && (remoteMessage.status === "streaming" || remoteMessage.status === "pending" || !remoteMessage.content.trim())
+    ) {
+      return { ...remoteMessage, content: localMessage.content };
+    }
+    return remoteMessage;
+  });
+}
+
 function MessageBubble({
   message,
   streaming = false,
@@ -74,6 +123,10 @@ function MessageBubble({
         </div>
       </div>
     );
+  }
+
+  if (!displayText.trim() && !streaming) {
+    return null;
   }
 
   return (
@@ -118,12 +171,14 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
   const [selectedTool, setSelectedTool] = useState<ChatToolId | null>(null);
   const [sources, setSources] = useState<ConversationSource[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
   const [agentOutputs, setAgentOutputs] = useState<AgentOutput[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeSource, setActiveSource] = useState<{ source: SearchSource; index: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const activeStreamRef = useRef(0);
+  const messagesRef = useRef<PersistedMessage[]>([]);
+  const loadingRef = useRef(false);
 
   const funnyLines = [
     "Let's build something awesome (or just write code we'll rewrite later).",
@@ -136,26 +191,48 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
   const [catchyLine] = useState(() => funnyLines[Math.floor(Math.random() * funnyLines.length)]);
 
   useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
     setConversationId(state.activeConversationId);
   }, [state.activeConversationId]);
 
   useEffect(() => {
-    if (loading) return;
-
     if (!conversationId) {
       setMessages([]);
       setAgentOutputs([]);
       setSources([]);
       return;
     }
+    if (loadingRef.current) {
+      return;
+    }
 
+    let cancelled = false;
     fetchConversationMessages(conversationId)
-      .then((result) => setMessages(result.messages))
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Failed to load messages"));
+      .then((result) => {
+        if (!cancelled) setMessages(result.messages);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "Failed to load messages");
+      });
     fetchConversationSources(conversationId)
-      .then((result) => setSources(result.sources))
-      .catch(() => setSources([]));
-  }, [conversationId, loading]);
+      .then((result) => {
+        if (!cancelled) setSources(result.sources);
+      })
+      .catch(() => {
+        if (!cancelled) setSources([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -171,7 +248,7 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, loading]);
 
   function notifyConversationListChanged() {
     window.dispatchEvent(
@@ -211,16 +288,28 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
     setSelectedTool((current) => (current === toolId ? null : toolId));
   }
 
+  async function refreshMessages(id: string, preserveLocalContent = false) {
+    const result = await fetchConversationMessages(id);
+    if (preserveLocalContent) {
+      setMessages(mergeMessagesPreservingLocalContent(messagesRef.current, result.messages));
+      return mergeMessagesPreservingLocalContent(messagesRef.current, result.messages);
+    }
+    setMessages(result.messages);
+    return result.messages;
+  }
+
   async function runStream(
     content: string,
     options?: { requestedTool?: string; silentUserMessage?: boolean },
   ) {
+    const streamId = ++activeStreamRef.current;
     setLoading(true);
     setError(null);
-    setStreamingText("");
     setAgentOutputs([]);
 
     const clientMessageId = crypto.randomUUID();
+    let streamCompleted = false;
+    let activeConversationId = conversationId;
     if (!options?.silentUserMessage) {
       const optimistic: PersistedMessage = {
         id: clientMessageId,
@@ -236,17 +325,17 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
     }
 
     try {
-      let id = conversationId;
-      if (!id) {
+      if (!activeConversationId) {
         const created = await createConversation(scope, projectId);
-        id = created.id;
-        setConversationId(id);
-        selectConversation(id, scope === "general" ? "general-chat" : "project");
+        activeConversationId = created.id;
+        setConversationId(activeConversationId);
+        selectConversation(activeConversationId, scope === "general" ? "general-chat" : "project");
         notifyConversationListChanged();
       }
 
-      await streamConversationMessage(id, content, clientMessageId, (event) => {
-        console.log("ConversationChatView SSE Event:", event);
+      const { completed } = await streamConversationMessage(activeConversationId, content, clientMessageId, (event) => {
+        if (streamId !== activeStreamRef.current) return;
+
         if (event.event === "message.accepted" && event.data.user_message) {
           if (options?.silentUserMessage) {
             return;
@@ -267,10 +356,18 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
           );
         }
         if (event.event === "delta") {
-          setStreamingText((current) => current + event.data.text);
+          setMessages((current) =>
+            appendAssistantDelta(
+              current,
+              event.data.assistant_message_id,
+              activeConversationId!,
+              event.data.text,
+            ),
+          );
           setAgentOutputs((current) => appendSynthesizerOutput(current, event.data.text));
         }
         if (event.event === "message.completed") {
+          streamCompleted = true;
           setAgentOutputs((current) =>
             completeAgentOutput(current, "synthesis", null, event.data.assistant_message.content),
           );
@@ -278,21 +375,36 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
             ...current.filter((message) => message.id !== event.data.assistant_message.id),
             event.data.assistant_message,
           ]);
-          setStreamingText("");
           notifyConversationListChanged();
         }
-        if (event.event === "error") setError(event.data.message);
+        if (event.event === "error") {
+          setError(event.data.message);
+        }
       }, {
         requestedTool: options?.requestedTool,
         webSearchMode: state.search.webSearchMode,
       });
+      streamCompleted = streamCompleted || completed;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Message failed");
+      if (streamId === activeStreamRef.current) {
+        setError(reason instanceof Error ? reason.message : "Message failed");
+      }
     } finally {
+      if (streamId !== activeStreamRef.current) return;
+
       setLoading(false);
       setAgentOutputs((current) =>
         current.map((entry) => (entry.status === "active" ? { ...entry, status: "complete" } : entry)),
       );
+
+      if (!streamCompleted && activeConversationId) {
+        try {
+          await refreshMessages(activeConversationId, true);
+          notifyConversationListChanged();
+        } catch {
+          // Keep locally streamed assistant content visible.
+        }
+      }
     }
   }
 
@@ -382,25 +494,10 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
             <MessageBubble
               key={message.id}
               message={message}
+              streaming={message.status === "streaming" && loading}
               onSourceClick={(source, index) => setActiveSource({ source, index })}
             />
           ))}
-          {streamingText && (
-            <MessageBubble
-              message={{
-                id: "streaming",
-                conversation_id: conversationId ?? "streaming",
-                role: "assistant",
-                content: streamingText,
-                status: "streaming",
-                citations: [],
-                created_at: new Date().toISOString(),
-                completed_at: null,
-              }}
-              streaming
-              onSourceClick={(source, index) => setActiveSource({ source, index })}
-            />
-          )}
           {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
           <div ref={endRef} />
         </div>

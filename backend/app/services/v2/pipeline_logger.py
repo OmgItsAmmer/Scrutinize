@@ -264,7 +264,7 @@ class PipelineLogger:
             run = self._session.get(PipelineRun, run_id)
             if run:
                 run.end_time = datetime.now(UTC)
-                run.final_route = final_route
+                run.final_route = str(final_route)
                 run.final_answer = final_answer
                 run.final_confidence = final_confidence
                 run.attempts_count = attempts_count
@@ -273,3 +273,4 @@ class PipelineLogger:
                 self._session.commit()
         except Exception:
             logger.exception("Failed to log search pipeline run completion to database.")
+            self._session.rollback()

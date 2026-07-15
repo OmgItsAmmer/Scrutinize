@@ -18,7 +18,7 @@ from app.core.deps import (
     get_v2_llm_client,
     get_web_search_service,
 )
-from app.models.conversation import ChatConversation, ChatMessage, RetrievalPolicy
+from app.models.conversation import ChatConversation, ChatMessage, MessageStatus, RetrievalPolicy
 from app.models.file import FileStatus
 from app.models.processing_job import JobStatus
 from app.models.user import User
@@ -362,6 +362,7 @@ def stream_message(
                     project_ctx = ProjectService(session).resolve_context(project, settings)
                 result: SearchV2Response | None = None
                 web_search_mode = body.web_search_mode
+                retrieval_citations: list[dict] = []
                 for block in orchestrator.search_stream(
                     turn_content,
                     project_ctx=project_ctx,
@@ -377,22 +378,42 @@ def stream_message(
                     event_name = event.get("event")
                     data = event.get("data") or {}
                     if event_name == "status":
+                        if data.get("step") == "retrieval_end":
+                            retrieval_citations = list(data.get("sources") or [])
                         yield _sse("status", data)
                     elif event_name == "chunk":
                         chunk = data.get("text", "")
                         answer += chunk
                         yield _sse("delta", {"assistant_message_id": assistant.id, "text": chunk})
                     elif event_name == "result":
-                        result = SearchV2Response.model_validate(data)
-                        answer = result.answer
-                        citations = [source.model_dump(mode="json") for source in result.sources]
+                        try:
+                            result = SearchV2Response.model_validate(data)
+                            answer = result.answer
+                            citations = [source.model_dump(mode="json") for source in result.sources]
+                        except Exception as exc:
+                            import logging
+                            logging.getLogger(__name__).warning(
+                                "Pipeline result validation failed; falling back to streamed answer: %s",
+                                exc,
+                            )
                     elif event_name == "error":
                         raise RuntimeError(data.get("message", "Project search failed"))
                 if result is None:
-                    raise RuntimeError("Project search ended before a final result was received.")
+                    if not answer.strip():
+                        raise RuntimeError("Project search ended before a final result was received.")
+                    if not citations and retrieval_citations:
+                        citations = retrieval_citations
             service.complete(assistant, answer, citations)
             session.refresh(assistant)
             session.refresh(conversation)
+
+            yield _sse(
+                "message.completed",
+                {
+                    "assistant_message": _message_read(assistant).model_dump(),
+                    "conversation": _conversation_read(conversation).model_dump(),
+                },
+            )
 
             if conversation.project_id:
                 from sqlalchemy import func
@@ -415,16 +436,9 @@ def stream_message(
                 except Exception as exc:
                     import logging
                     logging.getLogger(__name__).error("Failed to update project SVG on 5th message: %s", exc)
-
-            yield _sse(
-                "message.completed",
-                {
-                    "assistant_message": _message_read(assistant).model_dump(),
-                    "conversation": _conversation_read(conversation).model_dump(),
-                },
-            )
         except Exception as exc:
-            service.fail(assistant, "execution_failed")
+            if assistant.status != MessageStatus.COMPLETED:
+                service.fail(assistant, "execution_failed")
             yield _sse(
                 "error",
                 {"code": "execution_failed", "retryable": True, "message": str(exc)},
