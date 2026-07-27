@@ -31,6 +31,10 @@ from app.services.v2.retrieval_precheck import RetrievalPrecheck
 from app.services.v2.rrf_retriever import RrfRetriever
 from app.services.v4.rag_gate import RagGate
 from app.services.web_search import WebSearchService
+from app.services.v4.evidence_assessor import EvidenceAssessor, InsufficientEvidenceError
+from app.services.v4.citation_verifier import CitationVerifier
+from app.services.v4.groundedness_evaluator import GroundednessEvaluator
+from app.services.v4.memory_manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -256,12 +260,14 @@ class RetrieveAction(SingleStepAction):
         web_search: WebSearchService | None,
         settings: Settings,
         mcp_manager: McpClientManager | None,
+        memory_manager: MemoryManager | None = None,
     ):
         super().__init__()
         self.rrf = rrf_retriever
         self.web_search = web_search
         self.settings = settings
         self.mcp_manager = mcp_manager
+        self.memory_manager = memory_manager
 
     @property
     def reads(self) -> list[str]:
@@ -315,6 +321,14 @@ class RetrieveAction(SingleStepAction):
             web_sources = self._retrieve_web(rewritten_text)
             sources = web_sources
             web_searches += 1
+
+        # Run Graphiti retrieval if memory manager is available and route uses documents
+        if self.memory_manager and project_id and route in ("rag", "hybrid"):
+            try:
+                graph_sources = self.memory_manager.query_temporal_graph(project_id, rewritten_text)
+                sources = sources + graph_sources
+            except Exception as e:
+                logger.warning("Failed to query Graphiti temporal graph: %s", e)
 
         # Rerank combined results to put the best on top
         sources.sort(key=lambda s: s.score, reverse=True)
@@ -791,6 +805,100 @@ class GenericAction(SingleStepAction):
         )
 
 
+class AssessEvidenceAction(SingleStepAction):
+    def __init__(self, evidence_assessor: EvidenceAssessor | None):
+        super().__init__()
+        self.assessor = evidence_assessor
+
+    @property
+    def reads(self) -> list[str]:
+        return ["query", "sources", "use_cloud_llm", "project_ctx"]
+
+    @property
+    def writes(self) -> list[str]:
+        return ["evidence_assessment"]
+
+    def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
+        if not self.assessor:
+            from app.schemas.v4.rag import EvidenceAssessmentResult
+            default_assessment = EvidenceAssessmentResult(is_sufficient=True, reasoning="No assessor configured", missing_information=None)
+            return {"evidence_assessment": default_assessment}, state.update(evidence_assessment=default_assessment)
+
+        project_ctx = state["project_ctx"]
+        assessment = self.assessor.evaluate(
+            query=state["query"],
+            sources=state["sources"],
+            use_cloud_llm=state["use_cloud_llm"],
+            model=project_ctx.gate_model if project_ctx else None,
+        )
+
+        if not assessment.is_sufficient:
+            msg = assessment.missing_information or "I could not find sufficient information in the provided sources."
+            raise InsufficientEvidenceError(msg)
+
+        return {"evidence_assessment": assessment}, state.update(evidence_assessment=assessment)
+
+
+class VerifyCitationsAction(SingleStepAction):
+    def __init__(self, citation_verifier: CitationVerifier | None):
+        super().__init__()
+        self.verifier = citation_verifier
+
+    @property
+    def reads(self) -> list[str]:
+        return ["query", "answer", "sources", "use_cloud_llm", "project_ctx"]
+
+    @property
+    def writes(self) -> list[str]:
+        return ["citation_map_result"]
+
+    def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
+        if not self.verifier:
+            from app.schemas.v4.rag import CitationMapResult
+            default_result = CitationMapResult(has_valid_citations=True, mappings=[])
+            return {"citation_map_result": default_result}, state.update(citation_map_result=default_result)
+
+        project_ctx = state["project_ctx"]
+        result = self.verifier.verify(
+            query=state["query"],
+            draft_answer=state["answer"],
+            sources=state["sources"],
+            use_cloud_llm=state["use_cloud_llm"],
+            model=project_ctx.gate_model if project_ctx else None,
+        )
+        return {"citation_map_result": result}, state.update(citation_map_result=result)
+
+
+class EvaluateGroundednessAction(SingleStepAction):
+    def __init__(self, groundedness_evaluator: GroundednessEvaluator | None):
+        super().__init__()
+        self.evaluator = groundedness_evaluator
+
+    @property
+    def reads(self) -> list[str]:
+        return ["query", "answer", "sources", "use_cloud_llm", "project_ctx"]
+
+    @property
+    def writes(self) -> list[str]:
+        return ["groundedness_result"]
+
+    def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
+        if not self.evaluator:
+            from app.schemas.v4.rag import GroundednessResult
+            default_result = GroundednessResult(score=1.0, reasoning="No evaluator configured", is_grounded=True)
+            return {"groundedness_result": default_result}, state.update(groundedness_result=default_result)
+
+        project_ctx = state["project_ctx"]
+        result = self.evaluator.evaluate(
+            query=state["query"],
+            answer=state["answer"],
+            sources=state["sources"],
+            use_cloud_llm=state["use_cloud_llm"],
+            model=project_ctx.gate_model if project_ctx else None,
+        )
+        return {"groundedness_result": result}, state.update(groundedness_result=result)
+
+
 class DecisionAction(SingleStepAction):
     def __init__(self, decision_agent: DecisionAgent):
         super().__init__()
@@ -809,6 +917,8 @@ class DecisionAction(SingleStepAction):
             "project_ctx",
             "llm_calls",
             "input_tokens",
+            "citation_map_result",
+            "groundedness_result",
         ]
 
     @property
@@ -817,6 +927,8 @@ class DecisionAction(SingleStepAction):
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         project_ctx = state["project_ctx"]
+        
+        # Default decision from standard DecisionAgent
         decision = self.decision_agent.evaluate(
             DecisionContext(
                 original_query=state["query"],
@@ -833,21 +945,38 @@ class DecisionAction(SingleStepAction):
             ),
         )
 
+        verdict = decision.verdict
+        confidence = decision.confidence
+        feedback = decision.feedback or "Improve query specificity and keywords."
+
+        # Apply strict verification checks (Phase 2)
+        citation_map = state.get("citation_map_result")
+        groundedness = state.get("groundedness_result")
+
+        if citation_map and not citation_map.has_valid_citations:
+            verdict = "bad"
+            confidence = 0.0
+            feedback = "Fabricated or invalid citations detected. Please regenerate with valid source citations."
+        elif groundedness and not groundedness.is_grounded:
+            verdict = "bad"
+            confidence = groundedness.score
+            feedback = f"Ungrounded claims detected (score {groundedness.score:.2f}). Please regenerate and stick strictly to the sources: {groundedness.reasoning}."
+
         llm_calls = state.get("llm_calls", 0) + 1
         sources_len = sum(len(s.content) for s in state["sources"])
         prompt_len = len(state["query"]) + len(state["rewritten_query"]) + len(state["answer"]) + sources_len
         input_tokens = state.get("input_tokens", 0) + (prompt_len // 4 + 400)
 
         return {
-            "verdict": decision.verdict,
-            "confidence": decision.confidence,
-            "feedback": decision.feedback,
+            "verdict": verdict,
+            "confidence": confidence,
+            "feedback": feedback,
             "correct_route": decision.correct_route,
         }, state.update(
-            verdict=decision.verdict,
-            confidence=decision.confidence,
+            verdict=verdict,
+            confidence=confidence,
             attempt=state["attempt"] + 1,
-            prev_feedback=decision.feedback or "Improve query specificity and keywords.",
+            prev_feedback=feedback,
             # If the decision agent corrects the route, update it
             route=decision.correct_route or state["route"],
             llm_calls=llm_calls,
@@ -872,6 +1001,11 @@ class BurrOrchestrator:
         mcp_manager: McpClientManager | None = None,
         retrieval_precheck: RetrievalPrecheck | None = None,
         session: Any = None,
+        # New Phase 2 services
+        memory_manager: MemoryManager | None = None,
+        evidence_assessor: EvidenceAssessor | None = None,
+        citation_verifier: CitationVerifier | None = None,
+        groundedness_evaluator: GroundednessEvaluator | None = None,
     ) -> None:
         self.rewriter = rewriter
         self.gate = gate
@@ -885,6 +1019,11 @@ class BurrOrchestrator:
         self.mcp_manager = mcp_manager
         self.retrieval_precheck = retrieval_precheck
         self.db_logger = PipelineLogger(session)
+        # New services (Phase 2)
+        self.memory_manager = memory_manager
+        self.evidence_assessor = evidence_assessor
+        self.citation_verifier = citation_verifier
+        self.groundedness_evaluator = groundedness_evaluator
 
     def build_application(self, initial_state: dict):
         builder = ApplicationBuilder()
@@ -892,8 +1031,11 @@ class BurrOrchestrator:
             precheck=PrecheckAction(self.retrieval_precheck, self.settings),
             gate=GateAction(self.gate, self.settings, self.mcp_manager),
             rewrite=RewriteAction(self.rewriter),
-            retrieve=RetrieveAction(self.rrf_retriever, self.web_search, self.settings, self.mcp_manager),
+            retrieve=RetrieveAction(self.rrf_retriever, self.web_search, self.settings, self.mcp_manager, self.memory_manager),
+            assess_evidence=AssessEvidenceAction(self.evidence_assessor),
             synthesize=SynthesizeAction(self.rag_synthesis, self.settings, self.mcp_manager),
+            verify_citations=VerifyCitationsAction(self.citation_verifier),
+            evaluate_groundedness=EvaluateGroundednessAction(self.groundedness_evaluator),
             generic=GenericAction(self.generic_agent),
             decision=DecisionAction(self.decision_agent),
         )
@@ -909,8 +1051,11 @@ class BurrOrchestrator:
             ("gate", "generic", expr("route == 'generic'")),
             ("gate", "rewrite", expr("route in ['rag', 'web', 'hybrid']")),
             ("rewrite", "retrieve", default),
-            ("retrieve", "synthesize", default),
-            ("synthesize", "decision", default),
+            ("retrieve", "assess_evidence", default),
+            ("assess_evidence", "synthesize", default),
+            ("synthesize", "verify_citations", default),
+            ("verify_citations", "evaluate_groundedness", default),
+            ("evaluate_groundedness", "decision", default),
             ("generic", "decision", default),
             # Decision transitions: retry if verdict is not good or confidence is low, and attempts remaining
             (
@@ -952,6 +1097,17 @@ class BurrOrchestrator:
         stripped = query.strip()
         conv_state, conversation_context = self.conversation_memory.prepare(conversation)
 
+        project_id = project_ctx.project_id if project_ctx else UUID(int=0)
+
+        # Injects Letta persistent user memory (Phase 2)
+        if self.memory_manager and project_id:
+            try:
+                letta_context = self.memory_manager.get_user_memory(project_id)
+                if letta_context.strip():
+                    conversation_context = f"{letta_context.strip()}\n\n{conversation_context}"
+            except Exception as e:
+                logger.warning("Failed to retrieve Letta context: %s", e)
+
         run_id = self.db_logger.start_run(
             query=stripped,
             modality_filter=modality_filter,
@@ -963,7 +1119,6 @@ class BurrOrchestrator:
             if project_ctx
             else max(1, self.settings.v2_max_pipeline_attempts)
         )
-        project_id = project_ctx.project_id if project_ctx else UUID(int=0)
 
         initial_state = {
             "query": stripped,
@@ -989,6 +1144,9 @@ class BurrOrchestrator:
             "web_searches": 0,
             "tools": 0,
             "input_tokens": 0,
+            "evidence_assessment": None,
+            "citation_map_result": None,
+            "groundedness_result": None,
         }
 
         app = self.build_application(initial_state)
@@ -1040,6 +1198,11 @@ class BurrOrchestrator:
                     "status",
                     {"step": "retrieve", "message": "Retrieving context from indexed sources..."},
                 )
+            elif action_name == "assess_evidence":
+                yield emit(
+                    "status",
+                    {"step": "assess_evidence", "message": "Evaluating evidence sufficiency..."},
+                )
             elif action_name == "synthesize":
                 synthesis_model = (
                     project_ctx.synthesis_model
@@ -1053,6 +1216,16 @@ class BurrOrchestrator:
                         "model": synthesis_model,
                         "message": "Synthesizing answer...",
                     },
+                )
+            elif action_name == "verify_citations":
+                yield emit(
+                    "status",
+                    {"step": "verify_citations", "message": "Verifying citations in draft answer..."},
+                )
+            elif action_name == "evaluate_groundedness":
+                yield emit(
+                    "status",
+                    {"step": "evaluate_groundedness", "message": "Evaluating answer groundedness score..."},
                 )
             elif action_name == "generic":
                 gate_model = (
@@ -1126,6 +1299,36 @@ class BurrOrchestrator:
                         "message": f"Found {len(sources)} relevant document matches.",
                     },
                 )
+            elif action.name == "assess_evidence":
+                assessment = state.get("evidence_assessment")
+                yield emit(
+                    "status",
+                    {
+                        "step": "assess_evidence_end",
+                        "is_sufficient": assessment.is_sufficient if assessment else True,
+                        "message": "Evidence sufficiency evaluated successfully.",
+                    },
+                )
+            elif action.name == "verify_citations":
+                citations_res = state.get("citation_map_result")
+                yield emit(
+                    "status",
+                    {
+                        "step": "verify_citations_end",
+                        "has_valid_citations": citations_res.has_valid_citations if citations_res else True,
+                        "message": f"Citations verified: {'VALID' if (citations_res and citations_res.has_valid_citations) else 'INVALID'}",
+                    },
+                )
+            elif action.name == "evaluate_groundedness":
+                ground_res = state.get("groundedness_result")
+                yield emit(
+                    "status",
+                    {
+                        "step": "evaluate_groundedness_end",
+                        "score": ground_res.score if ground_res else 1.0,
+                        "message": f"Groundedness score: {ground_res.score if ground_res else 1.0:.2f}",
+                    },
+                )
             elif action.name == "synthesize":
                 self.db_logger.log_synthesis(
                     run_id=run_id,
@@ -1164,6 +1367,14 @@ class BurrOrchestrator:
                 if confidence >= threshold and verdict == "good":
                     # Good answer, we exit
                     final_answer = state.get("answer")
+                    
+                    # Update Letta persistent memory (Phase 2)
+                    if self.memory_manager and project_id:
+                        try:
+                            self.memory_manager.update_user_memory(project_id, query=stripped, answer=final_answer)
+                        except Exception as e:
+                            logger.warning("Failed to update Letta memory: %s", e)
+
                     updated_conversation = self.conversation_memory.record_exchange(
                         conv_state, stripped, final_answer
                     )

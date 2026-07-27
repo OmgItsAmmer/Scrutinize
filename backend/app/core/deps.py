@@ -29,6 +29,10 @@ from app.services.vector_store import VectorStore
 from app.services.web_search import WebSearchService
 from app.services.v4.rag_gate import RagGate as RagGateV4
 from app.services.v4.burr_orchestrator import BurrOrchestrator
+from app.services.v4.evidence_assessor import EvidenceAssessor
+from app.services.v4.citation_verifier import CitationVerifier
+from app.services.v4.groundedness_evaluator import GroundednessEvaluator
+from app.services.v4.memory_manager import MemoryManager
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -133,6 +137,22 @@ def get_v4_rag_gate(
     return RagGateV4(settings)
 
 
+def get_memory_manager(settings: Settings = Depends(get_app_settings)) -> MemoryManager:
+    return MemoryManager(settings)
+
+
+def get_evidence_assessor(settings: Settings = Depends(get_app_settings)) -> EvidenceAssessor:
+    return EvidenceAssessor(settings)
+
+
+def get_citation_verifier(settings: Settings = Depends(get_app_settings)) -> CitationVerifier:
+    return CitationVerifier(settings)
+
+
+def get_groundedness_evaluator(settings: Settings = Depends(get_app_settings)) -> GroundednessEvaluator:
+    return GroundednessEvaluator(settings)
+
+
 def get_v4_burr_orchestrator(
     rewriter: QueryRewriter = Depends(get_query_rewriter),
     gate: RagGateV4 = Depends(get_v4_rag_gate),
@@ -146,6 +166,11 @@ def get_v4_burr_orchestrator(
     retrieval_precheck: RetrievalPrecheck = Depends(get_retrieval_precheck),
     settings: Settings = Depends(get_app_settings),
     session: Session = Depends(get_db_session),
+    # Phase 2 dependencies
+    memory_manager: MemoryManager = Depends(get_memory_manager),
+    evidence_assessor: EvidenceAssessor = Depends(get_evidence_assessor),
+    citation_verifier: CitationVerifier = Depends(get_citation_verifier),
+    groundedness_evaluator: GroundednessEvaluator = Depends(get_groundedness_evaluator),
 ) -> BurrOrchestrator:
     return BurrOrchestrator(
         rewriter=rewriter,
@@ -160,6 +185,11 @@ def get_v4_burr_orchestrator(
         mcp_manager=mcp_manager,
         retrieval_precheck=retrieval_precheck,
         session=session,
+        # Phase 2 services
+        memory_manager=memory_manager,
+        evidence_assessor=evidence_assessor,
+        citation_verifier=citation_verifier,
+        groundedness_evaluator=groundedness_evaluator,
     )
 
 

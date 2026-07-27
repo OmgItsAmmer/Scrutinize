@@ -122,3 +122,121 @@ def test_run_budget_controller_validation():
         RunBudget(input_tokens=25000).check()
     assert "Input tokens count" in str(exc_info.value)
 
+
+def test_evidence_assessor(monkeypatch):
+    from app.services.v4.evidence_assessor import EvidenceAssessor
+    from app.schemas.v4.rag import EvidenceAssessmentResult
+    from app.schemas.search import SearchSource
+    from app.models.file import FileModality
+    from uuid import uuid4
+
+    mock_run_result = MagicMock()
+    mock_run_result.data = EvidenceAssessmentResult(
+        is_sufficient=True,
+        reasoning="All clear",
+        missing_information=None,
+    )
+    monkeypatch.setattr(pydantic_ai.Agent, "run_sync", lambda self, prompt: mock_run_result)
+
+    settings = Settings()
+    assessor = EvidenceAssessor(settings)
+    res = assessor.evaluate("test query", [SearchSource(
+        segment_id=uuid4(),
+        file_id=uuid4(),
+        modality=FileModality.TEXT,
+        title="test",
+        content="source content",
+        score=0.9,
+        source_path="test_path",
+    )])
+    assert res.is_sufficient is True
+
+
+def test_citation_verifier(monkeypatch):
+    from app.services.v4.citation_verifier import CitationVerifier
+    from app.schemas.v4.rag import CitationMapResult, CitationMapping
+    from app.schemas.search import SearchSource
+    from app.models.file import FileModality
+    from uuid import uuid4
+
+    mock_run_result = MagicMock()
+    mock_run_result.data = CitationMapResult(
+        has_valid_citations=True,
+        mappings=[
+            CitationMapping(
+                citation_id="1",
+                supports_claim=True,
+                snippet_evidence="matching snippet",
+            )
+        ],
+    )
+    monkeypatch.setattr(pydantic_ai.Agent, "run_sync", lambda self, prompt: mock_run_result)
+
+    settings = Settings()
+    verifier = CitationVerifier(settings)
+    res = verifier.verify("test query", "draft [1]", [SearchSource(
+        segment_id=uuid4(),
+        file_id=uuid4(),
+        modality=FileModality.TEXT,
+        title="test",
+        content="matching snippet",
+        score=0.9,
+        source_path="test_path",
+    )])
+    assert res.has_valid_citations is True
+
+
+def test_groundedness_evaluator(monkeypatch):
+    from app.services.v4.groundedness_evaluator import GroundednessEvaluator
+    from app.schemas.v4.rag import GroundednessResult
+    from app.schemas.search import SearchSource
+    from app.models.file import FileModality
+    from uuid import uuid4
+
+    mock_run_result = MagicMock()
+    mock_run_result.data = GroundednessResult(
+        score=0.95,
+        reasoning="Good groundedness",
+        is_grounded=True,
+    )
+    monkeypatch.setattr(pydantic_ai.Agent, "run_sync", lambda self, prompt: mock_run_result)
+
+    settings = Settings()
+    evaluator = GroundednessEvaluator(settings)
+    res = evaluator.evaluate("test query", "grounded answer", [SearchSource(
+        segment_id=uuid4(),
+        file_id=uuid4(),
+        modality=FileModality.TEXT,
+        title="test",
+        content="grounded answer source",
+        score=0.9,
+        source_path="test_path",
+    )])
+    assert res.score == 0.95
+    assert res.is_grounded is True
+
+
+def test_memory_manager_fallbacks(tmp_path):
+    from app.services.v4.memory_manager import MemoryManager
+    from uuid import uuid4
+
+    settings = Settings()
+    mgr = MemoryManager(settings)
+    
+    # Override paths to temporary path to avoid writing to app directory
+    mgr.letta_fallback_path = str(tmp_path / "letta_fallback.json")
+    mgr.graphiti_fallback_path = str(tmp_path / "graphiti_fallback.json")
+
+    pid = uuid4()
+    # Test Letta fallback
+    assert mgr.get_user_memory(pid) == ""
+    mgr.update_user_memory(pid, "We use Neon Postgres database.", "Acknowledged database choice.")
+    assert "Neon Postgres" in mgr.get_user_memory(pid)
+
+    # Test Graphiti fallback
+    mgr.index_file(pid, "doc.txt", "We migrated to AWS RDS in June.")
+    sources = mgr.query_temporal_graph(pid, "AWS RDS")
+    assert len(sources) > 0
+    assert "AWS RDS" in sources[0].content
+
+

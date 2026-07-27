@@ -63,5 +63,23 @@ def index_segments(
         )
 
     vector_store.upsert_segments(vector_segments)
+
+    # Index in Graphiti temporal graph (Phase 2)
+    try:
+        from app.core.config import get_settings
+        from app.services.v4.memory_manager import MemoryManager
+        settings = get_settings()
+        memory_mgr = MemoryManager(settings)
+        full_content = "\n".join(segment.content for segment in segments)
+        if full_content.strip() and file_record.project_id:
+            memory_mgr.index_file(
+                project_id=file_record.project_id,
+                filename=file_record.filename,
+                content=full_content,
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Graphiti indexing failed during ingestion: %s", e)
+
     return len(vector_segments)
 

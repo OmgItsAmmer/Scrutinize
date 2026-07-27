@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     web_search_engine: str = "brave"  # "brave" or "tavily"
     jina_reader_token: str = ""
 
+    # Letta & Graphiti Memory Configurations
+    letta_api_url: str = "http://localhost:8283"
+    letta_api_key: str = ""
+    graphiti_neo4j_uri: str = "bolt://localhost:7687"
+    graphiti_neo4j_user: str = "neo4j"
+    graphiti_neo4j_password: str = ""
+
     # LangSmith tracing config
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""

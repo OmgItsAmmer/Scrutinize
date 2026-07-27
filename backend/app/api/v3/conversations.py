@@ -54,6 +54,7 @@ from app.services.v2.llm_clients import BaseLlmClient
 from app.services.v2.pipeline_orchestrator import PipelineOrchestrator
 from app.services.v4.burr_orchestrator import BurrOrchestrator
 from app.services.v4.run_budget import BudgetExceededError
+from app.services.v4.evidence_assessor import InsufficientEvidenceError
 from app.services.web_search import WebSearchService
 from app.workers.tasks import process_audio, process_text, process_video
 
@@ -449,6 +450,14 @@ def stream_message(
                 except Exception as exc:
                     import logging
                     logging.getLogger(__name__).error("Failed to update project SVG on 5th message: %s", exc)
+        except InsufficientEvidenceError as exc:
+            abstention_message = str(exc) or "I could not find sufficient information in the provided sources."
+            if assistant.status != MessageStatus.COMPLETED:
+                service.complete(assistant, abstention_message, [])
+            yield _sse(
+                "error",
+                {"code": "StopReason.insufficient_evidence", "retryable": False, "message": abstention_message},
+            )
         except BudgetExceededError as exc:
             if assistant.status != MessageStatus.COMPLETED:
                 service.fail(assistant, "budget_exceeded")
