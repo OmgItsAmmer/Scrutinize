@@ -8,6 +8,9 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ffmpeg && rm -rf /var/lib/apt/lists/*
 
+# Prioritize IPv4 over IPv6 in DNS resolution to avoid connection failures
+RUN echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf
+
 COPY pyproject.toml README.md ./
 COPY app ./app
 

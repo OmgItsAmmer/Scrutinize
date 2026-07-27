@@ -412,6 +412,7 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
       }, {
         requestedTool: options?.requestedTool,
         webSearchMode: state.search.webSearchMode,
+        useCloudLlm: state.search.model === "gpt-4o-mini",
       });
       streamCompleted = streamCompleted || completed;
     } catch (reason) {

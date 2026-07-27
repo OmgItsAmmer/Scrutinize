@@ -44,6 +44,7 @@ type SearchState = {
   activeQuery: string | null;
   modalityFilter: ModalityFilter;
   webSearchMode: "auto" | "always" | "never";
+  model: string;
   loading: boolean;
   error: string | null;
   result: SearchV2Response | null;
@@ -125,6 +126,7 @@ type Action =
   | { type: "CLEAR_PROJECT" }
   | { type: "PROJECT_SETTINGS_UPDATED"; settings: Record<string, any>; apiKey?: string; clientKey?: string }
   | { type: "OPEN_PDF_DRAWER"; url: string; title: string; filename: string }
+  | { type: "SET_MODEL"; model: string }
   | { type: "CLOSE_PDF_DRAWER" };
 
 const initialState: AppState = {
@@ -145,6 +147,7 @@ const initialState: AppState = {
     activeQuery: null,
     modalityFilter: "all",
     webSearchMode: "auto",
+    model: "gpt-4o-mini",
     loading: false,
     error: null,
     result: null,
@@ -276,6 +279,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, search: { ...state.search, modalityFilter: action.filter } };
     case "SET_WEB_SEARCH_MODE":
       return { ...state, search: { ...state.search, webSearchMode: action.mode } };
+    case "SET_MODEL":
+      return { ...state, search: { ...state.search, model: action.model } };
     case "SEARCH_START":
       return {
         ...state,
@@ -478,6 +483,7 @@ type AppContextValue = {
   setSearchQuery: (query: string) => void;
   setModalityFilter: (filter: ModalityFilter) => void;
   setWebSearchMode: (mode: "auto" | "always" | "never") => void;
+  setModel: (model: string) => void;
   runSearch: () => Promise<void>;
   clearSearch: () => void;
   uploadFiles: (files: FileList | File[]) => Promise<void>;
@@ -826,6 +832,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSearchQuery: (query) => dispatch({ type: "SET_SEARCH_QUERY", query }),
       setModalityFilter: (filter) => dispatch({ type: "SET_MODALITY_FILTER", filter }),
       setWebSearchMode: (mode) => dispatch({ type: "SET_WEB_SEARCH_MODE", mode }),
+      setModel: (model) => dispatch({ type: "SET_MODEL", model }),
       runSearch,
       clearSearch: () => dispatch({ type: "CLEAR_SEARCH" }),
       uploadFiles: uploadFilesHandler,

@@ -42,6 +42,15 @@ async def lifespan(_: FastAPI):
     ):
         raise RuntimeError("JWT_SECRET_KEY must be configured in production")
     try:
+        from phoenix.otel import register
+        from openinference.instrumentation.openai import OpenAIInstrumentor
+        register(project_name="scrutinize")
+        OpenAIInstrumentor().instrument()
+        logger.info("Phoenix OpenTelemetry tracing initialized successfully")
+    except Exception as e:
+        logger.warning("Failed to initialize Phoenix OpenTelemetry tracing: %s", e)
+
+    try:
         init_db()
     except Exception:
         logger.exception("Database init failed — check DATABASE_URL and Neon connectivity")

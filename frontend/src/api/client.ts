@@ -407,7 +407,7 @@ export async function streamConversationMessage(
   content: string,
   clientMessageId: string,
   onEvent: (event: ConversationStreamEvent) => void,
-  options?: { requestedTool?: string; webSearchMode?: "auto" | "always" | "never" },
+  options?: { requestedTool?: string; webSearchMode?: "auto" | "always" | "never"; useCloudLlm?: boolean },
 ): Promise<{ completed: boolean }> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = localStorage.getItem("scrutinize_access_token");
@@ -418,6 +418,9 @@ export async function streamConversationMessage(
   }
   if (options?.webSearchMode) {
     body.web_search_mode = options.webSearchMode;
+  }
+  if (options?.useCloudLlm !== undefined) {
+    body.use_cloud_llm = options.useCloudLlm;
   }
   const response = await fetch(`${API_URL}/v3/conversations/${conversationId}/messages/stream`, {
     method: "POST",

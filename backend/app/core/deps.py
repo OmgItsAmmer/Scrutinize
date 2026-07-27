@@ -27,6 +27,8 @@ from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 from app.services.v2.rrf_retriever import RrfRetriever
 from app.services.vector_store import VectorStore
 from app.services.web_search import WebSearchService
+from app.services.v4.rag_gate import RagGate as RagGateV4
+from app.services.v4.burr_orchestrator import BurrOrchestrator
 
 
 def get_db_session() -> Generator[Session, None, None]:
@@ -123,6 +125,42 @@ def get_retrieval_precheck(
     settings: Settings = Depends(get_app_settings),
 ) -> RetrievalPrecheck:
     return RetrievalPrecheck(retriever, settings)
+
+
+def get_v4_rag_gate(
+    settings: Settings = Depends(get_app_settings),
+) -> RagGateV4:
+    return RagGateV4(settings)
+
+
+def get_v4_burr_orchestrator(
+    rewriter: QueryRewriter = Depends(get_query_rewriter),
+    gate: RagGateV4 = Depends(get_v4_rag_gate),
+    generic_agent: GenericAgent = Depends(get_generic_agent),
+    rrf_retriever: RrfRetriever = Depends(get_rrf_retriever),
+    rag_synthesis: RagSynthesisAgent = Depends(get_rag_synthesis_agent),
+    decision_agent: DecisionAgent = Depends(get_decision_agent),
+    conversation_memory: ConversationMemory = Depends(get_conversation_memory),
+    web_search_service: WebSearchService = Depends(get_web_search_service),
+    mcp_manager: McpClientManager = Depends(get_mcp_manager),
+    retrieval_precheck: RetrievalPrecheck = Depends(get_retrieval_precheck),
+    settings: Settings = Depends(get_app_settings),
+    session: Session = Depends(get_db_session),
+) -> BurrOrchestrator:
+    return BurrOrchestrator(
+        rewriter=rewriter,
+        gate=gate,
+        generic_agent=generic_agent,
+        rrf_retriever=rrf_retriever,
+        rag_synthesis=rag_synthesis,
+        decision_agent=decision_agent,
+        conversation_memory=conversation_memory,
+        web_search=web_search_service,
+        settings=settings,
+        mcp_manager=mcp_manager,
+        retrieval_precheck=retrieval_precheck,
+        session=session,
+    )
 
 
 def get_pipeline_orchestrator(

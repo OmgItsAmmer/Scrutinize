@@ -17,6 +17,7 @@ from app.core.deps import (
     get_pipeline_orchestrator,
     get_v2_llm_client,
     get_web_search_service,
+    get_v4_burr_orchestrator,
 )
 from app.models.conversation import ChatConversation, ChatMessage, MessageStatus, RetrievalPolicy
 from app.models.file import FileStatus
@@ -51,6 +52,8 @@ from app.services.upload_utils import (
 )
 from app.services.v2.llm_clients import BaseLlmClient
 from app.services.v2.pipeline_orchestrator import PipelineOrchestrator
+from app.services.v4.burr_orchestrator import BurrOrchestrator
+from app.services.v4.run_budget import BudgetExceededError
 from app.services.web_search import WebSearchService
 from app.workers.tasks import process_audio, process_text, process_video
 
@@ -274,6 +277,7 @@ def stream_message(
     llm: BaseLlmClient = Depends(get_v2_llm_client),
     web: WebSearchService = Depends(get_web_search_service),
     orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator),
+    burr_orchestrator: BurrOrchestrator = Depends(get_v4_burr_orchestrator),
 ) -> StreamingResponse:
     service = ConversationService(session)
     turn_content, requested_tool, title_hint = _resolve_turn(body)
@@ -371,7 +375,7 @@ def stream_message(
                 result: SearchV2Response | None = None
                 web_search_mode = body.web_search_mode
                 retrieval_citations: list[dict] = []
-                for block in orchestrator.search_stream(
+                for block in burr_orchestrator.search_stream(
                     turn_content,
                     project_ctx=project_ctx,
                     conversation=ConversationState(messages=history),
@@ -379,6 +383,7 @@ def stream_message(
                     client_requested_tool=requested_tool,
                     conversation_id=conversation.id,
                     has_corpus=has_corpus,
+                    use_cloud_llm=body.use_cloud_llm or False,
                 ):
                     event = _parse_v2_sse(block)
                     if not event:
@@ -444,6 +449,13 @@ def stream_message(
                 except Exception as exc:
                     import logging
                     logging.getLogger(__name__).error("Failed to update project SVG on 5th message: %s", exc)
+        except BudgetExceededError as exc:
+            if assistant.status != MessageStatus.COMPLETED:
+                service.fail(assistant, "budget_exceeded")
+            yield _sse(
+                "error",
+                {"code": "StopReason.budget_exceeded", "retryable": False, "message": str(exc)},
+            )
         except Exception as exc:
             if assistant.status != MessageStatus.COMPLETED:
                 service.fail(assistant, "execution_failed")

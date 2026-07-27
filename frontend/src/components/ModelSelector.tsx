@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { IconChevronDown, IconOpenAI } from "./icons";
+import { useApp } from "../context/AppContext";
 
 export type ModelOption = {
   id: string;
@@ -8,8 +9,8 @@ export type ModelOption = {
 };
 
 const MODELS: ModelOption[] = [
-  { id: "gpt-4o-mini", label: "GPT-4o-mini", provider: "" },
- 
+  { id: "gpt-4o-mini", label: "GPT-4o-mini", provider: "Cloud" },
+  { id: "local-llm", label: "Local LLM", provider: "Local" },
 ];
 
 type ModelSelectorProps = {
@@ -17,7 +18,8 @@ type ModelSelectorProps = {
 };
 
 export function ModelSelector({ disabled }: ModelSelectorProps) {
-  const [selectedId, setSelectedId] = useState(MODELS[0].id);
+  const { state: { search }, setModel } = useApp();
+  const selectedId = search.model;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -47,9 +49,9 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
         aria-expanded={open}
       >
         <IconOpenAI className="h-3.5 w-3.5 shrink-0 text-zinc-800" />
-        <span className="text-zinc-800">{selected.provider}</span>
+        <span className="text-zinc-800">{selected.provider}: </span>
         <span className="hidden sm:inline">{selected.label}</span>
-        <span className="sm:hidden">Mini</span>
+        <span className="sm:hidden">{selected.label.replace("GPT-", "").replace(" LLM", "")}</span>
         <IconChevronDown className="h-3 w-3 opacity-60" />
       </button>
 
@@ -63,7 +65,7 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedId(model.id);
+                  setModel(model.id);
                   setOpen(false);
                 }}
                 className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-[var(--chatly-dropdown-hover)] ${
@@ -85,3 +87,4 @@ export function ModelSelector({ disabled }: ModelSelectorProps) {
     </div>
   );
 }
+
