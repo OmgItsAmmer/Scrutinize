@@ -85,7 +85,7 @@ export function ChatInput({
       )}
 
       <div
-        className="relative w-full rounded-2xl border border-black/80 bg-transparent transition-all duration-300 focus-within:border-black focus-within:bg-white/25 focus-within:backdrop-blur-2xl hover:shadow-md hover:-translate-y-0.5"
+        className="relative w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] backdrop-blur-xl transition-all duration-300 shadow-[0_0_20px_rgba(0,0,0,0.06),_0_0_40px_rgba(0,0,0,0.03)] hover:shadow-[0_0_25px_rgba(0,0,0,0.12),_0_0_50px_rgba(0,0,0,0.06)] hover:-translate-y-1 focus-within:bg-[var(--app-bg-elevated)] focus-within:shadow-[0_0_35px_rgba(0,0,0,0.18),_0_0_70px_rgba(0,0,0,0.09)] focus-within:-translate-y-1"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 sm:px-4 sm:py-3.5">
           <div className="relative min-h-[44px] min-w-0 w-full">

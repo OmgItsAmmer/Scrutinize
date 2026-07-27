@@ -48,8 +48,7 @@ function ConfirmDialog({
 
   const confirmLabel = request.confirmLabel ?? (request.tone === "danger" ? "Delete" : "Confirm");
   const cancelLabel = request.cancelLabel ?? "Cancel";
-  const confirmButtonClass =
-    request.tone === "danger" ? "app-btn app-btn-danger" : "app-btn app-btn-primary";
+  const confirmButtonClass = "app-btn bg-black text-white hover:bg-zinc-800 transition-colors";
 
   return (
     <div
@@ -58,7 +57,7 @@ function ConfirmDialog({
       role="presentation"
     >
       <div
-        className="confirm-dialog glass-panel"
+        className="confirm-dialog bg-white border border-zinc-200 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         role="alertdialog"
         aria-modal="true"
@@ -82,7 +81,7 @@ function ConfirmDialog({
           {request.description}
         </p>
         <div className="confirm-dialog__actions">
-          <button type="button" className="app-btn app-btn-secondary" onClick={() => onClose(false)}>
+          <button type="button" className="app-btn border border-black text-black bg-white hover:bg-zinc-50 transition-colors" onClick={() => onClose(false)}>
             {cancelLabel}
           </button>
           <button type="button" className={confirmButtonClass} onClick={() => onClose(true)}>

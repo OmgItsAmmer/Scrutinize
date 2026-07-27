@@ -72,12 +72,16 @@ def _build_system_instruction(name: str, description: str) -> str:
         "representing the project visually based on the project name and description.\n"
         "SVG Design Guidelines:\n"
         "- Must use viewBox='0 0 200 150' to fit the card header aspect ratio.\n"
-        "- Do NOT draw simple shapes or plain text. Create a professional, modern vector illustration or abstract logo.\n"
-        "- Use rich, vibrant gradients (define <linearGradient> or <radialGradient> in a <defs> block) instead of flat, solid colors.\n"
-        "- Use deep background colors (e.g., dark blues, deep purples, slate graces) with bright, glowing accent colors (cyan, magenta, gold, emerald) to create high contrast.\n"
-        "- Use organic curves and paths (<path d='...' />) to draw custom shapes rather than basic rectangles and circles.\n"
-        "- Use visual metaphors: a glowing rocket/constellation for space, a steaming dish/pan/flame for cooking, a stylized outline face or silhouette for personality sketches, gear/connection nodes for AI, etc.\n"
-        "- Implement layering, opacity, and subtle drop shadows (using <filter> with <feDropShadow>) to add depth and dimension.\n"
+        "- First of all, read the project name and description.\n"
+        "- If it is an object, company, or anything, find the main color of that thing. For example, NVIDIA's main color is green, so the background of the SVG must be green or have green as the primary background/color theme.\n"
+        "- If the mentioned project name and description is about a company or a person, find their famous identity (such as their logo, face shape, or most connected community logo) and visualize it in the center or main path of the SVG.\n"
+        "- If anything extra about that main topic is mentioned in the project, try to visualize it in the SVG as side elements/details surrounding the main logo or identity.\n"
+        "- Do NOT draw simple shapes, plain text, or basic clip art. Create a highly creative, sophisticated, and modern digital vector artwork.\n"
+        "- Use rich, vibrant gradient maps (define multi-stop <linearGradient> or <radialGradient> with high-end color transitions in a <defs> block) instead of flat, solid colors.\n"
+        "- Use organic curves, flowing wave paths, and complex bezier shapes (<path d='...' />) to draw custom artwork rather than basic rectangles and circles.\n"
+        "- Incorporate glowing aura and dimension effects. Define `<filter id='glow'>` in the defs containing `<feGaussianBlur>` and `<feMerge>` elements to make parts of the vector glow.\n"
+        "- Use layered translucent glassmorphic plates (shapes with `fill-opacity='0.15'` up to `0.45` and subtle borders) overlapping each other to create stunning depth.\n"
+        "- Forbid low-effort designs, centered single shapes, emojis, or flat cartoons. The SVG must look like a premium digital asset created by a professional designer.\n"
         "- Do not wrap the SVG string in markdown code block ticks inside the JSON value."
     )
 
@@ -90,28 +94,17 @@ def generate_project_prompts(
     """
     Generates customized system prompts for the five agent types:
     gate, rewriter, generic, synthesis, decision.
-    Tries the local LLM 'qwen3.5:2b' first, falling back to cloud OpenAI 'gpt-4o-mini'.
+    Tries cloud OpenAI 'gpt-4o' first for high-quality creative SVGs and prompts,
+    falling back to the local LLM if cloud fails.
     """
     system_instruction = _build_system_instruction(name, description)
-    user_prompt = "Generate the JSON object containing the five system prompts and the visual SVG."
-
-    if settings.local_llm_base_url:
-        try:
-            logger.info("Attempting to generate project prompts using local LLM 'qwen3.5:2b'...")
-            local_client = LocalLlmClient(settings)
-            response = local_client.generate(
-                model="qwen3.5:2b",
-                system=system_instruction,
-                user=user_prompt,
-                json_mode=True,
-            )
-            data = parse_json_object(response.content)
-            if all(k in data for k in _REQUIRED_KEYS):
-                logger.info("Successfully generated project prompts using local LLM.")
-                return {key: str(data[key]) for key in _REQUIRED_KEYS}
-            logger.warning("Local LLM returned incomplete JSON keys: %s. Falling back...", data.keys())
-        except Exception as exc:
-            logger.warning("Failed to generate prompts using local LLM: %s. Falling back to cloud LLM...", exc)
+    user_prompt = (
+        f"Generate the JSON object containing the five system prompts and the visual SVG.\n\n"
+        f"CRITICAL: For the 'visual_svg' key, you must design custom artwork that directly represents "
+        f"the project '{name}' and its description: '{description}'. "
+        f"Analyze the name and description, identify the core theme/domain, and construct a beautiful, "
+        f"thematic vector illustration representing that specific domain. Do not make it generic."
+    )
 
     try:
         logger.info("Attempting to generate project prompts using cloud LLM 'gpt-4o'...")
@@ -128,8 +121,27 @@ def generate_project_prompts(
             return {key: str(data[key]) for key in _REQUIRED_KEYS}
         raise ValueError(f"Cloud LLM returned incomplete JSON keys: {data.keys()}")
     except Exception as exc:
-        logger.error("Failed to generate prompts using cloud LLM fallback: %s", exc)
-        raise RuntimeError(f"Could not generate project prompts from LLMs: {exc}") from exc
+        logger.warning("Failed to generate prompts using cloud LLM: %s. Trying local LLM fallback...", exc)
+
+    if settings.local_llm_base_url:
+        try:
+            logger.info("Attempting to generate project prompts using local LLM fallback 'qwen3.5:2b'...")
+            local_client = LocalLlmClient(settings)
+            response = local_client.generate(
+                model="qwen3.5:2b",
+                system=system_instruction,
+                user=user_prompt,
+                json_mode=True,
+            )
+            data = parse_json_object(response.content)
+            if all(k in data for k in _REQUIRED_KEYS):
+                logger.info("Successfully generated project prompts using local LLM fallback.")
+                return {key: str(data[key]) for key in _REQUIRED_KEYS}
+            logger.warning("Local LLM fallback returned incomplete JSON keys: %s", data.keys())
+        except Exception as local_exc:
+            logger.error("Failed to generate prompts using local LLM fallback: %s", local_exc)
+
+    raise RuntimeError("Could not generate project prompts from any configured LLM.")
 
 
 def recreate_project_svg(
@@ -139,7 +151,7 @@ def recreate_project_svg(
     llm: BaseLlmClient,
 ) -> None:
     """
-    Fetches context (recent messages) in this project and triggers LLM to
+    Fetches context (recent messages) in this project and triggers Cloud LLM to
     regenerate a new visual SVG representation, saving it to project settings.
     """
     from app.models.project import Project
@@ -179,20 +191,24 @@ def recreate_project_svg(
         "SVG Requirements:\n"
         "- Must be valid, raw, modern, beautiful, and clean SVG code.\n"
         "- Must use viewBox='0 0 200 150' to fit the card header aspect ratio.\n"
-        "- Do NOT draw simple shapes or plain text. Create a professional, modern vector illustration or abstract logo.\n"
-        "- Use rich, vibrant gradients (define <linearGradient> or <radialGradient> in a <defs> block) instead of flat, solid colors.\n"
-        "- Use deep background colors (e.g., dark blues, deep purples, slate graces) with bright, glowing accent colors (cyan, magenta, gold, emerald) to create high contrast.\n"
-        "- Use organic curves and paths (<path d='...' />) to draw custom shapes rather than basic rectangles and circles.\n"
-        "- Use visual metaphors: a glowing rocket/constellation for space, a steaming dish/pan/flame for cooking, a stylized outline face or silhouette for personality sketches, gear/connection nodes for AI, etc.\n"
-        "- Implement layering, opacity, and subtle drop shadows (using <filter> with <feDropShadow>) to add depth and dimension.\n"
+        "- First of all, read the project name and description.\n"
+        "- If it is an object, company, or anything, find the main color of that thing. For example, NVIDIA's main color is green, so the background of the SVG must be green or have green as the primary background/color theme.\n"
+        "- If the mentioned project name and description is about a company or a person, find their famous identity (such as their logo, face shape, or most connected community logo) and visualize it in the center or main path of the SVG.\n"
+        "- If anything extra about that main topic is mentioned in the project, try to visualize it in the SVG as side elements/details surrounding the main logo or identity.\n"
+        "- Do NOT draw simple shapes, plain text, or basic clip art. Create a highly creative, sophisticated, and modern digital vector artwork.\n"
+        "- Use rich, vibrant gradient maps (define multi-stop <linearGradient> or <radialGradient> with high-end color transitions in a <defs> block) instead of flat, solid colors.\n"
+        "- Use organic curves, flowing wave paths, and complex bezier shapes (<path d='...' />) to draw custom artwork rather than basic rectangles and circles.\n"
+        "- Incorporate glowing aura and dimension effects. Define `<filter id='glow'>` in the defs containing `<feGaussianBlur>` and `<feMerge>` elements to make parts of the vector glow.\n"
+        "- Use layered translucent glassmorphic plates (shapes with `fill-opacity='0.15'` up to `0.45` and subtle borders) overlapping each other to create stunning depth.\n"
+        "- Forbid low-effort designs, centered single shapes, emojis, or flat cartoons. The SVG must look like a premium digital asset created by a professional designer.\n"
         "- Do not include markdown code block formatting (such as ```xml or ```svg).\n"
         "- Output ONLY the raw SVG code. No explanations, no JSON, no prefix, no suffix."
     )
 
     try:
-        logger.info("Attempting to regenerate visual SVG using LLM...")
-        # Fallback default model for prompt generation is gpt-4o
-        response = llm.generate(
+        logger.info("Attempting to regenerate visual SVG using Cloud LLM gpt-4o...")
+        cloud_client = CloudLlmClient(settings)
+        response = cloud_client.generate(
             model="gpt-4o",
             system=system_instruction,
             user="Generate the new updated visual SVG representation.",
@@ -204,8 +220,21 @@ def recreate_project_svg(
             cleaned_lines = [l for l in lines if not l.strip().startswith("```")]
             svg_code = "\n".join(cleaned_lines).strip()
     except Exception as exc:
-        logger.error("Failed to regenerate SVG: %s", exc)
-        return
+        logger.error("Failed to regenerate SVG using Cloud LLM: %s. Falling back to provided llm...", exc)
+        try:
+            response = llm.generate(
+                model="gpt-4o",
+                system=system_instruction,
+                user="Generate the new updated visual SVG representation.",
+            )
+            svg_code = response.content.strip()
+            if "```" in svg_code:
+                lines = svg_code.splitlines()
+                cleaned_lines = [l for l in lines if not l.strip().startswith("```")]
+                svg_code = "\n".join(cleaned_lines).strip()
+        except Exception as fallback_exc:
+            logger.error("Fallback LLM also failed to regenerate SVG: %s", fallback_exc)
+            return
 
     if svg_code.startswith("<svg") and "</svg>" in svg_code:
         project_settings = dict(project.settings)

@@ -9,11 +9,22 @@ Multi-modal AI ingestion, retrieval, and agentic search system with hybrid RAG +
 **Scrutinize** is a unified ingestion and retrieval platform that lets users upload **text, audio, and video**, then ask natural-language questions answered by either local document retrieval, live web search, or a combination of both. The system is split into four primary layers:
 
 1. **Client** — React chat-style UI (conversation, upload, library) with persistent project workspaces.
-2. **API Layer** — FastAPI, the single entry point for the frontend. Hosts three API generations (`/v1–v3`) plus dedicated auth endpoints.
+2. **API Layer** — FastAPI, the single entry point for the frontend. Hosts **unversioned legacy routes** (`/health`, `/upload`, `/library`), **v2** project/search/auth APIs, and **v3** persistent conversations.
 3. **Processing Layer** — Async Celery workers that process raw files (extract transcriptions/captions) and generate embeddings.
 4. **Data Layer** — **Qdrant** for vector similarity search, **Neon Postgres** for relational data and pipeline observability, and **Cloudinary** for raw binary file storage.
 
-A local/cloud **Agentic Pipeline (V2)** orchestrates all query-time logic: query routing, retrieval precheck, hybrid retrieval, web search via MCP tools, synthesis, and quality evaluation. A **V3 Conversation API** sits on top, adding persistent per-user chat history, project-scoped workspaces, and streaming responses.
+A local/cloud **Agentic Pipeline (V2)** orchestrates all query-time logic: query routing, retrieval precheck, hybrid retrieval, web search via MCP tools, synthesis, and quality evaluation. A **V3 Conversation API** sits on top as the primary user-facing chat path, adding persistent per-user chat history, project-scoped workspaces, conversation-attached sources, and typed SSE streaming — while still executing the v2 pipeline engine for project chats.
+
+### Repo layout
+
+| Path | Role |
+|---|---|
+| `backend/app/` | FastAPI app, models, services, workers |
+| `backend/migrations/` | Sequential SQL migrations (001–014) |
+| `frontend/src/` | React 19 + Vite SPA |
+| `deploy/fly/` | Fly.io configs (api, worker, redis, qdrant) |
+| `tests/` | pytest unit / integration / system / security |
+| `docs/architecture/` | This document + `architecture_v3.md` (original v3 plan, now largely implemented) |
 
 ---
 
@@ -28,9 +39,10 @@ flowchart TD
     end
 
     subgraph API["API Layer (FastAPI)"]
-        V3["POST /v3/conversations/{id}/messages\nstreaming SSE via search_stream()"]
-        V2["POST /v2/search\nnon-streaming, legacy"]
-        AUTH["POST /v2/auth/*\nJWT + OTP + Google OAuth"]
+        V3["POST /v3/conversations/{id}/messages/stream\nSSE: delta + message.completed"]
+        V2["POST /v2/search[/stream]\nnon-streaming + legacy SSE envelope"]
+        LEG["/health /upload /library\nunversioned legacy"]
+        AUTH["POST /v2/auth/google\nJWT (password auth disabled)"]
     end
 
     subgraph Orchestrator["PipelineOrchestrator"]
@@ -47,7 +59,7 @@ flowchart TD
     end
 
     subgraph MCP["MCP Tool Layer (McpClientManager)"]
-        UNIFIED["unified_server.py (FastMCP stdio)\ngenerate_pdf | web_search"]
+        UNIFIED["unified_server.py (FastMCP stdio)\ngenerate_pdf | generate_flowchart | web_search"]
         WSSVC["WebSearchService\nBrave / Tavily + Jina Reader scraper"]
         PDFSVC["PDF Generator\nReportLab"]
     end
@@ -117,7 +129,7 @@ The user can override routing from the frontend `ChatInput` using a three-state 
 | `always` | RAG → hybrid; generic → web; other routes unchanged |
 | `never` | web/hybrid → rag; other routes unchanged |
 
-This `web_search_mode` field travels from `ChatInput` → `MessageCreate` schema → `/v3/conversations/{id}/messages` → `PipelineOrchestrator.search_stream()`.
+This `web_search_mode` field travels from `ChatInput` → `AppContext` → `MessageCreate` schema → `POST /v3/conversations/{id}/messages/stream` → `PipelineOrchestrator.search_stream()`.
 
 ### 3.4 Route Execution
 
@@ -156,10 +168,12 @@ This `web_search_mode` field travels from `ChatInput` → `MessageCreate` schema
 | `llm_clients/base.py` | `BaseLlmClient` abstract class and `LlmResponse` type | — |
 | `llm_clients/local.py` | OpenAI-compatible HTTP client for local Ollama via ngrok | Ollama |
 | `llm_clients/cloud.py` | OpenAI Chat Completions client | OpenAI |
-| `auth_service.py` | Email/password signup + OTP verification + Google OAuth login | Resend email |
-| `conversation_service.py` | CRUD for `ChatConversation` and `ChatMessage`; scoped to `general` (web-only) vs. `project` (RAG + web) | Neon Postgres |
-| `project_service.py` | Project creation, admin/client keys, per-project model overrides | Neon Postgres |
+| `auth_service.py` | Google OAuth login (`login_or_create_google_user`); password signup/OTP routes disabled | Google OAuth |
+| `conversation_service.py` | CRUD for `ChatConversation` and `ChatMessage`; turn lifecycle (`begin_turn`, `complete`, `fail`); scoped to `general` vs `project` | Neon Postgres |
+| `project_service.py` | Project creation, admin/client keys, per-project settings resolution (`settings` JSON) | Neon Postgres |
+| `prompt_generator.py` | Auto-generates per-project system prompt overrides and SVG icons on project creation | Gate Model |
 | `job_orchestrator.py` | Enqueues Celery ingestion tasks (text/audio/video), polls job status | Redis + Celery |
+| `fly_scaler.py` | Wakes stopped Fly worker machines on upload via Fly Machines API | Fly.io API |
 
 ---
 
@@ -173,19 +187,21 @@ PipelineOrchestrator
     ├── McpClientManager.list_tools()   →  JSON-RPC: tools/list
     │       ↕ stdio
     │   unified_server.py (FastMCP)
-    │       ├── generate_pdf(title, content) → ReportLab → .pdf file path
-    │       └── web_search(query, limit)     → WebSearchService → JSON results
+    │       ├── generate_pdf(title, content)       → ReportLab → .pdf file path
+    │       ├── generate_flowchart(title, content) → LLM Mermaid diagram
+    │       └── web_search(query, limit)           → WebSearchService → JSON results
     │
     └── McpClientManager.call_tool(name, args)  →  JSON-RPC: tools/call
 ```
 
-**Fallback chain:** If the `mcp` Python package is unavailable, `McpClientManager` falls back to calling `generate_pdf` and `web_search` directly as local Python functions.
+**Fallback chain:** If the `mcp` Python package is unavailable, `McpClientManager` falls back to calling `generate_pdf`, `generate_flowchart`, and `web_search` directly as local Python functions.
 
 ### Available MCP Tools
 
 | Tool | Trigger | Output |
 |---|---|---|
-| `generate_pdf` | Gate sets `requested_tool = "generate_pdf"` | Absolute path to a compiled PDF file |
+| `generate_pdf` | Client sets `requested_tool = "generate_pdf"` on v3 message | Absolute path to a compiled PDF file |
+| `generate_flowchart` | Client sets `requested_tool = "generate_flowchart"` on v3 message | Mermaid flowchart wrapped in a fenced code block |
 | `web_search` | Route is `web` or `hybrid` | JSON list of `{title, url, snippet, content}` dicts |
 
 Web search results are converted to `SearchSource` objects (same schema as RAG results) and merged with any RAG sources. The combined list is **reranked by `score`** descending before synthesis, ensuring the most relevant sources appear first regardless of origin.
@@ -196,36 +212,88 @@ Web search results are converted to `SearchSource` objects (same schema as RAG r
 
 ### 6.1 Authentication
 
-JWT-based auth (`/v2/auth/`). Signup requires email OTP verification via **Resend**. Google OAuth provides passwordless login. All protected endpoints require `Authorization: Bearer <token>`.
+**User auth (JWT):** Google OAuth is the active login path (`POST /v2/auth/google`). The backend verifies the Google ID token, creates or loads the user, and returns a custom HS256 JWT. Password signup, OTP verification, and email/password login routes exist but return **400 — disabled**.
+
+All v3 conversation endpoints require `Authorization: Bearer <token>`. The user must be `is_verified` (Google users are auto-verified on first login).
+
+**Project keys (embeddable API clients):**
+
+| Key | Prefix | Used for |
+|---|---|---|
+| Admin key | `scrutinize_sk_` | File upload, library delete, project admin |
+| Client key | `scrutinize_pk_` | v2 search (`POST /v2/search`) |
+
+When both a JWT and `X-Project-Id` header are present, membership is checked instead of raw key lookup.
 
 ### 6.2 Persistent Conversations (V3)
 
-`/v3/conversations` adds persistent chat backed by **two new tables**:
+`/v3/conversations` adds persistent chat backed by **two tables** (migration 012) plus conversation-scoped file sources (migration 013):
 
 | Model | Table | Key fields |
 |---|---|---|
 | `ChatConversation` | `chat_conversations` | `id`, `owner_user_id`, `project_id`, `scope` (general/project), `retrieval_policy` (web_only/project_rag), `title` |
-| `ChatMessage` | `chat_messages` | `id`, `conversation_id`, `role`, `content`, `status`, `citations` (JSON), `pipeline_run_id` |
+| `ChatMessage` | `chat_messages` | `id`, `conversation_id`, `role`, `content`, `status`, `citations` (JSON), `client_message_id`, `pipeline_run_id` |
 
 **Scopes:**
-- `general` — No project, `retrieval_policy = web_only`. These conversations always use web search; project RAG paths are excluded.
+- `general` — No project, `retrieval_policy = web_only`. When no indexed corpus exists, bypasses the full orchestrator and uses direct web search + gate-model streaming.
 - `project` — Linked to a project, `retrieval_policy = project_rag`. Runs the full pipeline (precheck + gate + RAG + web).
+
+**Conversation-scoped sources (migration 013):** Files uploaded via `POST /v3/conversations/{id}/sources` are tagged with `conversation_id` on both `files` and `segments`, enabling per-chat retrieval in addition to project-wide RRF search.
 
 ### 6.3 Streaming (SSE)
 
-`POST /v3/conversations/{id}/messages` returns a **Server-Sent Events** stream. The pipeline emits typed status events as it works:
+`POST /v3/conversations/{id}/messages/stream` returns a **Server-Sent Events** stream with typed event names:
 
 | Event | When emitted |
 |---|---|
+| `message.accepted` | User message persisted; includes canonical `user_message` |
 | `status { step: "precheck" }` | Before retrieval precheck |
-| `status { step: "gate", model, route }` | After gate classification |
-| `status { step: "rewrite" }` | Before query rewriting |
-| `status { step: "retrieval" }` | Before Qdrant search |
-| `status { step: "web_search" }` | Before MCP web_search call |
-| `status { step: "synthesis", model }` | Before synthesis |
-| `status { step: "evaluation" }` | Before decision agent |
-| `chunk { text }` | Streaming answer tokens |
-| `done { ... }` | Final answer with sources and citations |
+| `status { step: "gate" \| "gate_end", route }` | Gate classification |
+| `status { step: "rewrite" \| "rewrite_end" }` | Query rewriting |
+| `status { step: "retrieval" \| "retrieval_end" }` | Qdrant hybrid search |
+| `status { step: "synthesis" }` | Before answer generation |
+| `status { step: "decision" \| "evaluation_end" }` | Decision agent evaluation |
+| `status { step: "web_search" \| "web_search_end" }` | Direct web search path (general chat) |
+| `delta { assistant_message_id, text }` | Streaming answer tokens |
+| `message.completed` | Final `assistant_message` + `conversation` metadata (with citations) |
+| `error { code, message, retryable }` | Pipeline or persistence failure |
+
+**v2 legacy SSE** (`POST /v2/search/stream`) uses a single-channel JSON envelope instead:
+```
+data: {"event": "status"|"chunk"|"result"|"error", "data": {...}}
+```
+
+The frontend primary chat UI (`ConversationChatView`) consumes v3 typed SSE. The legacy `SearchView` component (v2 envelope) is **not mounted** in the current app shell.
+
+### 6.4 Frontend Architecture
+
+Navigation uses an **`AppView` reducer** in `AppContext` (no React Router):
+
+| View | Component | Scope |
+|---|---|---|
+| `general-chat` | `ConversationChatView scope="general"` | Web-only general chat |
+| `project` | `ProjectWorkspace` → tabs: Chats / Sources / Library / Settings | Project workspace |
+| `account-settings` | `AccountSettingsView` | User account |
+
+**Primary chat flow:**
+1. `ChatInput` collects message + `web_search_mode` (auto/always/never) + optional tool (`generate_pdf`, `generate_flowchart`)
+2. `ConversationChatView.runStream()` calls `streamConversationMessage()` → v3 SSE
+3. Deltas update the in-flight assistant message directly in the `messages` array (by `assistant_message_id`)
+4. `message.completed` replaces the streaming message with the persisted row (including citations)
+5. `ThinkingPanel` renders pipeline step progress from `agentOutputs` (via `pipelineAgents.ts`)
+
+### 6.5 v2 vs v3 — What Changed
+
+| Aspect | v2 (legacy) | v3 (current primary) |
+|---|---|---|
+| Chat state | Client sends full `conversation` snapshot each request | Server-persisted `chat_messages` |
+| Primary endpoint | `POST /v2/search[/stream]` | `POST /v3/conversations/{id}/messages/stream` |
+| Auth | Project client key | JWT (`get_current_user`) |
+| SSE format | JSON envelope (`chunk`, `result`) | Typed events (`delta`, `message.completed`) |
+| File attachment | Project-level (`/v2/projects/files`) | Per-conversation (`/v3/conversations/{id}/sources`) |
+| Citations | Returned in search response only | Stored in `chat_messages.citations` JSONB |
+| Frontend UI | `SearchView` (orphaned, not in `App.tsx`) | `ConversationChatView` + `ProjectWorkspace` |
+| Pipeline engine | `PipelineOrchestrator` | Same orchestrator, wrapped by v3 stream handler |
 
 ---
 
@@ -265,7 +333,7 @@ flowchart TD
 
 Embeddings (dense) and ingestion media APIs (Whisper, GPT-4o-mini vision) always use **OpenAI** regardless of `USE_CLOUD_LLM`.
 
-Per-project model overrides are stored in `projects.model_overrides` (JSON) and applied by the orchestrator for gate, rewriter, and decision models.
+Per-project model overrides and system prompt customizations are stored in `projects.settings` (JSON) — keys include `gate_model`, `rewriter_model`, `synthesis_model`, `decision_model`, and `system_prompt_overrides`. Applied by `ProjectService.resolve_context()` before each pipeline run.
 
 ---
 
@@ -351,7 +419,7 @@ sequenceDiagram
     API->>D: evaluate(draft_answer, sources)
     D-->>API: verdict, confidence
 
-    API-->>U: SSE stream (status events + chunks + done)
+    API-->>U: SSE stream (status + delta + message.completed)
 ```
 
 ---
@@ -492,9 +560,20 @@ create table segments (
   created_at timestamptz not null default now()
 );
 
--- Pipeline observability
-create table pipeline_runs (id uuid primary key, ...);
-create table pipeline_steps (run_id uuid references pipeline_runs(id), ...);
+-- Pipeline observability (migration 009 schema; route constraint expanded in 014)
+create table pipeline_runs (
+  id uuid primary key,
+  original_query text not null,
+  final_route text check (final_route is null or final_route in ('generic','rag','web','hybrid')),
+  ...
+);
+create table pipeline_steps (
+  run_id uuid references pipeline_runs(id),
+  step_type text,          -- gate | rewrite | retrieval | synthesis | evaluation
+  structured_output jsonb,
+  retrieved_sources jsonb,
+  ...
+);
 
 create index on segments (file_id);
 create index on processing_jobs (file_id, status);
@@ -542,26 +621,46 @@ create index on chat_messages (conversation_id, created_at);
 
 ## 13. API Surface
 
+### Unversioned (legacy)
+
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `POST` | `/v2/auth/signup` | — | Register new user (sends OTP) |
-| `POST` | `/v2/auth/verify` | — | Verify OTP, activate account |
-| `POST` | `/v2/auth/login` | — | Email/password login → JWT |
+| `GET` | `/health` | — | Full dependency check (DB, Redis, Qdrant) |
+| `GET` | `/health/wake` | — | Lightweight Fly wake probe (no Redis/Qdrant) |
+| `GET` | `/status/{job_id}` | — | Celery ingestion job status |
+| `POST` | `/upload` | Optional `X-Project-Key` | Legacy file upload |
+| `GET` | `/library` | `X-Project-Key` | List indexed project files |
+| `GET` | `/library/{file_id}/content` | `X-Project-Key` | Stream/download file content |
+| `DELETE` | `/library/{file_id}` | `X-Project-Key` | Delete indexed file |
+
+### `/v2`
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
 | `POST` | `/v2/auth/google` | — | Google OAuth login → JWT |
+| `GET` | `/v2/auth/me` | JWT | Current user profile |
+| `POST` | `/v2/auth/signup` | — | **Disabled** (400) |
+| `POST` | `/v2/auth/login` | — | **Disabled** (400) |
 | `GET` | `/v2/llm-health` | — | Probe gate LLM reachability |
-| `POST` | `/v2/search` | Optional `X-Project-Key` | Non-streaming agentic search |
-| `GET`/`POST` | `/v2/projects/…` | Admin key | Project management & model config |
+| `POST` | `/v2/search` | Client key or JWT+`X-Project-Id` | Non-streaming agentic search |
+| `POST` | `/v2/search/stream` | Client key or JWT+`X-Project-Id` | Legacy SSE search stream |
+| `GET`/`POST` | `/v2/projects/…` | Admin/client key or JWT | Project management |
 | `POST` | `/v2/projects/files` | Admin key | Upload + enqueue ingestion |
 | `POST` | `/v2/pdf/generate` | Optional key | Directly compile Markdown to PDF via MCP |
 | `GET` | `/v2/pdf/download/{filename}` | — | Download compiled PDF |
-| `POST` | `/v3/conversations` | JWT required | Create a new conversation (general or project) |
-| `GET` | `/v3/conversations` | JWT required | List conversations for authenticated user |
-| `GET` | `/v3/conversations/{id}` | JWT required | Get conversation details |
-| `PATCH` | `/v3/conversations/{id}` | JWT required | Rename or archive a conversation |
-| `GET` | `/v3/conversations/{id}/messages` | JWT required | List messages in a conversation |
-| `POST` | `/v3/conversations/{id}/messages` | JWT required | Send message → SSE streaming response |
-| `GET` | `/v3/conversations/{id}/sources` | JWT required | List indexed files available for this conversation |
-| `POST` | `/v3/conversations/{id}/files` | JWT required | Upload a file directly into a conversation's project |
+| `GET` | `/v2/pdf/preview/{filename}` | — | Inline PDF preview |
+
+### `/v3` (primary chat API)
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/v3/conversations` | JWT | Create conversation (general or project scope) |
+| `GET` | `/v3/conversations` | JWT | List conversations (`scope`, `project_id` filters) |
+| `GET/PATCH/DELETE` | `/v3/conversations/{id}` | JWT | Get, rename/archive, soft-delete |
+| `GET` | `/v3/conversations/{id}/messages` | JWT | List messages |
+| `POST` | `/v3/conversations/{id}/messages/stream` | JWT | Send message → **SSE streaming turn** |
+| `GET` | `/v3/conversations/{id}/sources` | JWT | List conversation-attached files |
+| `POST` | `/v3/conversations/{id}/sources` | JWT | Upload file scoped to conversation |
 
 ---
 
@@ -587,14 +686,15 @@ create index on chat_messages (conversation_id, created_at);
 | `mcp_pdf_server_enabled` | `true` | Enables the FastMCP tool subprocess |
 | `jwt_secret_key` | _(must set)_ | JWT signing secret |
 | `jwt_expiry_minutes` | `1440` | Token TTL (24 hours) |
-| `otp_expiry_minutes` | `15` | Email verification OTP TTL |
+| `celery_task_always_eager` | dev: `true` | Run Celery tasks inline (no worker needed for search-only dev) |
+| `worker_idle_timeout_seconds` | dev: `0` (disabled) | Auto-shutdown idle Fly worker machines |
 
 ---
 
 ## 15. Non-Functional Considerations
 
-- **Security**: JWT tokens are server-signed. API keys stay server-side. File size validation enforced at API layer. OTP verification required for new accounts.
-- **Streaming resilience**: SSE emits typed events so the frontend can track partial state even if a specific step fails. The `MessageStatus` enum (`pending → streaming → completed/failed`) is written to Postgres for recovery on reconnect.
+- **Security**: JWT tokens are server-signed (custom HS256). Google OAuth is the active user auth path; password/OTP signup is disabled. Project API keys (`scrutinize_sk_` / `scrutinize_pk_`) enable embeddable API access. File size validation enforced at the API layer.
+- **Streaming resilience**: v3 SSE emits typed events (`delta`, `message.completed`) so the frontend can finalize messages even when intermediate steps fail. `MessageStatus` (`pending → streaming → completed/failed`) is persisted in Postgres. The chat UI updates the in-flight assistant message in-place during streaming and only clears the cursor when `loading` ends or `message.completed` arrives.
 - **Cost Control**: Cache embeddings by content hash. Retrieval precheck short-circuits the gate LLM for clear-cut queries, saving LLM tokens on every request with unambiguous corpus matches or empty corpora.
 - **Observability**: `PipelineLogger` writes each gate, rewrite, retrieval, synthesis, and evaluation step to Neon Postgres with structured JSON payloads, enabling root-cause analysis of routing decisions and synthesis quality.
 
@@ -606,7 +706,9 @@ create index on chat_messages (conversation_id, created_at);
 |---|---|---|---|
 | **Unit** | `tests/unit/` | Pure logic — chunking, LLM client parsing, memory formatting, keyword normalization, MCP manager fallback | `unit-tests` |
 | **Integration** | `tests/integration/` | Real database, Redis, and Qdrant connections. Mocked LLMs for billing/network limits. | `integration-tests` |
-| **System** | `tests/system/` | End-to-end: upload → Celery worker → Qdrant index → V2 search query | `system-tests` |
+| **System** | `tests/system/` | End-to-end: upload → Celery worker → Qdrant index → search query | `system-tests` |
+
+v3 API coverage: `tests/unit/test_v3_conversations_api.py` (conversation CRUD, delete, cascade).
 
 ---
 
@@ -647,6 +749,30 @@ volumes:
 ```
 
 ### Fly.io (production)
-- Backend and Celery worker both deploy to **Fly.io**.
-- `fly_scaler.py` triggers worker machine wakeup via the Fly Machines API on incoming upload jobs, and idles the worker after a configurable timeout period to minimize compute costs.
-- Neon Postgres, Qdrant Cloud, Redis, and Cloudinary are all external managed services.
+
+Configs live under `deploy/fly/` (`api/`, `worker/`, `redis/`, `qdrant/`).
+
+- **API** (`scrutinize-api`): scale-to-zero; `/health/wake` avoids cold-start dependency checks
+- **Worker** (`scrutinize-worker`): Celery; self-idles after configurable timeout; woken by `fly_scaler.py` on upload
+- **Redis** and **Qdrant**: separate Fly apps (manual deploy)
+- **CI** (`.github/workflows/deploy-fly.yml`): deploys API only; worker/redis deployed manually
+- **External services**: Neon Postgres (`DATABASE_URL`), Qdrant Cloud, Cloudinary
+- Production defaults: `USE_CLOUD_LLM=true`, models `gpt-4o-mini`
+
+---
+
+## 18. Database Migrations
+
+Applied via `make db-migrate` → `backend/scripts/apply_migrations.py` (tracks `migration_history` table).
+
+| Migration | Summary |
+|---|---|
+| 001–002 | Core `files`, `processing_jobs`, `segments`; FK cascades |
+| 003–005 | Pipeline logging (`pipeline_runs`, `pipeline_steps`); JSONB simplification |
+| 006 | Multi-tenant `projects`, `project_id` on files/segments |
+| 007–008 | Project passwords, prompt overrides in `settings` |
+| 009 | Logging v2 schema (JSONB `structured_output`, `retrieved_sources`) |
+| 010–011 | `users`, `project_members`; Google auth (nullable `password_hash`) |
+| **012** | **v3 conversations** — `chat_conversations`, `chat_messages` |
+| **013** | **Conversation-scoped sources** — `conversation_id` on `files`/`segments` |
+| **014** | **`pipeline_runs.final_route` CHECK** — adds `web`, `hybrid` (required for Web Search → Always) |
