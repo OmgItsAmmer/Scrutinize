@@ -35,6 +35,12 @@ from app.services.v4.evidence_assessor import EvidenceAssessor, InsufficientEvid
 from app.services.v4.citation_verifier import CitationVerifier
 from app.services.v4.groundedness_evaluator import GroundednessEvaluator
 from app.services.v4.memory_manager import MemoryManager
+from sqlmodel import select
+from app.models.tool_approval import ToolApproval
+from app.tools.policy import PermissionChecker
+from app.tools.execution_sandbox import execute_python_in_sandbox
+from app.models.conversation import ChatConversation
+from app.models.user import ProjectMember
 
 logger = logging.getLogger(__name__)
 
@@ -431,11 +437,13 @@ class SynthesizeAction(SingleStepAction):
         rag_synthesis: RagSynthesisAgent,
         settings: Settings,
         mcp_manager: McpClientManager | None,
+        session: Any = None,
     ):
         super().__init__()
         self.rag_synthesis = rag_synthesis
         self.settings = settings
         self.mcp_manager = mcp_manager
+        self.session = session
 
     @property
     def reads(self) -> list[str]:
@@ -449,6 +457,8 @@ class SynthesizeAction(SingleStepAction):
             "llm_calls",
             "input_tokens",
             "tools",
+            "conversation_id",
+            "project_id",
         ]
 
     @property
@@ -540,7 +550,80 @@ class SynthesizeAction(SingleStepAction):
 
             if llm_call and llm_call.tool_calls:
                 for tool_call in llm_call.tool_calls:
-                    if tool_call.name == "generate_pdf":
+                    tool_name = tool_call.name
+                    tool_args = tool_call.arguments
+
+                    # Resolve user role for permission check
+                    user_role = "member"
+                    conversation_id = state.get("conversation_id")
+                    project_id = state.get("project_id")
+
+                    if self.session and conversation_id:
+                        conv = self.session.get(ChatConversation, conversation_id)
+                        if conv:
+                            if not project_id or str(project_id) == "00000000-0000-0000-0000-000000000000":
+                                user_role = "owner"
+                            else:
+                                user_id = conv.owner_user_id
+                                member = self.session.exec(
+                                    select(ProjectMember).where(
+                                        ProjectMember.user_id == user_id,
+                                        ProjectMember.project_id == project_id
+                                    )
+                                ).first()
+                                if member:
+                                    user_role = member.role
+
+                    # Check permission
+                    if not PermissionChecker.check_permission(tool_name, user_role):
+                        answer = f"Permission Denied: User role '{user_role}' is not authorized to execute tool '{tool_name}'."
+                        break
+
+                    # Check if human approval is required
+                    if PermissionChecker.requires_approval(tool_name):
+                        # Create a pending approval record
+                        approval = ToolApproval(
+                            conversation_id=conversation_id,
+                            tool_name=tool_name,
+                            arguments=tool_args,
+                            status="waiting"
+                        )
+                        self.session.add(approval)
+                        self.session.commit()
+                        self.session.refresh(approval)
+
+                        # Emit approval.required event
+                        on_emit = inputs.get("on_emit")
+                        if on_emit:
+                            on_emit(
+                                "approval.required",
+                                {
+                                    "approval_id": str(approval.id),
+                                    "tool_name": tool_name,
+                                    "arguments": tool_args,
+                                }
+                            )
+
+                        # Block/Sleep-loop and refresh DB
+                        import time
+                        status = "waiting"
+                        while status == "waiting":
+                            time.sleep(1.0)
+                            self.session.commit()
+                            approval_db = self.session.exec(
+                                select(ToolApproval).where(ToolApproval.id == approval.id)
+                            ).first()
+                            if approval_db:
+                                status = approval_db.status
+                                approval = approval_db
+                            else:
+                                status = "rejected"
+
+                        if status == "rejected":
+                            answer = f"Execution rejected by user for tool '{tool_name}'."
+                            break
+
+                    if tool_name == "generate_pdf":
                         try:
                             filepath = self.mcp_manager.call_tool(
                                 tool_call.name, tool_call.arguments
@@ -555,7 +638,7 @@ class SynthesizeAction(SingleStepAction):
                         except Exception as e:
                             answer = f"Failed to generate PDF: {e}"
                         break
-                    elif tool_call.name == "generate_flowchart":
+                    elif tool_name == "generate_flowchart":
                         try:
                             mermaid_block = self.mcp_manager.call_tool(
                                 tool_call.name, tool_call.arguments
@@ -565,6 +648,28 @@ class SynthesizeAction(SingleStepAction):
                             tools_count += 1
                         except Exception as e:
                             answer = f"Failed to generate flowchart: {e}"
+                        break
+                    elif tool_name == "execute_python":
+                        try:
+                            sandbox_output = self.mcp_manager.call_tool(
+                                tool_name, tool_call.arguments
+                            )
+                            answer = f"{synthesis_result.answer.strip()}\n\nSandbox execution output:\n```\n{sandbox_output}\n```"
+                            tool_result = sandbox_output
+                            tools_count += 1
+                        except Exception as e:
+                            answer = f"Sandbox execution failed: {e}"
+                        break
+                    elif tool_name == "web_search":
+                        try:
+                            results = self.mcp_manager.call_tool(
+                                tool_name, tool_call.arguments
+                            )
+                            answer = f"{synthesis_result.answer.strip()}\n\nSearch Results:\n{results}"
+                            tool_result = results
+                            tools_count += 1
+                        except Exception as e:
+                            answer = f"Web search tool failed: {e}"
                         break
 
             if pdf_requested and tool_result is None:
@@ -1018,6 +1123,7 @@ class BurrOrchestrator:
         self.web_search = web_search
         self.mcp_manager = mcp_manager
         self.retrieval_precheck = retrieval_precheck
+        self.session = session
         self.db_logger = PipelineLogger(session)
         # New services (Phase 2)
         self.memory_manager = memory_manager
@@ -1033,7 +1139,7 @@ class BurrOrchestrator:
             rewrite=RewriteAction(self.rewriter),
             retrieve=RetrieveAction(self.rrf_retriever, self.web_search, self.settings, self.mcp_manager, self.memory_manager),
             assess_evidence=AssessEvidenceAction(self.evidence_assessor),
-            synthesize=SynthesizeAction(self.rag_synthesis, self.settings, self.mcp_manager),
+            synthesize=SynthesizeAction(self.rag_synthesis, self.settings, self.mcp_manager, self.session),
             verify_citations=VerifyCitationsAction(self.citation_verifier),
             evaluate_groundedness=EvaluateGroundednessAction(self.groundedness_evaluator),
             generic=GenericAction(self.generic_agent),
@@ -1258,9 +1364,22 @@ class BurrOrchestrator:
                 chunks_yielded.append(chunk)
 
             chunks_yielded = []
+            custom_events_yielded = []
+
+            def emit_callback(event: str, data: dict):
+                custom_events_yielded.append((event, data))
+
             action, result, state = app.step(
-                inputs={"web_search_mode": web_search_mode, "on_chunk": chunk_callback}
+                inputs={
+                    "web_search_mode": web_search_mode,
+                    "on_chunk": chunk_callback,
+                    "on_emit": emit_callback,
+                }
             )
+
+            # Yield custom events collected during step execution
+            for event, data in custom_events_yielded:
+                yield emit(event, data)
 
             # Yield chunks collected during LLM step
             for chunk in chunks_yielded:

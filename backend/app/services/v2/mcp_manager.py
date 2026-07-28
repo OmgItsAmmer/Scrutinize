@@ -47,7 +47,7 @@ WEB_SEARCH_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string"},
+                 "query": {"type": "string"},
                 "limit": {"type": "integer", "default": 3},
             },
             "required": ["query"],
@@ -55,7 +55,25 @@ WEB_SEARCH_SCHEMA = {
     },
 }
 
-FALLBACK_SCHEMAS = [PDF_TOOL_SCHEMA, FLOWCHART_TOOL_SCHEMA, WEB_SEARCH_SCHEMA]
+EXECUTE_PYTHON_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "execute_python",
+        "description": "Execute python code in a secure sandboxed environment. Use this for complex math, data processing, or algorithmic tasks.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "The complete Python code block to execute in the sandbox."
+                }
+            },
+            "required": ["code"],
+        },
+    },
+}
+
+FALLBACK_SCHEMAS = [PDF_TOOL_SCHEMA, FLOWCHART_TOOL_SCHEMA, WEB_SEARCH_SCHEMA, EXECUTE_PYTHON_SCHEMA]
 
 
 class McpClientManager:
@@ -89,6 +107,11 @@ class McpClientManager:
                 query=str(arguments.get("query") or ""),
                 limit=int(arguments.get("limit") or 3)
             ))
+        elif tool_name == "execute_python":
+            from app.tools.execution_sandbox import execute_python_in_sandbox
+            return execute_python_in_sandbox(
+                code=str(arguments.get("code") or "")
+            )
         else:
             raise RuntimeError(f"Unknown local MCP fallback tool: {tool_name}")
 

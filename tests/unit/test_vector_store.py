@@ -60,7 +60,7 @@ def test_delete_by_file_id_uses_filter_selector():
 
     store.delete_by_file_id(file_id)
 
-    assert store._client.create_payload_index.call_count == 3  # file_id, modality, project_id
+    assert store._client.create_payload_index.call_count == 4  # file_id, modality, project_id, conversation_id
     store._client.delete.assert_called_once()
     _, kwargs = store._client.delete.call_args
     assert kwargs["collection_name"] == "segments-test"

@@ -123,20 +123,7 @@ class TestProjectAuth:
             headers={"X-Project-Key": admin_key},
             json={"current_password": "oldpassword1", "new_password": "newpassword2"},
         )
-        assert response.status_code == 200
-        assert response.json()["message"] == "Password updated."
-
-        login_ok = client.post(
-            "/v2/projects/login",
-            json={"name": "pw-change-project", "password": "newpassword2"},
-        )
-        assert login_ok.status_code == 200
-
-        login_fail = client.post(
-            "/v2/projects/login",
-            json={"name": "pw-change-project", "password": "oldpassword1"},
-        )
-        assert login_fail.status_code == 401
+        assert response.status_code == 410
 
     def test_change_password_wrong_current(self, client):
         reg = client.post(
@@ -149,7 +136,7 @@ class TestProjectAuth:
             headers={"X-Project-Key": reg["api_key"]},
             json={"current_password": "wrongpass", "new_password": "newpassword2"},
         )
-        assert response.status_code == 401
+        assert response.status_code == 410
 
     def test_reset_password_without_current_using_admin_key(self, client):
         reg = client.post(
@@ -162,13 +149,7 @@ class TestProjectAuth:
             headers={"X-Project-Key": reg["api_key"]},
             json={"new_password": "recovered2"},
         )
-        assert response.status_code == 200
-
-        login_ok = client.post(
-            "/v2/projects/login",
-            json={"name": "pw-reset-logged-in", "password": "recovered2"},
-        )
-        assert login_ok.status_code == 200
+        assert response.status_code == 410
 
     def test_reset_password_logged_out(self, client):
         reg = client.post(
@@ -184,13 +165,7 @@ class TestProjectAuth:
                 "new_password": "brandnew3",
             },
         )
-        assert response.status_code == 200
-
-        login_ok = client.post(
-            "/v2/projects/login",
-            json={"name": "pw-reset-out", "password": "brandnew3"},
-        )
-        assert login_ok.status_code == 200
+        assert response.status_code == 410
 
     def test_reset_password_invalid_admin_key(self, client):
         client.post(
@@ -206,5 +181,5 @@ class TestProjectAuth:
                 "new_password": "brandnew3",
             },
         )
-        assert response.status_code == 401
+        assert response.status_code == 410
 

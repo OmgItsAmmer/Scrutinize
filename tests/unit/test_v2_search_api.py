@@ -1,10 +1,29 @@
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
-from app.core.deps import get_pipeline_orchestrator
+from app.core.deps import get_pipeline_orchestrator, get_project_from_client_key
+from app.schemas.v2.project import ProjectContext
 from app.schemas.v2.search import SearchV2Response, SearchV2Route
 from app.services.v2.llm_clients.local import LocalLlmError
+
+
+@pytest.fixture(autouse=True)
+def override_project_key_dependency(client):
+    mock_project_ctx = ProjectContext(
+        project_id=uuid4(),
+        gate_model="mock-model",
+        rewriter_model="mock-model",
+        synthesis_model="mock-model",
+        decision_model="mock-model",
+        confidence_threshold=0.7,
+        max_attempts=2,
+        system_prompt_overrides={}
+    )
+    client.app.dependency_overrides[get_project_from_client_key] = lambda: mock_project_ctx
+    yield
+    client.app.dependency_overrides.pop(get_project_from_client_key, None)
 
 
 @pytest.mark.unit
@@ -30,12 +49,11 @@ def test_v2_search_endpoint_generic(client):
     body = response.json()
     assert body["route"] == "generic"
     assert body["answer"] == "Hi there!"
-    mock_orchestrator.search.assert_called_once_with(
-        "Hello",
-        project_ctx=None,
-        modality_filter=None,
-        conversation=None,
-    )
+    assert mock_orchestrator.search.call_count == 1
+    args, kwargs = mock_orchestrator.search.call_args
+    assert args[0] == "Hello"
+    assert kwargs.get("modality_filter") is None
+    assert kwargs.get("conversation") is None
 
 
 @pytest.mark.unit

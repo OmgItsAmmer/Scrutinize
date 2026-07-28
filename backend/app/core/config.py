@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     graphiti_neo4j_user: str = "neo4j"
     graphiti_neo4j_password: str = ""
 
+    # E2B Sandbox API Key
+    e2b_api_key: str = ""
+
     # LangSmith tracing config
     langsmith_tracing: bool = False
     langsmith_api_key: str = ""
