@@ -135,6 +135,17 @@ class LocalLlmClient(BaseLlmClient):
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
 
+        prompt_tokens = 0
+        completion_tokens = 0
+        cached_tokens = 0
+        usage_dict = body.get("usage") or {}
+        if usage_dict:
+            prompt_tokens = usage_dict.get("prompt_tokens", 0) or 0
+            completion_tokens = usage_dict.get("completion_tokens", 0) or 0
+            details = usage_dict.get("prompt_tokens_details", {})
+            if isinstance(details, dict):
+                cached_tokens = details.get("cached_tokens", 0) or 0
+
         return LlmResponse(
             content=text,
             model_name=model,
@@ -143,6 +154,9 @@ class LocalLlmClient(BaseLlmClient):
             raw_thinking=raw_thinking,
             latency_ms=latency_ms,
             tool_calls=tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
         )
 
     @traceable(name="LocalLlmClient.generate_stream", run_type="llm")

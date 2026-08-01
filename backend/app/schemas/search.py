@@ -17,6 +17,9 @@ class SearchSource(BaseModel):
     start_time: float | None = None
     end_time: float | None = None
     score: float
+    page_number: int | None = None
+    section_path: str | None = None
+    is_poisoned: bool = False
 
 
 

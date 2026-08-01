@@ -18,12 +18,17 @@ class RetrievalStats:
     rrf_keyword_only: int = 0
     rrf_both_lists: int = 0
     sparse_query_dimensions: int = 0
+    prefetch_limit: int = 0  # V5 M1 — per-branch Qdrant limit, vs. qdrant_retrieved_count (post-fusion)
+    rerank_applied: bool = False
+    rerank_latency_ms: int = 0
+    rerank_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "semantic_prefetch_count": self.semantic_prefetch_count,
             "keyword_prefetch_count": self.keyword_prefetch_count,
             "qdrant_retrieved_count": self.qdrant_retrieved_count,
+            "prefetch_limit": self.prefetch_limit,
             "sparse_query_dimensions": self.sparse_query_dimensions,
             "rrf": {
                 "k": self.rrf_k,
@@ -31,6 +36,11 @@ class RetrievalStats:
                 "semantic_only": self.rrf_semantic_only,
                 "keyword_only": self.rrf_keyword_only,
                 "both_lists": self.rrf_both_lists,
+            },
+            "rerank": {
+                "applied": self.rerank_applied,
+                "latency_ms": self.rerank_latency_ms,
+                "error": self.rerank_error,
             },
         }
 
@@ -45,12 +55,16 @@ class RetrieveResult:
     stats: RetrievalStats
     source_rank_fields: list[dict[str, Any]] = field(default_factory=list)
     latency_ms: int = 0
+    rerank_applied: bool = False
+    rerank_latency_ms: int = 0
+    rerank_error: str | None = None
 
 
 def hit_to_source(hit: dict[str, Any]) -> SearchSource:
     payload = hit.get("payload") or {}
     start_time = payload.get("start_time")
     end_time = payload.get("end_time")
+    page_number = payload.get("page_number")
     return SearchSource(
         segment_id=UUID(str(hit["id"])),
         file_id=UUID(str(payload["file_id"])),
@@ -61,6 +75,8 @@ def hit_to_source(hit: dict[str, Any]) -> SearchSource:
         start_time=float(start_time) if start_time is not None else None,
         end_time=float(end_time) if end_time is not None else None,
         score=float(hit["score"]),
+        page_number=int(page_number) if page_number is not None else None,
+        section_path=payload.get("section_path"),
     )
 
 

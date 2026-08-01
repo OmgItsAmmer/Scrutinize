@@ -21,5 +21,17 @@ class Segment(SQLModel, table=True):
     content: str
     start_time: float | None = None
     end_time: float | None = None
+    # V5 M4 — page/section position metadata (nullable for pre-V5 rows).
+    page_number: int | None = None
+    section_path: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    block_type: str | None = None
+    # V5 Phase 3 M6 — generated situating header (embedded, never shown/cited as content).
+    context_header: str | None = None
+    # V5 Phase 3 M7 — which ingestion pipeline generation produced this segment,
+    # so mixed-generation corpora are diagnosable during a staged reindex rollout.
+    pipeline_version: int = 1
+    is_poisoned: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

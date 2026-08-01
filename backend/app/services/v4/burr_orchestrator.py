@@ -5,6 +5,7 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Generator
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from langsmith import traceable
 
 from app.core.config import Settings
 from app.services.v4.run_budget import RunBudget, BudgetExceededError
+from app.services.v5.cost_model import estimate_cost
 from app.models.file import FileModality
 from app.schemas.search import SearchSource
 from app.schemas.v2.project import ProjectContext
@@ -50,6 +52,18 @@ PDF_TITLE_FALLBACK = "generated-document"
 PDF_TOOL_NAME = "generate_pdf"
 FLOWCHART_TOOL_NAME = "generate_flowchart"
 TOOLS_REQUIRING_RAG = frozenset({PDF_TOOL_NAME, FLOWCHART_TOOL_NAME})
+
+
+def count_tokens_fallback(text: str, model_name: str) -> int:
+    try:
+        import tiktoken
+        try:
+            encoding = tiktoken.encoding_for_model(model_name)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    except Exception:
+        return len(text) // 4
 
 
 class PrecheckAction(SingleStepAction):
@@ -119,11 +133,12 @@ class GateAction(SingleStepAction):
             "project_ctx",
             "llm_calls",
             "input_tokens",
+            "cost_usd",
         ]
 
     @property
     def writes(self) -> list[str]:
-        return ["route", "gate_result", "llm_calls", "input_tokens"]
+        return ["route", "gate_result", "llm_calls", "input_tokens", "cost_usd"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         # If precheck already determined the route, we skip gate classification
@@ -204,14 +219,29 @@ class GateAction(SingleStepAction):
                     requested_tool=tool,
                 )
 
-        llm_calls = state.get("llm_calls", 0) + 1
-        input_tokens = state.get("input_tokens", 0) + (prompt_len // 4 + 200)
+        llm_calls = state.get("llm_calls", 0)
+        input_tokens = state.get("input_tokens", 0)
+        cost_usd = state.get("cost_usd", 0.0)
+
+        if gate_res.llm_call:
+            llm_calls += 1
+            input_tokens += gate_res.llm_call.prompt_tokens
+            cost_usd += float(estimate_cost(gate_res.llm_call.model_name, {
+                "prompt_tokens": gate_res.llm_call.prompt_tokens,
+                "completion_tokens": gate_res.llm_call.completion_tokens,
+                "cached_tokens": gate_res.llm_call.cached_tokens,
+            }))
+        else:
+            if state["route"] is None:
+                llm_calls += 1
+                input_tokens += (prompt_len // 4 + 200)
 
         return {"route": gate_res.route}, state.update(
             route=gate_res.route,
             gate_result=gate_res,
             llm_calls=llm_calls,
             input_tokens=input_tokens,
+            cost_usd=cost_usd,
         )
 
 
@@ -230,11 +260,12 @@ class RewriteAction(SingleStepAction):
             "project_ctx",
             "llm_calls",
             "input_tokens",
+            "cost_usd",
         ]
 
     @property
     def writes(self) -> list[str]:
-        return ["rewritten_query", "llm_calls", "input_tokens"]
+        return ["rewritten_query", "rewrite_result", "llm_calls", "input_tokens", "cost_usd"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         project_ctx = state["project_ctx"]
@@ -248,14 +279,29 @@ class RewriteAction(SingleStepAction):
             conversation_context=state["conversation_context"],
         )
 
-        prompt_len = len(state["query"]) + len(state["prev_feedback"] or "") + len(state["conversation_context"])
-        llm_calls = state.get("llm_calls", 0) + 1
-        input_tokens = state.get("input_tokens", 0) + (prompt_len // 4 + 300)
+        llm_calls = state.get("llm_calls", 0)
+        input_tokens = state.get("input_tokens", 0)
+        cost_usd = state.get("cost_usd", 0.0)
+
+        if rewritten.llm_call:
+            llm_calls += 1
+            input_tokens += rewritten.llm_call.prompt_tokens
+            cost_usd += float(estimate_cost(rewritten.llm_call.model_name, {
+                "prompt_tokens": rewritten.llm_call.prompt_tokens,
+                "completion_tokens": rewritten.llm_call.completion_tokens,
+                "cached_tokens": rewritten.llm_call.cached_tokens,
+            }))
+        else:
+            llm_calls += 1
+            prompt_len = len(state["query"]) + len(state["conversation_context"]) + len(state["prev_feedback"] or "")
+            input_tokens += (prompt_len // 4 + 300)
 
         return {"rewritten_query": rewritten.text}, state.update(
             rewritten_query=rewritten.text,
+            rewrite_result=rewritten,
             llm_calls=llm_calls,
             input_tokens=input_tokens,
+            cost_usd=cost_usd,
         )
 
 
@@ -284,11 +330,12 @@ class RetrieveAction(SingleStepAction):
             "route",
             "conversation_id",
             "web_searches",
+            "cost_usd",
         ]
 
     @property
     def writes(self) -> list[str]:
-        return ["sources", "web_searches"]
+        return ["sources", "web_searches", "cost_usd", "retrieval_stats", "source_rank_fields", "retrieval_prompt_tokens", "retrieval_cost_usd"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         rewritten_text = state["rewritten_query"]
@@ -300,6 +347,7 @@ class RetrieveAction(SingleStepAction):
 
         disable_web = web_search_mode == "never"
         web_searches = state.get("web_searches", 0)
+        cost_usd = state.get("cost_usd", 0.0)
 
         if route == "web":
             if disable_web:
@@ -307,7 +355,14 @@ class RetrieveAction(SingleStepAction):
             else:
                 sources = self._retrieve_web(rewritten_text)
                 web_searches += 1
-            return {"sources": sources}, state.update(sources=sources, web_searches=web_searches)
+            return {"sources": sources}, state.update(
+                sources=sources,
+                web_searches=web_searches,
+                retrieval_stats=None,
+                source_rank_fields=None,
+                retrieval_prompt_tokens=0,
+                retrieval_cost_usd=0.0,
+            )
 
         # Run RRF retrieval
         retrieval = self.rrf.retrieve(
@@ -318,6 +373,7 @@ class RetrieveAction(SingleStepAction):
             include_project_wide=True,
         )
         sources = retrieval.sources
+        source_rank_fields = retrieval.source_rank_fields
 
         if route == "hybrid" and not disable_web:
             web_sources = self._retrieve_web(rewritten_text)
@@ -339,7 +395,31 @@ class RetrieveAction(SingleStepAction):
         # Rerank combined results to put the best on top
         sources.sort(key=lambda s: s.score, reverse=True)
 
-        return {"sources": sources}, state.update(sources=sources, web_searches=web_searches)
+        # Calculate embedding cost
+        embedding_cost = 0.0
+        num_tokens = 0
+        if route in ("rag", "hybrid"):
+            try:
+                num_tokens = count_tokens_fallback(rewritten_text, self.settings.embedding_model)
+            except Exception:
+                num_tokens = len(rewritten_text) // 4
+            
+            embedding_cost = float(estimate_cost(self.settings.embedding_model, {
+                "prompt_tokens": num_tokens,
+                "completion_tokens": 0,
+                "cached_tokens": 0,
+            }))
+            cost_usd += embedding_cost
+
+        return {"sources": sources}, state.update(
+            sources=sources,
+            web_searches=web_searches,
+            cost_usd=cost_usd,
+            retrieval_stats=retrieval.stats,
+            source_rank_fields=source_rank_fields,
+            retrieval_prompt_tokens=num_tokens,
+            retrieval_cost_usd=embedding_cost,
+        )
 
     def _retrieve_web(self, query: str) -> list[SearchSource]:
         web_results = []
@@ -459,11 +539,16 @@ class SynthesizeAction(SingleStepAction):
             "tools",
             "conversation_id",
             "project_id",
+            "cost_usd",
+            "client_requested_tool",
+            "attempt",
+            "prev_feedback",
+            "retry_target",
         ]
 
     @property
     def writes(self) -> list[str]:
-        return ["answer", "llm_calls", "input_tokens", "tools"]
+        return ["answer", "llm_calls", "input_tokens", "tools", "cost_usd", "synthesis_result"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         query = state["query"]
@@ -474,37 +559,59 @@ class SynthesizeAction(SingleStepAction):
         project_ctx = state["project_ctx"]
         on_chunk = inputs.get("on_chunk")
 
+        # Synthesis-only retry (citation/groundedness failure, sources unchanged):
+        # fold the verifier's feedback into the prompt so regeneration actually
+        # addresses it, since we're skipping the rewrite step that would
+        # normally carry prev_feedback into a fresh query.
+        if state.get("retry_target") == "synthesize" and state.get("attempt", 1) > 1 and state.get("prev_feedback"):
+            rewritten_text = f"{rewritten_text}\n\n[Regeneration instruction: {state['prev_feedback']}]"
+
         pdf_requested = gate_result.requested_tool == PDF_TOOL_NAME
         flowchart_requested = gate_result.requested_tool == FLOWCHART_TOOL_NAME
 
         llm_calls = state.get("llm_calls", 0)
         input_tokens = state.get("input_tokens", 0)
         tools_count = state.get("tools", 0)
-
-        def record_llm_call(prompt_length: int):
-            nonlocal llm_calls, input_tokens
-            llm_calls += 1
-            input_tokens += (prompt_length // 4 + 500)
+        cost_usd = state.get("cost_usd", 0.0)
 
         if not sources:
             if pdf_requested:
-                prompt_length = len(rewritten_text) + len(conversation_context)
-                record_llm_call(prompt_length)
-                answer = self._draft_document_content(
+                gen_res = self._draft_document_content(
                     rewritten_text, conversation_context, project_ctx
                 )
+                answer = gen_res.answer
+                llm_call = gen_res.llm_call
+                if llm_call:
+                    llm_calls += 1
+                    input_tokens += llm_call.prompt_tokens
+                    cost_usd += float(estimate_cost(llm_call.model_name, {
+                        "prompt_tokens": llm_call.prompt_tokens,
+                        "completion_tokens": llm_call.completion_tokens,
+                        "cached_tokens": llm_call.cached_tokens,
+                    }))
                 answer = self._attach_pdf_to_answer(query, answer)
                 tools_count += 1
+                synthesis_result = gen_res
             elif flowchart_requested:
-                prompt_length = len(rewritten_text) + len(conversation_context)
-                record_llm_call(prompt_length)
-                answer = self._draft_document_content(
+                gen_res = self._draft_document_content(
                     rewritten_text, conversation_context, project_ctx
                 )
+                answer = gen_res.answer
+                llm_call = gen_res.llm_call
+                if llm_call:
+                    llm_calls += 1
+                    input_tokens += llm_call.prompt_tokens
+                    cost_usd += float(estimate_cost(llm_call.model_name, {
+                        "prompt_tokens": llm_call.prompt_tokens,
+                        "completion_tokens": llm_call.completion_tokens,
+                        "cached_tokens": llm_call.cached_tokens,
+                    }))
                 answer = self._attach_flowchart_to_answer(query, answer)
                 tools_count += 1
+                synthesis_result = gen_res
             else:
                 answer = NO_INDEXED_CONTENT
+                synthesis_result = RagSynthesisResult(answer=answer, llm_call=None)
 
             if on_chunk:
                 on_chunk(answer)
@@ -513,7 +620,9 @@ class SynthesizeAction(SingleStepAction):
                 answer=answer,
                 llm_calls=llm_calls,
                 input_tokens=input_tokens,
+                cost_usd=cost_usd,
                 tools=tools_count,
+                synthesis_result=synthesis_result,
             )
 
         # Synthesize with sources
@@ -533,7 +642,6 @@ class SynthesizeAction(SingleStepAction):
 
         if tools or pdf_requested or flowchart_requested:
             # Run blocking synthesis to allow tool calling
-            record_llm_call(prompt_length)
             synthesis_result = self.rag_synthesis.synthesize(
                 rewritten_text,
                 sources,
@@ -546,6 +654,16 @@ class SynthesizeAction(SingleStepAction):
             )
             answer = synthesis_result.answer
             llm_call = synthesis_result.llm_call
+            
+            if llm_call:
+                llm_calls += 1
+                input_tokens += llm_call.prompt_tokens
+                cost_usd += float(estimate_cost(llm_call.model_name, {
+                    "prompt_tokens": llm_call.prompt_tokens,
+                    "completion_tokens": llm_call.completion_tokens,
+                    "cached_tokens": llm_call.cached_tokens,
+                }))
+
             tool_result = None
 
             if llm_call and llm_call.tool_calls:
@@ -574,8 +692,15 @@ class SynthesizeAction(SingleStepAction):
                                 if member:
                                     user_role = member.role
 
+                    provenance = "model"
+                    if (
+                        state.get("client_requested_tool") == tool_name
+                        or (state.get("gate_result") and state.get("gate_result").requested_tool == tool_name)
+                    ):
+                        provenance = "user"
+
                     # Check permission
-                    if not PermissionChecker.check_permission(tool_name, user_role):
+                    if not PermissionChecker.check_permission(tool_name, user_role, provenance):
                         answer = f"Permission Denied: User role '{user_role}' is not authorized to execute tool '{tool_name}'."
                         break
 
@@ -698,7 +823,6 @@ class SynthesizeAction(SingleStepAction):
 
         else:
             # Stream synthesis
-            record_llm_call(prompt_length)
             answer = ""
             for chunk in self.rag_synthesis.synthesize_stream(
                 rewritten_text,
@@ -712,17 +836,51 @@ class SynthesizeAction(SingleStepAction):
                 answer += chunk
                 if on_chunk:
                     on_chunk(chunk)
+            
+            # Estimate tokens
+            model_name = project_ctx.synthesis_model if project_ctx else self.settings.local_llm_rewriter_model
+            
+            # Construct a helper prompt representation to estimate prompt tokens
+            lines = []
+            for index, source in enumerate(sources, start=1):
+                lines.append(source.content)
+            prompt_str = rewritten_text + "\n".join(lines) + conversation_context
+            
+            prompt_tokens_est = count_tokens_fallback(prompt_str, model_name)
+            completion_tokens_est = count_tokens_fallback(answer, model_name)
+            
+            llm_calls += 1
+            input_tokens += prompt_tokens_est
+            cost_usd += float(estimate_cost(model_name, {
+                "prompt_tokens": prompt_tokens_est,
+                "completion_tokens": completion_tokens_est,
+                "cached_tokens": 0,
+            }))
+            
+            from app.services.v2.llm_clients.base import LlmResponse
+            llm_call = LlmResponse(
+                content=answer,
+                model_name=model_name,
+                prompt_system=project_ctx.system_prompt_overrides.get("synthesis") or "",
+                prompt_user=rewritten_text,
+                prompt_tokens=prompt_tokens_est,
+                completion_tokens=completion_tokens_est,
+                cached_tokens=0,
+            )
+            synthesis_result = RagSynthesisResult(answer=answer, llm_call=llm_call)
 
         return {"answer": answer}, state.update(
             answer=answer,
             llm_calls=llm_calls,
             input_tokens=input_tokens,
+            cost_usd=cost_usd,
             tools=tools_count,
+            synthesis_result=synthesis_result,
         )
 
     def _draft_document_content(
         self, query: str, conversation_context: str, project_ctx: ProjectContext | None = None
-    ) -> str:
+    ) -> RagSynthesisResult:
         generic_result = self.rag_synthesis.synthesize(
             query,
             [],
@@ -732,7 +890,7 @@ class SynthesizeAction(SingleStepAction):
             ),
             conversation_context=conversation_context,
         )
-        return generic_result.answer
+        return generic_result
 
     def _attach_pdf_to_answer(self, query: str, answer: str) -> str:
         if "/v2/pdf/download/" in answer:
@@ -917,11 +1075,11 @@ class AssessEvidenceAction(SingleStepAction):
 
     @property
     def reads(self) -> list[str]:
-        return ["query", "sources", "use_cloud_llm", "project_ctx"]
+        return ["query", "sources", "use_cloud_llm", "project_ctx", "llm_calls", "input_tokens", "cost_usd"]
 
     @property
     def writes(self) -> list[str]:
-        return ["evidence_assessment"]
+        return ["evidence_assessment", "llm_calls", "input_tokens", "cost_usd"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         if not self.assessor:
@@ -937,71 +1095,121 @@ class AssessEvidenceAction(SingleStepAction):
             model=project_ctx.gate_model if project_ctx else None,
         )
 
+        llm_calls = state.get("llm_calls", 0)
+        input_tokens = state.get("input_tokens", 0)
+        cost_usd = state.get("cost_usd", 0.0)
+
+        if assessment.llm_call:
+            llm_calls += 1
+            input_tokens += assessment.llm_call.prompt_tokens
+            cost_usd += float(estimate_cost(assessment.llm_call.model_name, {
+                "prompt_tokens": assessment.llm_call.prompt_tokens,
+                "completion_tokens": assessment.llm_call.completion_tokens,
+                "cached_tokens": assessment.llm_call.cached_tokens,
+            }))
+
         if not assessment.is_sufficient:
-            msg = assessment.missing_information or "I could not find sufficient information in the provided sources."
+            if assessment.missing_information:
+                msg = (
+                    "I couldn't find enough information in the project sources to answer this. "
+                    f"Specifically missing: {assessment.missing_information}"
+                )
+            else:
+                msg = "I could not find sufficient information in the provided sources."
             raise InsufficientEvidenceError(msg)
 
-        return {"evidence_assessment": assessment}, state.update(evidence_assessment=assessment)
+        return {"evidence_assessment": assessment}, state.update(
+            evidence_assessment=assessment,
+            llm_calls=llm_calls,
+            input_tokens=input_tokens,
+            cost_usd=cost_usd,
+        )
 
 
-class VerifyCitationsAction(SingleStepAction):
-    def __init__(self, citation_verifier: CitationVerifier | None):
+class VerifyAndEvaluateAction(SingleStepAction):
+    """Runs citation verification and groundedness evaluation concurrently.
+
+    Both stages take the same (query, answer, sources) input and are
+    otherwise independent — running them in parallel threads instead of
+    sequentially halves their combined wall-clock cost on every RAG turn.
+    """
+
+    def __init__(
+        self,
+        citation_verifier: CitationVerifier | None,
+        groundedness_evaluator: GroundednessEvaluator | None,
+    ):
         super().__init__()
         self.verifier = citation_verifier
+        self.evaluator = groundedness_evaluator
 
     @property
     def reads(self) -> list[str]:
-        return ["query", "answer", "sources", "use_cloud_llm", "project_ctx"]
+        return ["query", "answer", "sources", "use_cloud_llm", "project_ctx", "llm_calls", "input_tokens", "cost_usd"]
 
     @property
     def writes(self) -> list[str]:
-        return ["citation_map_result"]
+        return ["citation_map_result", "groundedness_result", "llm_calls", "input_tokens", "cost_usd"]
 
-    def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
+    def _verify_citations(self, state: State) -> "CitationMapResult":
         if not self.verifier:
             from app.schemas.v4.rag import CitationMapResult
-            default_result = CitationMapResult(has_valid_citations=True, mappings=[])
-            return {"citation_map_result": default_result}, state.update(citation_map_result=default_result)
+            return CitationMapResult(has_valid_citations=True, mappings=[])
 
         project_ctx = state["project_ctx"]
-        result = self.verifier.verify(
+        return self.verifier.verify(
             query=state["query"],
             draft_answer=state["answer"],
             sources=state["sources"],
             use_cloud_llm=state["use_cloud_llm"],
             model=project_ctx.gate_model if project_ctx else None,
         )
-        return {"citation_map_result": result}, state.update(citation_map_result=result)
 
-
-class EvaluateGroundednessAction(SingleStepAction):
-    def __init__(self, groundedness_evaluator: GroundednessEvaluator | None):
-        super().__init__()
-        self.evaluator = groundedness_evaluator
-
-    @property
-    def reads(self) -> list[str]:
-        return ["query", "answer", "sources", "use_cloud_llm", "project_ctx"]
-
-    @property
-    def writes(self) -> list[str]:
-        return ["groundedness_result"]
-
-    def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
+    def _evaluate_groundedness(self, state: State) -> "GroundednessResult":
         if not self.evaluator:
             from app.schemas.v4.rag import GroundednessResult
-            default_result = GroundednessResult(score=1.0, reasoning="No evaluator configured", is_grounded=True)
-            return {"groundedness_result": default_result}, state.update(groundedness_result=default_result)
+            return GroundednessResult(score=1.0, reasoning="No evaluator configured", is_grounded=True)
 
         project_ctx = state["project_ctx"]
-        result = self.evaluator.evaluate(
+        return self.evaluator.evaluate(
             query=state["query"],
             answer=state["answer"],
             sources=state["sources"],
             use_cloud_llm=state["use_cloud_llm"],
             model=project_ctx.gate_model if project_ctx else None,
         )
-        return {"groundedness_result": result}, state.update(groundedness_result=result)
+
+    def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            citation_future = pool.submit(self._verify_citations, state)
+            groundedness_future = pool.submit(self._evaluate_groundedness, state)
+            citation_result = citation_future.result()
+            groundedness_result = groundedness_future.result()
+
+        llm_calls = state.get("llm_calls", 0)
+        input_tokens = state.get("input_tokens", 0)
+        cost_usd = state.get("cost_usd", 0.0)
+
+        for result in (citation_result, groundedness_result):
+            if result.llm_call:
+                llm_calls += 1
+                input_tokens += result.llm_call.prompt_tokens
+                cost_usd += float(estimate_cost(result.llm_call.model_name, {
+                    "prompt_tokens": result.llm_call.prompt_tokens,
+                    "completion_tokens": result.llm_call.completion_tokens,
+                    "cached_tokens": result.llm_call.cached_tokens,
+                }))
+
+        return {
+            "citation_map_result": citation_result,
+            "groundedness_result": groundedness_result,
+        }, state.update(
+            citation_map_result=citation_result,
+            groundedness_result=groundedness_result,
+            llm_calls=llm_calls,
+            input_tokens=input_tokens,
+            cost_usd=cost_usd,
+        )
 
 
 class DecisionAction(SingleStepAction):
@@ -1024,41 +1232,72 @@ class DecisionAction(SingleStepAction):
             "input_tokens",
             "citation_map_result",
             "groundedness_result",
+            "cost_usd",
         ]
 
     @property
     def writes(self) -> list[str]:
-        return ["verdict", "confidence", "attempt", "prev_feedback", "llm_calls", "input_tokens", "route"]
+        return ["verdict", "confidence", "attempt", "prev_feedback", "llm_calls", "input_tokens", "route", "cost_usd", "decision_result", "retry_target"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         project_ctx = state["project_ctx"]
-        
-        # Default decision from standard DecisionAgent
-        decision = self.decision_agent.evaluate(
-            DecisionContext(
-                original_query=state["query"],
-                rewritten_query=state["rewritten_query"],
-                route=state["route"],
-                draft_answer=state["answer"],
-                sources=state["sources"],
-                attempt=state["attempt"],
-                conversation_context=state["conversation_context"],
-            ),
-            model=project_ctx.decision_model if project_ctx else None,
-            system_override=(
-                project_ctx.system_prompt_overrides.get("decision") if project_ctx else None
-            ),
-        )
 
-        verdict = decision.verdict
-        confidence = decision.confidence
-        feedback = decision.feedback or "Improve query specificity and keywords."
+        if state["route"] == "generic":
+            from app.services.v2.decision_agent import DecisionResult
+            decision = DecisionResult(
+                verdict="good",
+                confidence=1.0,
+                feedback="Generic conversational route bypasses validation.",
+                correct_route="generic",
+                llm_call=None
+            )
+            verdict = "good"
+            confidence = 1.0
+            feedback = decision.feedback
+        else:
+            # Default decision from standard DecisionAgent
+            decision = self.decision_agent.evaluate(
+                DecisionContext(
+                    original_query=state["query"],
+                    rewritten_query=state["rewritten_query"],
+                    route=state["route"],
+                    draft_answer=state["answer"],
+                    sources=state["sources"],
+                    attempt=state["attempt"],
+                    conversation_context=state["conversation_context"],
+                ),
+                model=project_ctx.decision_model if project_ctx else None,
+                system_override=(
+                    project_ctx.system_prompt_overrides.get("decision") if project_ctx else None
+                ),
+            )
+
+            verdict = decision.verdict
+            confidence = decision.confidence
+            feedback = decision.feedback or "Improve query specificity and keywords."
 
         # Apply strict verification checks (Phase 2)
         citation_map = state.get("citation_map_result")
         groundedness = state.get("groundedness_result")
 
-        if citation_map and not citation_map.has_valid_citations:
+        # A verdict flip caused *only* by citation/groundedness failure means
+        # retrieval and routing were fine — the draft just needs to be
+        # regenerated against the same sources. Retrying from "rewrite" would
+        # redo query rewriting + retrieval + evidence assessment for nothing,
+        # so route that case straight back to "synthesize" instead.
+        retry_target = "rewrite"
+        if verdict == "good":
+            if citation_map and not citation_map.has_valid_citations:
+                verdict = "bad"
+                confidence = 0.0
+                feedback = "Fabricated or invalid citations detected. Please regenerate with valid source citations."
+                retry_target = "synthesize"
+            elif groundedness and not groundedness.is_grounded:
+                verdict = "bad"
+                confidence = groundedness.score
+                feedback = f"Ungrounded claims detected (score {groundedness.score:.2f}). Please regenerate and stick strictly to the sources: {groundedness.reasoning}."
+                retry_target = "synthesize"
+        elif citation_map and not citation_map.has_valid_citations:
             verdict = "bad"
             confidence = 0.0
             feedback = "Fabricated or invalid citations detected. Please regenerate with valid source citations."
@@ -1067,25 +1306,40 @@ class DecisionAction(SingleStepAction):
             confidence = groundedness.score
             feedback = f"Ungrounded claims detected (score {groundedness.score:.2f}). Please regenerate and stick strictly to the sources: {groundedness.reasoning}."
 
-        llm_calls = state.get("llm_calls", 0) + 1
-        sources_len = sum(len(s.content) for s in state["sources"])
-        prompt_len = len(state["query"]) + len(state["rewritten_query"]) + len(state["answer"]) + sources_len
-        input_tokens = state.get("input_tokens", 0) + (prompt_len // 4 + 400)
+        llm_calls = state.get("llm_calls", 0)
+        input_tokens = state.get("input_tokens", 0)
+        cost_usd = state.get("cost_usd", 0.0)
+
+        if decision.llm_call:
+            llm_calls += 1
+            input_tokens += decision.llm_call.prompt_tokens
+            cost_usd += float(estimate_cost(decision.llm_call.model_name, {
+                "prompt_tokens": decision.llm_call.prompt_tokens,
+                "completion_tokens": decision.llm_call.completion_tokens,
+                "cached_tokens": decision.llm_call.cached_tokens,
+            }))
+        else:
+            sources_len = sum(len(s.content) for s in state["sources"])
+            prompt_len = len(state["query"]) + len(state["rewritten_query"]) + len(state["answer"]) + sources_len
+            input_tokens += (prompt_len // 4 + 400)
 
         return {
             "verdict": verdict,
             "confidence": confidence,
             "feedback": feedback,
             "correct_route": decision.correct_route,
+            "retry_target": retry_target,
         }, state.update(
             verdict=verdict,
             confidence=confidence,
             attempt=state["attempt"] + 1,
             prev_feedback=feedback,
-            # If the decision agent corrects the route, update it
             route=decision.correct_route or state["route"],
+            decision_result=decision,
             llm_calls=llm_calls,
             input_tokens=input_tokens,
+            cost_usd=cost_usd,
+            retry_target=retry_target,
         )
 
 
@@ -1140,8 +1394,7 @@ class BurrOrchestrator:
             retrieve=RetrieveAction(self.rrf_retriever, self.web_search, self.settings, self.mcp_manager, self.memory_manager),
             assess_evidence=AssessEvidenceAction(self.evidence_assessor),
             synthesize=SynthesizeAction(self.rag_synthesis, self.settings, self.mcp_manager, self.session),
-            verify_citations=VerifyCitationsAction(self.citation_verifier),
-            evaluate_groundedness=EvaluateGroundednessAction(self.groundedness_evaluator),
+            verify_and_evaluate=VerifyAndEvaluateAction(self.citation_verifier, self.groundedness_evaluator),
             generic=GenericAction(self.generic_agent),
             decision=DecisionAction(self.decision_agent),
         )
@@ -1159,16 +1412,22 @@ class BurrOrchestrator:
             ("rewrite", "retrieve", default),
             ("retrieve", "assess_evidence", default),
             ("assess_evidence", "synthesize", default),
-            ("synthesize", "verify_citations", default),
-            ("verify_citations", "evaluate_groundedness", default),
-            ("evaluate_groundedness", "decision", default),
+            ("synthesize", "verify_and_evaluate", default),
+            ("verify_and_evaluate", "decision", default),
             ("generic", "decision", default),
-            # Decision transitions: retry if verdict is not good or confidence is low, and attempts remaining
+            # Decision transitions: a citation/groundedness-only failure (retry_target
+            # == 'synthesize') skips straight back to synthesis, reusing the existing
+            # sources instead of redoing rewrite + retrieve + evidence assessment.
+            (
+                "decision",
+                "synthesize",
+                expr("retry_target == 'synthesize' and attempt <= max_attempts"),
+            ),
             (
                 "decision",
                 "rewrite",
                 expr(
-                    f"(verdict != 'good' or confidence < {threshold}) and attempt <= max_attempts"
+                    f"retry_target == 'rewrite' and (verdict != 'good' or confidence < {threshold}) and attempt <= max_attempts"
                 ),
             ),
         )
@@ -1218,6 +1477,7 @@ class BurrOrchestrator:
             query=stripped,
             modality_filter=modality_filter,
             conversation_context=conversation_context,
+            project_id=project_id,
         )
 
         max_attempts = (
@@ -1242,6 +1502,7 @@ class BurrOrchestrator:
             "attempt": 1,
             "max_attempts": max_attempts,
             "prev_feedback": None,
+            "retry_target": "rewrite",
             "project_ctx": project_ctx,
             "project_id": project_id,
             "conversation_id": conversation_id,
@@ -1250,9 +1511,12 @@ class BurrOrchestrator:
             "web_searches": 0,
             "tools": 0,
             "input_tokens": 0,
+            "cost_usd": 0.0,
             "evidence_assessment": None,
             "citation_map_result": None,
             "groundedness_result": None,
+            "synthesis_result": None,
+            "rewrite_result": None,
         }
 
         app = self.build_application(initial_state)
@@ -1261,11 +1525,18 @@ class BurrOrchestrator:
         while True:
             # Enforce budget limits
             budget = RunBudget(
+                max_attempts=self.settings.run_budget_max_attempts,
+                max_llm_calls=self.settings.run_budget_max_llm_calls,
+                max_web_searches=self.settings.run_budget_max_web_searches,
+                max_tools=self.settings.run_budget_max_tools,
+                max_input_tokens=self.settings.run_budget_max_input_tokens,
+                max_cost_usd=self.settings.run_budget_max_cost_usd,
                 attempts=app.state.get("attempt", 0),
                 llm_calls=app.state.get("llm_calls", 0),
                 web_searches=app.state.get("web_searches", 0),
                 tools=app.state.get("tools", 0),
                 input_tokens=app.state.get("input_tokens", 0),
+                cost_usd=app.state.get("cost_usd", 0.0),
             )
             budget.check()
 
@@ -1323,15 +1594,13 @@ class BurrOrchestrator:
                         "message": "Synthesizing answer...",
                     },
                 )
-            elif action_name == "verify_citations":
+            elif action_name == "verify_and_evaluate":
                 yield emit(
                     "status",
-                    {"step": "verify_citations", "message": "Verifying citations in draft answer..."},
-                )
-            elif action_name == "evaluate_groundedness":
-                yield emit(
-                    "status",
-                    {"step": "evaluate_groundedness", "message": "Evaluating answer groundedness score..."},
+                    {
+                        "step": "verify_and_evaluate",
+                        "message": "Verifying citations and evaluating groundedness...",
+                    },
                 )
             elif action_name == "generic":
                 gate_model = (
@@ -1386,9 +1655,10 @@ class BurrOrchestrator:
                 yield emit("chunk", {"text": chunk})
 
             # Yield status updates AFTER running
+            # Yield status updates AFTER running
             if action.name == "gate":
                 gate_res = state.get("gate_result")
-                self.db_logger.log_gate(run_id=run_id, gate_result=gate_res)
+                self.db_logger.log_gate(run_id=run_id, gate_result=gate_res, attempt=state.get("attempt", 1))
                 yield emit(
                     "status",
                     {
@@ -1399,6 +1669,9 @@ class BurrOrchestrator:
                 )
             elif action.name == "rewrite":
                 rewritten_text = state.get("rewritten_query")
+                rewrite_res = state.get("rewrite_result")
+                if rewrite_res:
+                    self.db_logger.log_rewrite(run_id=run_id, attempt=state.get("attempt", 1), rewritten=rewrite_res)
                 yield emit(
                     "status",
                     {
@@ -1409,6 +1682,18 @@ class BurrOrchestrator:
                 )
             elif action.name == "retrieve":
                 sources = state.get("sources")
+                self.db_logger.log_retrieval(
+                    run_id=run_id,
+                    attempt=state.get("attempt", 1),
+                    query=state.get("query"),
+                    rewritten_query=state.get("rewritten_query"),
+                    sources=sources,
+                    retrieval_stats=state.get("retrieval_stats"),
+                    source_rank_fields=state.get("source_rank_fields"),
+                    prompt_tokens=state.get("retrieval_prompt_tokens"),
+                    cost_usd=state.get("retrieval_cost_usd"),
+                    model_name=self.settings.embedding_model,
+                )
                 yield emit(
                     "status",
                     {
@@ -1420,6 +1705,8 @@ class BurrOrchestrator:
                 )
             elif action.name == "assess_evidence":
                 assessment = state.get("evidence_assessment")
+                if assessment:
+                    self.db_logger.log_evidence_assessment(run_id=run_id, assessment=assessment, attempt=state.get("attempt", 1))
                 yield emit(
                     "status",
                     {
@@ -1428,8 +1715,13 @@ class BurrOrchestrator:
                         "message": "Evidence sufficiency evaluated successfully.",
                     },
                 )
-            elif action.name == "verify_citations":
+            elif action.name == "verify_and_evaluate":
                 citations_res = state.get("citation_map_result")
+                ground_res = state.get("groundedness_result")
+                if citations_res:
+                    self.db_logger.log_citation_verification(run_id=run_id, verification=citations_res, attempt=state.get("attempt", 1))
+                if ground_res:
+                    self.db_logger.log_groundedness(run_id=run_id, groundedness=ground_res, attempt=state.get("attempt", 1))
                 yield emit(
                     "status",
                     {
@@ -1438,8 +1730,6 @@ class BurrOrchestrator:
                         "message": f"Citations verified: {'VALID' if (citations_res and citations_res.has_valid_citations) else 'INVALID'}",
                     },
                 )
-            elif action.name == "evaluate_groundedness":
-                ground_res = state.get("groundedness_result")
                 yield emit(
                     "status",
                     {
@@ -1452,7 +1742,7 @@ class BurrOrchestrator:
                 self.db_logger.log_synthesis(
                     run_id=run_id,
                     attempt=state.get("attempt", 1) - 1,
-                    synthesis_result=RagSynthesisResult(answer=state.get("answer"), llm_call=None),
+                    synthesis_result=state.get("synthesis_result"),
                 )
             elif action.name == "generic":
                 self.db_logger.log_synthesis(
@@ -1466,6 +1756,13 @@ class BurrOrchestrator:
                 confidence = state.get("confidence")
                 correct_route = state.get("route")
                 feedback = state.get("prev_feedback")
+                decision_res = state.get("decision_result")
+                if decision_res:
+                    self.db_logger.log_evaluation(
+                        run_id=run_id,
+                        attempt=state.get("attempt", 1) - 1,
+                        decision=decision_res,
+                    )
 
                 yield emit(
                     "status",
@@ -1509,6 +1806,11 @@ class BurrOrchestrator:
                         disclaimer_appended=False,
                         conversation=updated_conversation,
                     )
+                    
+                    # Calculate total tokens (input + output)
+                    total_tokens = state.get("input_tokens", 0) + count_tokens_fallback(
+                        final_answer or "", self.settings.local_llm_rewriter_model
+                    )
                     self.db_logger.end_run(
                         run_id=run_id,
                         final_route=response.route,
@@ -1516,6 +1818,8 @@ class BurrOrchestrator:
                         final_confidence=response.confidence,
                         attempts_count=response.attempts,
                         disclaimer_appended=response.disclaimer_appended,
+                        total_cost_usd=state.get("cost_usd", 0.0),
+                        total_tokens=total_tokens,
                     )
                     yield emit("result", response.model_dump(mode="json"))
                     break
@@ -1549,6 +1853,10 @@ class BurrOrchestrator:
                         disclaimer_appended=True,
                         conversation=updated_conversation,
                     )
+                    
+                    total_tokens = state.get("input_tokens", 0) + count_tokens_fallback(
+                        final_answer or "", self.settings.local_llm_rewriter_model
+                    )
                     self.db_logger.end_run(
                         run_id=run_id,
                         final_route=response.route,
@@ -1556,11 +1864,13 @@ class BurrOrchestrator:
                         final_confidence=response.confidence,
                         attempts_count=response.attempts,
                         disclaimer_appended=response.disclaimer_appended,
+                        total_cost_usd=state.get("cost_usd", 0.0),
+                        total_tokens=total_tokens,
                     )
                     yield emit("result", response.model_dump(mode="json"))
                     break
 
-            if app.is_terminal():
+            if not app.has_next_action():
                 break
 
     @staticmethod

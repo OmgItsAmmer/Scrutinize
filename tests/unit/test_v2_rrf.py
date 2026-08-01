@@ -13,7 +13,12 @@ from app.services.v2.rrf_retriever import RrfRetriever
 @pytest.mark.v2
 @patch("app.services.v2.rrf_retriever.embed_sparse_query")
 def test_rrf_retriever_searches_rewritten_query_only(mock_embed_sparse):
-    settings = Settings(local_llm_base_url="http://llm.test", v2_rrf_top_k=2, v2_rrf_k=60)
+    settings = Settings(
+        local_llm_base_url="http://llm.test",
+        v2_rrf_top_k=2,
+        v2_rrf_k=60,
+        rerank_enabled=False,
+    )
     embedding = MagicMock()
     embedding.embed_texts.return_value = [[0.1]]
 
@@ -76,6 +81,66 @@ def test_rrf_retriever_returns_empty_for_blank_query():
     result = retriever.retrieve("   ", project_id=uuid4())
     assert result.sources == []
     assert result.stats.qdrant_retrieved_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.v2
+@patch("app.services.v2.rrf_retriever.embed_sparse_query")
+def test_rrf_retriever_widens_pool_and_applies_reranker(mock_embed_sparse):
+    from app.services.v5.reranker import RerankedSource, RerankResult
+
+    settings = Settings(
+        local_llm_base_url="http://llm.test",
+        v2_rrf_top_k=1,
+        rerank_enabled=True,
+        rerank_candidate_pool=50,
+    )
+    embedding = MagicMock()
+    embedding.embed_texts.return_value = [[0.1]]
+    mock_embed_sparse.return_value = MagicMock(indices=[1], values=[0.5])
+
+    id_a, id_b = str(uuid4()), str(uuid4())
+    vector_store = MagicMock()
+    stats = RetrievalStats(qdrant_retrieved_count=2, rrf_both_lists=2)
+    vector_store.search_hybrid.return_value = MagicMock(
+        hits=[
+            {"id": id_a, "score": 0.03, "payload": _payload("low relevance")},
+            {"id": id_b, "score": 0.02, "payload": _payload("high relevance")},
+        ],
+        stats=stats,
+    )
+
+    source_a = _payload_to_source(id_a, "low relevance")
+    source_b = _payload_to_source(id_b, "high relevance")
+    reranker = MagicMock()
+    reranker.rerank.return_value = RerankResult(
+        sources=[RerankedSource(source=source_b, rrf_rank=2, rerank_score=0.9)],
+        applied=True,
+        latency_ms=12,
+    )
+
+    retriever = RrfRetriever(embedding, vector_store, settings, reranker=reranker)
+    result = retriever.retrieve("rewritten query", project_id=uuid4())
+
+    # Fusion pool widened to rerank_candidate_pool, not the final top_k=1.
+    assert vector_store.search_hybrid.call_args.kwargs["top_k"] == 50
+    reranker.rerank.assert_called_once()
+    assert reranker.rerank.call_args.kwargs["top_k"] == 1
+    assert len(result.sources) == 1
+    assert result.sources[0].content == "high relevance"
+    assert result.rerank_applied is True
+    assert result.rerank_latency_ms == 12
+    assert result.stats.rerank_applied is True
+    assert result.source_rank_fields[0]["rrf_rank"] == 2
+    assert result.source_rank_fields[0]["rerank_score"] == 0.9
+
+
+def _payload_to_source(segment_id: str, content: str):
+    from uuid import UUID
+
+    from app.services.v2.retrieval_utils import hit_to_source
+
+    return hit_to_source({"id": segment_id, "score": 0.5, "payload": _payload(content)})
 
 
 def _payload(content: str) -> dict:

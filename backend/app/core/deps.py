@@ -25,6 +25,7 @@ from app.services.v2.rag_gate import RagGate
 from app.services.v2.retrieval_precheck import RetrievalPrecheck
 from app.services.v2.rag_synthesis_agent import RagSynthesisAgent
 from app.services.v2.rrf_retriever import RrfRetriever
+from app.services.v5.reranker import Reranker
 from app.services.vector_store import VectorStore
 from app.services.web_search import WebSearchService
 from app.services.v4.rag_gate import RagGate as RagGateV4
@@ -90,12 +91,24 @@ def get_generic_agent(
     return GenericAgent(llm_client, settings)
 
 
+_reranker_singleton: Reranker | None = None
+
+
+def get_reranker(settings: Settings = Depends(get_app_settings)) -> Reranker:
+    # Module-level singleton: the cross-encoder model is too expensive to reload per request.
+    global _reranker_singleton
+    if _reranker_singleton is None:
+        _reranker_singleton = Reranker(settings)
+    return _reranker_singleton
+
+
 def get_rrf_retriever(
     embedding_service: EmbeddingService = Depends(get_embedding_service),
     vector_store: VectorStore = Depends(get_vector_store),
     settings: Settings = Depends(get_app_settings),
+    reranker: Reranker = Depends(get_reranker),
 ) -> RrfRetriever:
-    return RrfRetriever(embedding_service, vector_store, settings)
+    return RrfRetriever(embedding_service, vector_store, settings, reranker=reranker)
 
 
 def get_rag_synthesis_agent(

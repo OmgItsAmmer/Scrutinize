@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
@@ -269,9 +269,10 @@ async def upload_conversation_source(
 
 
 @router.post("/{conversation_id}/messages/stream")
-def stream_message(
+async def stream_message(
     conversation_id: UUID,
     body: MessageCreate,
+    request: Request,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_app_settings),
@@ -297,39 +298,45 @@ def stream_message(
         conversation.project_id,
     )
 
-    def generate():
-        yield _sse("message.accepted", {"user_message": _message_read(user_message).model_dump()})
-        prior = service.messages(user, conversation_id, limit=20)
-        history = [
-            PipelineMessage(role=item.role, content=item.content, timestamp=item.created_at)
-            for item in prior
-            if item.id not in {user_message.id, assistant.id}
-            and item.status == "completed"
-            and item.role in {"user", "assistant"}
-        ]
+    project_ctx = None
+    if conversation.project_id is not None:
+        project = ProjectService(session).get_by_id(conversation.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        project_ctx = ProjectService(session).resolve_context(project, settings)
+
+    prior = service.messages(user, conversation_id, limit=20)
+    history = [
+        PipelineMessage(role=item.role, content=item.content, timestamp=item.created_at)
+        for item in prior
+        if item.id not in {user_message.id, assistant.id}
+        and item.status == "completed"
+        and item.role in {"user", "assistant"}
+    ]
+
+    # Pre-serialize and extract primitives to avoid lazy-loading DetachedInstanceError
+    user_message_data = _message_read(user_message).model_dump()
+    assistant_id = assistant.id
+    retrieval_policy = conversation.retrieval_policy
+    project_id = conversation.project_id
+
+    async def generate():
+        yield _sse("message.accepted", {"user_message": user_message_data})
         answer = ""
         citations: list[dict] = []
         try:
             use_pipeline = (
-                conversation.retrieval_policy != RetrievalPolicy.WEB_ONLY
+                retrieval_policy != RetrievalPolicy.WEB_ONLY
                 or has_corpus
             )
             if not use_pipeline:
                 yield _sse("status", {"phase": "web_search", "step": "web_search", "label": "Searching the web"})
-                import threading
-                results = []
-                exc_to_raise = None
-                def run_search():
-                    nonlocal results, exc_to_raise
-                    try:
-                        results = asyncio.run(web.search(turn_content, limit=5))
-                    except Exception as e:
-                        exc_to_raise = e
-                t = threading.Thread(target=run_search)
-                t.start()
-                t.join()
-                if exc_to_raise:
-                    raise exc_to_raise
+                
+                if await request.is_disconnected():
+                    await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
+                    return
+
+                results = await web.search(turn_content, limit=5)
                 citations = [
                     {
                         "title": item.get("title", "Web result"),
@@ -338,6 +345,11 @@ def stream_message(
                     }
                     for item in results
                 ]
+                
+                if await request.is_disconnected():
+                    await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
+                    return
+
                 yield _sse(
                     "status",
                     {
@@ -362,30 +374,59 @@ def stream_message(
                     "the provided web results for factual claims. Cite sources as markdown "
                     "links. Never claim access to project files or project retrieval."
                 )
+                
+                if await request.is_disconnected():
+                    await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
+                    return
+
                 yield _sse("status", {"phase": "synthesis", "step": "synthesis", "label": "Generating reply"})
-                for chunk in llm.generate_stream(settings.local_llm_gate_model, system, prompt):
+                
+                generator = llm.generate_stream(settings.local_llm_gate_model, system, prompt)
+                
+                def get_next_chunk(gen):
+                    try:
+                        return next(gen)
+                    except StopIteration:
+                        return None
+                        
+                while True:
+                    if await request.is_disconnected():
+                        await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
+                        return
+                    chunk = await asyncio.to_thread(get_next_chunk, generator)
+                    if chunk is None:
+                        break
                     answer += chunk
-                    yield _sse("delta", {"assistant_message_id": assistant.id, "text": chunk})
+                    yield _sse("delta", {"assistant_message_id": assistant_id, "text": chunk})
             else:
-                project_ctx = None
-                if conversation.project_id is not None:
-                    project = ProjectService(session).get_by_id(conversation.project_id)
-                    if project is None:
-                        raise RuntimeError("Project not found")
-                    project_ctx = ProjectService(session).resolve_context(project, settings)
-                result: SearchV2Response | None = None
                 web_search_mode = body.web_search_mode
                 retrieval_citations: list[dict] = []
-                for block in burr_orchestrator.search_stream(
+                
+                generator = burr_orchestrator.search_stream(
                     turn_content,
                     project_ctx=project_ctx,
                     conversation=ConversationState(messages=history),
                     web_search_mode=web_search_mode,
                     client_requested_tool=requested_tool,
-                    conversation_id=conversation.id,
+                    conversation_id=conversation_id,
                     has_corpus=has_corpus,
                     use_cloud_llm=body.use_cloud_llm or False,
-                ):
+                )
+                
+                def get_next_block(gen):
+                    try:
+                        return next(gen)
+                    except StopIteration:
+                        return None
+                        
+                while True:
+                    if await request.is_disconnected():
+                        await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
+                        return
+                    block = await asyncio.to_thread(get_next_block, generator)
+                    if block is None:
+                        break
+                    
                     event = _parse_v2_sse(block)
                     if not event:
                         continue
@@ -398,7 +439,7 @@ def stream_message(
                     elif event_name == "chunk":
                         chunk = data.get("text", "")
                         answer += chunk
-                        yield _sse("delta", {"assistant_message_id": assistant.id, "text": chunk})
+                        yield _sse("delta", {"assistant_message_id": assistant_id, "text": chunk})
                     elif event_name == "result":
                         try:
                             result = SearchV2Response.model_validate(data)
@@ -412,62 +453,48 @@ def stream_message(
                             )
                     elif event_name == "error":
                         raise RuntimeError(data.get("message", "Project search failed"))
+                        
                 if result is None:
                     if not answer.strip():
                         raise RuntimeError("Project search ended before a final result was received.")
                     if not citations and retrieval_citations:
                         citations = retrieval_citations
-            service.complete(assistant, answer, citations)
-            session.refresh(assistant)
-            session.refresh(conversation)
 
+            if await request.is_disconnected():
+                await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
+                return
+
+            assistant_data, conversation_data = await asyncio.to_thread(
+                db_complete_message, assistant_id, conversation_id, answer, citations, settings, llm
+            )
             yield _sse(
                 "message.completed",
                 {
-                    "assistant_message": _message_read(assistant).model_dump(),
-                    "conversation": _conversation_read(conversation).model_dump(),
+                    "assistant_message": assistant_data,
+                    "conversation": conversation_data,
                 },
             )
-
-            if conversation.project_id:
-                from sqlalchemy import func
-                try:
-                    completed_count = session.scalar(
-                        select(func.count(ChatMessage.id))
-                        .join(ChatConversation, ChatMessage.conversation_id == ChatConversation.id)
-                        .where(ChatConversation.project_id == conversation.project_id)
-                        .where(ChatMessage.role == "assistant")
-                        .where(ChatMessage.status == "completed")
-                    )
-                    if completed_count and completed_count > 0 and completed_count % 5 == 0:
-                        from app.services.v2.prompt_generator import recreate_project_svg
-                        recreate_project_svg(
-                            project_id=conversation.project_id,
-                            session=session,
-                            settings=settings,
-                            llm=llm,
-                        )
-                except Exception as exc:
-                    import logging
-                    logging.getLogger(__name__).error("Failed to update project SVG on 5th message: %s", exc)
         except InsufficientEvidenceError as exc:
+            import traceback, sys
+            traceback.print_exc(file=sys.stderr)
             abstention_message = str(exc) or "I could not find sufficient information in the provided sources."
-            if assistant.status != MessageStatus.COMPLETED:
-                service.complete(assistant, abstention_message, [])
+            await asyncio.to_thread(db_abstain_message, assistant_id, abstention_message)
             yield _sse(
                 "error",
                 {"code": "StopReason.insufficient_evidence", "retryable": False, "message": abstention_message},
             )
         except BudgetExceededError as exc:
-            if assistant.status != MessageStatus.COMPLETED:
-                service.fail(assistant, "budget_exceeded")
+            import traceback, sys
+            traceback.print_exc(file=sys.stderr)
+            await asyncio.to_thread(db_fail_message, assistant_id, "budget_exceeded")
             yield _sse(
                 "error",
                 {"code": "StopReason.budget_exceeded", "retryable": False, "message": str(exc)},
             )
         except Exception as exc:
-            if assistant.status != MessageStatus.COMPLETED:
-                service.fail(assistant, "execution_failed")
+            import traceback, sys
+            traceback.print_exc(file=sys.stderr)
+            await asyncio.to_thread(db_fail_message, assistant_id, "execution_failed")
             yield _sse(
                 "error",
                 {"code": "execution_failed", "retryable": True, "message": str(exc)},
@@ -478,3 +505,85 @@ def stream_message(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+import threading
+_db_lock = threading.Lock()
+
+
+def db_complete_message(
+    assistant_id: UUID,
+    conversation_id: UUID,
+    answer: str,
+    citations: list[dict],
+    settings_obj: Settings,
+    llm_obj: BaseLlmClient,
+) -> tuple[dict | None, dict | None]:
+    from app.core.database import get_engine
+    from sqlmodel import Session as DBSession
+    from app.services.conversation_service import ConversationService
+    from app.models.conversation import ChatMessage, ChatConversation
+    from sqlmodel import select
+
+    with _db_lock:
+        with DBSession(get_engine()) as db:
+            svc = ConversationService(db)
+            ast = db.get(ChatMessage, assistant_id)
+            conv = db.get(ChatConversation, conversation_id)
+            if ast:
+                svc.complete(ast, answer, citations)
+                db.commit()
+            if conv:
+                if conv.project_id:
+                    try:
+                        from sqlalchemy import func
+                        completed_count = db.scalar(
+                            select(func.count(ChatMessage.id))
+                            .join(ChatConversation, ChatMessage.conversation_id == ChatConversation.id)
+                            .where(ChatConversation.project_id == conv.project_id)
+                            .where(ChatMessage.role == "assistant")
+                            .where(ChatMessage.status == "completed")
+                        )
+                        if completed_count and completed_count > 0 and completed_count % 5 == 0:
+                            from app.services.v2.prompt_generator import recreate_project_svg
+                            recreate_project_svg(
+                                project_id=conv.project_id,
+                                session=db,
+                                settings=settings_obj,
+                                llm=llm_obj,
+                            )
+                    except Exception as exc:
+                        import logging
+                        logging.getLogger(__name__).error("Failed to update project SVG on 5th message: %s", exc)
+
+            ast_data = _message_read(ast).model_dump() if ast else None
+            conv_data = _conversation_read(conv).model_dump() if conv else None
+            return ast_data, conv_data
+
+
+def db_fail_message(assistant_id: UUID, status: str) -> None:
+    from app.core.database import get_engine
+    from sqlmodel import Session as DBSession
+    from app.services.conversation_service import ConversationService
+    from app.models.conversation import ChatMessage
+    with _db_lock:
+        with DBSession(get_engine()) as db:
+            svc = ConversationService(db)
+            ast = db.get(ChatMessage, assistant_id)
+            if ast:
+                svc.fail(ast, status)
+                db.commit()
+
+
+def db_abstain_message(assistant_id: UUID, message: str) -> None:
+    from app.core.database import get_engine
+    from sqlmodel import Session as DBSession
+    from app.services.conversation_service import ConversationService
+    from app.models.conversation import ChatMessage
+    with _db_lock:
+        with DBSession(get_engine()) as db:
+            svc = ConversationService(db)
+            ast = db.get(ChatMessage, assistant_id)
+            if ast:
+                svc.complete(ast, message, [])
+                db.commit()

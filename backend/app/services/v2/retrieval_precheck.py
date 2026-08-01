@@ -76,6 +76,11 @@ class RetrievalPrecheck:
 
         effective_project_id = project_id or _NULL_PROJECT_ID
         include_project_wide = project_id is not None
+        # Skip reranking here: this call only needs an approximate top score to
+        # compare against the high/low thresholds below, not a precisely ordered
+        # top-3. The final RrfRetriever.retrieve() call after rewrite still
+        # reranks properly — doubling that (expensive, single-worker) cost here
+        # for a value that gets thrown away is pure added latency.
         retrieval = self._retriever.retrieve(
             query,
             project_id=effective_project_id,
@@ -83,6 +88,7 @@ class RetrievalPrecheck:
             top_k=3,
             conversation_id=conversation_id,
             include_project_wide=include_project_wide,
+            apply_rerank=False,
         )
         top_score = retrieval.sources[0].score if retrieval.sources else 0.0
         high = self._settings.v2_retrieval_precheck_high_score

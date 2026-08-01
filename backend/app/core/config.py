@@ -33,6 +33,8 @@ class Settings(BaseSettings):
 
     # Neon Postgres — set via .env (pooled connection string recommended).
     database_url: str = ""
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
 
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
@@ -58,6 +60,25 @@ class Settings(BaseSettings):
     text_chunk_size: int = 400
     text_chunk_overlap: int = 50
     max_upload_bytes: int = 10 * 1024 * 1024
+
+    # V5 M3/M4 — structured PDF parsing and page-aware chunking
+    parser_backend: str = "docling"  # "docling" or "pypdf"
+
+    # V5 M5 — OCR fallback for scanned PDFs
+    ocr_enabled: bool = True
+    ocr_min_chars_per_page: int = 100
+
+    # V5 Phase 3 M6 — contextual retrieval headers
+    contextual_retrieval_enabled: bool = True
+    contextual_context_model: str = "gpt-4o-mini"
+    contextual_max_doc_tokens: int = 100_000
+    # Chunks in a document are enriched concurrently (I/O-bound LLM calls) instead
+    # of one at a time — bounded to avoid hammering the provider's rate limits.
+    context_enrichment_max_workers: int = 8
+
+    # V5 Phase 3 M7 — bump when ingestion behavior changes materially, so mixed-generation
+    # corpora are diagnosable during a staged reindex rollout.
+    text_pipeline_version: int = 2
 
     # Audio ingestion (M3)
     whisper_model: str = "whisper-1"
@@ -99,9 +120,27 @@ class Settings(BaseSettings):
     v2_confidence_threshold: float = 0.7
     v2_rrf_top_k: int = 5
     v2_rrf_k: int = 60
+    v2_rrf_prefetch_limit: int = 50  # V5 M1 — widen dense/sparse candidate pools before RRF fusion
+
+    # V5 M2 — cross-encoder reranker
+    rerank_enabled: bool = True
+    rerank_model: str = "BAAI/bge-reranker-base"
+    rerank_candidate_pool: int = 50
+    rerank_top_k: int = 5
+    rerank_timeout_s: float = 15.0
     v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
     v2_retrieval_precheck_high_score: float = 0.025
     v2_retrieval_precheck_low_score: float = 0.012
+
+    # V4 run budget — ceilings enforced by RunBudget across a whole search_stream run.
+    # Set generously high: they exist as a runaway-cost/loop safety net, not a
+    # tuning knob a normal run should ever brush up against.
+    run_budget_max_attempts: int = 10
+    run_budget_max_llm_calls: int = 50
+    run_budget_max_web_searches: int = 10
+    run_budget_max_tools: int = 10
+    run_budget_max_input_tokens: int = 200_000
+    run_budget_max_cost_usd: float = 10.0
 
     # MCP Configurations
     mcp_pdf_server_enabled: bool = True

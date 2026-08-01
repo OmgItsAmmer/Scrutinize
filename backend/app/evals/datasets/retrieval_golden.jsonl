@@ -1,0 +1,49 @@
+{"query": "What is the late payment fee in the vendor contract?", "expected_doc_ids": ["vendor_contract"], "category": "keyword_heavy"}
+{"query": "How many days notice is required to terminate the vendor agreement?", "expected_doc_ids": ["vendor_contract"], "category": "rag"}
+{"query": "What currency are payments made in under the vendor contract?", "expected_doc_ids": ["vendor_contract"], "category": "rag"}
+{"query": "Who are the two parties signing the vendor contract?", "expected_doc_ids": ["vendor_contract"], "category": "rag"}
+{"query": "vendor contract termination clause section number", "expected_doc_ids": ["vendor_contract"], "category": "keyword_heavy"}
+{"query": "What is Acme Corp's liability cap in the vendor agreement?", "expected_doc_ids": ["vendor_contract"], "category": "keyword_heavy"}
+{"query": "When does the annual leave policy reset each year?", "expected_doc_ids": ["hr_policy"], "category": "rag"}
+{"query": "How many sick days are employees entitled to per year?", "expected_doc_ids": ["hr_policy"], "category": "rag"}
+{"query": "What is the process for requesting parental leave?", "expected_doc_ids": ["hr_policy"], "category": "rag"}
+{"query": "employee handbook remote work eligibility criteria", "expected_doc_ids": ["hr_policy"], "category": "keyword_heavy"}
+{"query": "Can unused vacation days roll over to the next year?", "expected_doc_ids": ["hr_policy"], "category": "paraphrase"}
+{"query": "What disciplinary steps follow a policy violation at the company?", "expected_doc_ids": ["hr_policy"], "category": "rag"}
+{"query": "What was total quarterly revenue in Q3?", "expected_doc_ids": ["q3_earnings"], "category": "rag"}
+{"query": "How much did operating expenses grow year over year in Q3?", "expected_doc_ids": ["q3_earnings"], "category": "rag"}
+{"query": "What is the gross margin percentage reported for Q3?", "expected_doc_ids": ["q3_earnings"], "category": "keyword_heavy"}
+{"query": "Q3 earnings call guidance for next quarter", "expected_doc_ids": ["q3_earnings"], "category": "keyword_heavy"}
+{"query": "Did the company beat or miss analyst expectations in Q3?", "expected_doc_ids": ["q3_earnings"], "category": "paraphrase"}
+{"query": "What drove the increase in customer churn last quarter?", "expected_doc_ids": ["q3_earnings"], "category": "multi_hop"}
+{"query": "What steps do I follow to reset my account password?", "expected_doc_ids": ["support_faq"], "category": "rag"}
+{"query": "How do I cancel my subscription before the trial ends?", "expected_doc_ids": ["support_faq"], "category": "rag"}
+{"query": "What payment methods does the platform accept?", "expected_doc_ids": ["support_faq"], "category": "rag"}
+{"query": "support FAQ refund policy timeframe", "expected_doc_ids": ["support_faq"], "category": "keyword_heavy"}
+{"query": "I forgot my password, what should I do?", "expected_doc_ids": ["support_faq"], "category": "paraphrase"}
+{"query": "How do I export my data before closing my account?", "expected_doc_ids": ["support_faq"], "category": "rag"}
+{"query": "What temperature should the sourdough starter be kept at?", "expected_doc_ids": ["sourdough_recipe"], "category": "rag"}
+{"query": "How long should the dough undergo bulk fermentation?", "expected_doc_ids": ["sourdough_recipe"], "category": "rag"}
+{"query": "sourdough recipe hydration ratio percentage", "expected_doc_ids": ["sourdough_recipe"], "category": "keyword_heavy"}
+{"query": "What's the ideal oven temperature for baking the bread?", "expected_doc_ids": ["sourdough_recipe"], "category": "paraphrase"}
+{"query": "How often do you feed a sourdough starter to keep it active?", "expected_doc_ids": ["sourdough_recipe"], "category": "rag"}
+{"query": "What is the incident response time SLA for critical severity issues?", "expected_doc_ids": ["incident_runbook"], "category": "rag"}
+{"query": "Who is the designated on-call escalation contact during an outage?", "expected_doc_ids": ["incident_runbook"], "category": "rag"}
+{"query": "runbook postmortem template required sections", "expected_doc_ids": ["incident_runbook"], "category": "keyword_heavy"}
+{"query": "What should I do first when I detect a production outage?", "expected_doc_ids": ["incident_runbook"], "category": "paraphrase"}
+{"query": "How does the on-call rotation schedule get assigned to engineers?", "expected_doc_ids": ["incident_runbook"], "category": "multi_hop"}
+{"query": "What is the maximum altitude the drone can operate at?", "expected_doc_ids": ["drone_manual"], "category": "rag"}
+{"query": "drone manual battery charging time specification", "expected_doc_ids": ["drone_manual"], "category": "keyword_heavy"}
+{"query": "What safety precautions are required before first flight?", "expected_doc_ids": ["drone_manual"], "category": "rag"}
+{"query": "How do I calibrate the drone's compass?", "expected_doc_ids": ["drone_manual"], "category": "rag"}
+{"query": "What's the wind speed limit for safe drone operation?", "expected_doc_ids": ["drone_manual"], "category": "paraphrase"}
+{"query": "What are the side effects of the medication described in the leaflet?", "expected_doc_ids": ["drug_leaflet"], "category": "rag"}
+{"query": "What is the recommended adult dosage on the drug leaflet?", "expected_doc_ids": ["drug_leaflet"], "category": "rag"}
+{"query": "drug leaflet contraindications pregnancy", "expected_doc_ids": ["drug_leaflet"], "category": "keyword_heavy"}
+{"query": "Can this medication be taken with alcohol?", "expected_doc_ids": ["drug_leaflet"], "category": "paraphrase"}
+{"query": "What is the capital of France?", "expected_doc_ids": [], "category": "abstention"}
+{"query": "Explain how photosynthesis works at a cellular level.", "expected_doc_ids": [], "category": "abstention"}
+{"query": "What's the best strategy for the upcoming chess world championship?", "expected_doc_ids": [], "category": "abstention"}
+{"query": "Summarize the plot of a novel about time travel.", "expected_doc_ids": [], "category": "abstention"}
+{"query": "What programming language should I learn first in 2026?", "expected_doc_ids": [], "category": "abstention"}
+{"query": "Hi there, how are you today?", "expected_doc_ids": [], "category": "generic"}

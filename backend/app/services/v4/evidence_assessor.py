@@ -77,7 +77,26 @@ class EvidenceAssessor:
                 use_cloud_llm,
             )
             result = agent.run_sync(user_prompt)
-            return result.data
+            assessment_res = result.output
+
+            from app.services.v2.llm_clients.base import LlmResponse
+            usage = result.usage
+            prompt_tokens = (usage.input_tokens or 0) if usage else 0
+            completion_tokens = (usage.output_tokens or 0) if usage else 0
+            cached_tokens = 0
+            if usage and usage.details and isinstance(usage.details, dict):
+                cached_tokens = usage.details.get("cached_tokens", 0) or 0
+
+            assessment_res.llm_call = LlmResponse(
+                content=assessment_res.model_dump_json() if hasattr(assessment_res, "model_dump_json") else str(assessment_res),
+                model_name=effective_model,
+                prompt_system=effective_system,
+                prompt_user=user_prompt,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_tokens=cached_tokens,
+            )
+            return assessment_res
 
         except Exception as exc:
             logger.warning(

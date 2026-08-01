@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AccountSettingsView } from "./components/AccountSettingsView";
 import { useApp } from "./context/AppContext";
 import { MobileHeader } from "./components/MobileHeader";
@@ -6,6 +7,7 @@ import { ConversationChatView } from "./components/ConversationChatView";
 import { ProjectWorkspace } from "./components/ProjectWorkspace";
 import { Sidebar } from "./components/Sidebar";
 import { AuthView } from "./components/AuthView";
+import { LandingPage } from "./components/LandingPage";
 
 function MainView() {
   const { state } = useApp();
@@ -26,8 +28,12 @@ function MainView() {
 
 export default function App() {
   const { state } = useApp();
+  const [showAuth, setShowAuth] = useState(false);
 
   if (!state.isAuthenticated) {
+    if (!showAuth) {
+      return <LandingPage onEnter={() => setShowAuth(true)} />;
+    }
     return <AuthView />;
   }
 

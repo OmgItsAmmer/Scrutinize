@@ -68,7 +68,26 @@ class CitationVerifier:
                 use_cloud_llm,
             )
             result = agent.run_sync(user_prompt)
-            return result.data
+            citation_res = result.output
+
+            from app.services.v2.llm_clients.base import LlmResponse
+            usage = result.usage
+            prompt_tokens = (usage.input_tokens or 0) if usage else 0
+            completion_tokens = (usage.output_tokens or 0) if usage else 0
+            cached_tokens = 0
+            if usage and usage.details and isinstance(usage.details, dict):
+                cached_tokens = usage.details.get("cached_tokens", 0) or 0
+
+            citation_res.llm_call = LlmResponse(
+                content=citation_res.model_dump_json() if hasattr(citation_res, "model_dump_json") else str(citation_res),
+                model_name=effective_model,
+                prompt_system=effective_system,
+                prompt_user=user_prompt,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_tokens=cached_tokens,
+            )
+            return citation_res
 
         except Exception as exc:
             logger.warning(

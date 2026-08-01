@@ -13,6 +13,7 @@ sqlmodel>=0.0.22
 tiktoken>=0.8
 uvicorn[standard]>=0.32
 pypdf[image]>=4.0.0
+docling>=2.0.0
 fastembed>=0.3.0
 langsmith>=0.1.0
 mcp>=1.0.0

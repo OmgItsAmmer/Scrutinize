@@ -24,6 +24,7 @@ class JobOrchestrator:
         duration_seconds: float | None = None,
         project_id: UUID | None = None,
         conversation_id: UUID | None = None,
+        content_sha256: str | None = None,
     ) -> File:
         file_record = File(
             filename=filename,
@@ -34,6 +35,7 @@ class JobOrchestrator:
             status=FileStatus.UPLOADED,
             project_id=project_id,
             conversation_id=conversation_id,
+            content_sha256=content_sha256,
         )
         self.session.add(file_record)
         self.session.commit()
@@ -105,6 +107,14 @@ class JobOrchestrator:
         segment_id: UUID | None = None,
         project_id: UUID | None = None,
         conversation_id: UUID | None = None,
+        page_number: int | None = None,
+        section_path: str | None = None,
+        char_start: int | None = None,
+        char_end: int | None = None,
+        block_type: str | None = None,
+        context_header: str | None = None,
+        pipeline_version: int = 1,
+        is_poisoned: bool = False,
     ) -> Segment:
         segment = Segment(
             id=segment_id or uuid4(),
@@ -115,6 +125,14 @@ class JobOrchestrator:
             end_time=end_time,
             project_id=project_id,
             conversation_id=conversation_id,
+            page_number=page_number,
+            section_path=section_path,
+            char_start=char_start,
+            char_end=char_end,
+            block_type=block_type,
+            context_header=context_header,
+            pipeline_version=pipeline_version,
+            is_poisoned=is_poisoned,
         )
         self.session.add(segment)
         self.session.commit()
@@ -124,6 +142,14 @@ class JobOrchestrator:
     def list_segments_for_file(self, file_id: UUID) -> list[Segment]:
         statement = select(Segment).where(Segment.file_id == file_id)
         return list(self.session.exec(statement).all())
+
+    def delete_segments_for_file(self, file_id: UUID) -> int:
+        """Delete a file's Postgres segment rows without deleting the File itself (reindex)."""
+        segments = self.list_segments_for_file(file_id)
+        for segment in segments:
+            self.session.delete(segment)
+        self.session.commit()
+        return len(segments)
 
     def delete_file(self, file_id: UUID) -> File:
         file_record = self.session.get(File, file_id)

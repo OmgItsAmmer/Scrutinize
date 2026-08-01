@@ -33,4 +33,5 @@ class File(SQLModel, table=True):
     duration_seconds: float | None = None
     size_bytes: int | None = None
     status: FileStatus = Field(default=FileStatus.UPLOADED)
+    content_sha256: str | None = Field(default=None, index=True)
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -19,6 +19,9 @@ class LlmResponse:
     raw_thinking: str | None = None
     latency_ms: int = 0
     tool_calls: Optional[List[ToolCall]] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
 
 class BaseLlmClient(ABC):
     """Abstract base interface for V2 LLM clients (Local or Cloud)."""

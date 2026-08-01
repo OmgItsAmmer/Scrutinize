@@ -17,7 +17,7 @@ export function ProjectWorkspace() {
   return (
     <section className="flex h-full min-h-0 flex-col">
       <ProjectTabs choice={choice} onChoiceChange={setProjectChoice} />
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 flex flex-col">
         {choice === "chats" && <ConversationChatView scope="project" />}
         {choice === "sources" && <UploadView />}
         {choice === "library" && <LibraryView />}

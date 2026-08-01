@@ -74,14 +74,33 @@ class GroundednessEvaluator:
             result = agent.run_sync(user_prompt)
             
             # Enforce 0.90 safety threshold check explicitly if the model outputs differently
-            score = result.data.score
+            score = result.output.score
             is_grounded = score >= 0.90
             
-            return GroundednessResult(
+            ground_res = GroundednessResult(
                 score=score,
-                reasoning=result.data.reasoning,
+                reasoning=result.output.reasoning,
                 is_grounded=is_grounded,
             )
+
+            from app.services.v2.llm_clients.base import LlmResponse
+            usage = result.usage
+            prompt_tokens = (usage.input_tokens or 0) if usage else 0
+            completion_tokens = (usage.output_tokens or 0) if usage else 0
+            cached_tokens = 0
+            if usage and usage.details and isinstance(usage.details, dict):
+                cached_tokens = usage.details.get("cached_tokens", 0) or 0
+
+            ground_res.llm_call = LlmResponse(
+                content=ground_res.model_dump_json() if hasattr(ground_res, "model_dump_json") else str(ground_res),
+                model_name=effective_model,
+                prompt_system=effective_system,
+                prompt_user=user_prompt,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_tokens=cached_tokens,
+            )
+            return ground_res
 
         except Exception as exc:
             logger.warning(

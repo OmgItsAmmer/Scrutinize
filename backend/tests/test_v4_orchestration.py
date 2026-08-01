@@ -8,7 +8,7 @@ from app.services.v4.burr_orchestrator import BurrOrchestrator
 
 def test_v4_rag_gate_classify(monkeypatch):
     mock_run_result = MagicMock()
-    mock_run_result.data = GateResult(
+    mock_run_result.output = GateResult(
         route="rag",
         reason="Needs project data.",
         requested_tool="generate_pdf",
@@ -87,7 +87,7 @@ def test_run_budget_controller_validation():
     import pytest
     from app.services.v4.run_budget import RunBudget, BudgetExceededError
 
-    # Safe state
+    # Safe state, well within the (deliberately generous) production defaults.
     budget = RunBudget(
         attempts=1,
         llm_calls=5,
@@ -97,29 +97,33 @@ def test_run_budget_controller_validation():
     )
     budget.check()  # should not raise
 
+    # These assert check()'s enforcement logic against explicit low ceilings,
+    # independent of whatever the production defaults are set to (which are
+    # intentionally high — see run_budget.py / config.py run_budget_*).
+
     # Too many attempts
     with pytest.raises(BudgetExceededError) as exc_info:
-        RunBudget(attempts=3).check()
+        RunBudget(max_attempts=2, attempts=3).check()
     assert "Attempts count" in str(exc_info.value)
 
     # Too many LLM calls
     with pytest.raises(BudgetExceededError) as exc_info:
-        RunBudget(llm_calls=7).check()
+        RunBudget(max_llm_calls=6, llm_calls=7).check()
     assert "LLM calls count" in str(exc_info.value)
 
     # Too many web searches
     with pytest.raises(BudgetExceededError) as exc_info:
-        RunBudget(web_searches=3).check()
+        RunBudget(max_web_searches=2, web_searches=3).check()
     assert "Web search count" in str(exc_info.value)
 
     # Too many tools
     with pytest.raises(BudgetExceededError) as exc_info:
-        RunBudget(tools=4).check()
+        RunBudget(max_tools=3, tools=4).check()
     assert "Tool execution count" in str(exc_info.value)
 
     # Too many input tokens
     with pytest.raises(BudgetExceededError) as exc_info:
-        RunBudget(input_tokens=25000).check()
+        RunBudget(max_input_tokens=20000, input_tokens=25000).check()
     assert "Input tokens count" in str(exc_info.value)
 
 
@@ -131,7 +135,7 @@ def test_evidence_assessor(monkeypatch):
     from uuid import uuid4
 
     mock_run_result = MagicMock()
-    mock_run_result.data = EvidenceAssessmentResult(
+    mock_run_result.output = EvidenceAssessmentResult(
         is_sufficient=True,
         reasoning="All clear",
         missing_information=None,
@@ -160,7 +164,7 @@ def test_citation_verifier(monkeypatch):
     from uuid import uuid4
 
     mock_run_result = MagicMock()
-    mock_run_result.data = CitationMapResult(
+    mock_run_result.output = CitationMapResult(
         has_valid_citations=True,
         mappings=[
             CitationMapping(
@@ -194,7 +198,7 @@ def test_groundedness_evaluator(monkeypatch):
     from uuid import uuid4
 
     mock_run_result = MagicMock()
-    mock_run_result.data = GroundednessResult(
+    mock_run_result.output = GroundednessResult(
         score=0.95,
         reasoning="Good groundedness",
         is_grounded=True,

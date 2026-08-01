@@ -14,20 +14,8 @@ def execute_python_in_sandbox(code: str) -> str:
     api_key = settings.e2b_api_key or os.getenv("E2B_API_KEY", "")
     
     if not api_key:
-        logger.warning("E2B_API_KEY is not set. Running in local simulation fallback.")
-        import sys
-        import io
-        import contextlib
-
-        f = io.StringIO()
-        with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
-            try:
-                # Local safe mockup / simulation
-                exec_globals = {}
-                exec(code, exec_globals)
-            except Exception as e:
-                print(f"Error during local simulation: {e}", file=sys.stderr)
-        return f"[MOCK E2B SANDBOX OUTPUT]\n{f.getvalue().strip()}"
+        logger.error("E2B_API_KEY is not set. Python execution sandbox is disabled.")
+        return "Error: E2B_API_KEY is not set. Python execution sandbox is disabled."
 
     try:
         from e2b import Sandbox

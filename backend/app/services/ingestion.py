@@ -30,12 +30,14 @@ def index_segments(
     # Resolve the project_id for this file; fall back to null sentinel for legacy rows.
     project_id = file_record.project_id or _NULL_UUID
 
+    from app.services.v5.untrusted import check_for_injection
     texts = [segment.content for segment in segments]
     vectors = embedding_service.embed_texts(texts)
     vector_segments: list[VectorSegment] = []
 
     for segment, vector in zip(segments, vectors, strict=True):
         segment_id = uuid4()
+        is_poisoned = check_for_injection(segment.content)
         orchestrator.create_segment(
             file_id=file_record.id,
             modality=modality,
@@ -45,6 +47,7 @@ def index_segments(
             segment_id=segment_id,
             project_id=file_record.project_id,
             conversation_id=file_record.conversation_id,
+            is_poisoned=is_poisoned,
         )
         vector_segments.append(
             VectorSegment(
@@ -59,6 +62,7 @@ def index_segments(
                 title=file_record.filename,
                 start_time=segment.start_time,
                 end_time=segment.end_time,
+                is_poisoned=is_poisoned,
             )
         )
 

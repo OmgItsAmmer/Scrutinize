@@ -43,6 +43,8 @@ export type SearchSource = {
   start_time: number | null;
   end_time: number | null;
   score: number;
+  page_number: number | null;
+  section_path: string | null;
 };
 
 export type SearchResponse = {

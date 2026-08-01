@@ -34,6 +34,21 @@ export function formatDurationSeconds(seconds: number | null): string {
   return formatTimestampSeconds(seconds) || "—";
 }
 
+/** "p. 7 — §2.1 Payment Terms" style label for page/section-anchored source cards. */
+export function formatPositionLabel(
+  pageNumber: number | null,
+  sectionPath: string | null
+): string {
+  const parts: string[] = [];
+  if (pageNumber != null) {
+    parts.push(`p. ${pageNumber}`);
+  }
+  if (sectionPath) {
+    parts.push(`§${sectionPath}`);
+  }
+  return parts.join(" — ");
+}
+
 export const V2_LOW_CONFIDENCE_DISCLAIMER =
   "Note: answer may vary — retrieval confidence was low.";
 

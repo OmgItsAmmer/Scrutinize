@@ -23,6 +23,9 @@ class PipelineRun(SQLModel, table=True):
     attempts_count: int = 0
     disclaimer_appended: bool = False
     run_metadata: dict = Field(default_factory=dict, sa_column=Column(JSONB().with_variant(JSON, "sqlite")))
+    total_cost_usd: float | None = Field(default=None)
+    total_tokens: int | None = Field(default=None)
+    project_id: UUID | None = Field(default=None, foreign_key="projects.id", index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -41,4 +44,8 @@ class PipelineStep(SQLModel, table=True):
     retrieved_sources: list | dict | None = Field(default=None, sa_column=Column(JSONB().with_variant(JSON, "sqlite")))
     latency_ms: int | None = None
     status: str | None = None
+    prompt_tokens: int | None = Field(default=None)
+    completion_tokens: int | None = Field(default=None)
+    cached_tokens: int | None = Field(default=None)
+    cost_usd: float | None = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 Route = Literal["rag", "web", "hybrid", "generic"]
@@ -21,6 +21,7 @@ class GateResult(BaseModel):
         default=None,
         description="A conversational reply ONLY if route is 'generic'. Otherwise, must be None."
     )
+    llm_call: Any = Field(default=None, exclude=True)
 
 
 class QueryRewriteResult(BaseModel):
@@ -45,6 +46,7 @@ class EvidenceAssessmentResult(BaseModel):
         default=None,
         description="Specific details or content missing from the retrieval context, if any."
     )
+    llm_call: Any = Field(default=None, exclude=True)
 
 
 class CitationMapping(BaseModel):
@@ -69,6 +71,7 @@ class CitationMapResult(BaseModel):
         default_factory=list,
         description="List of citation support verification mappings."
     )
+    llm_call: Any = Field(default=None, exclude=True)
 
 
 class GroundednessResult(BaseModel):
@@ -82,3 +85,4 @@ class GroundednessResult(BaseModel):
     is_grounded: bool = Field(
         description="Whether the score is at or above the safety threshold (e.g., 0.90)."
     )
+    llm_call: Any = Field(default=None, exclude=True)

@@ -83,6 +83,29 @@ async def upload_file(
             raise HTTPException(status_code=401, detail="Invalid X-Project-Key.")
         project_id = project.id
 
+    import hashlib
+    content_sha256 = hashlib.sha256(data).hexdigest()
+
+    if project_id:
+        from app.models.file import File as DBFile
+        from sqlmodel import select
+        existing_file = session.exec(
+            select(DBFile).where(
+                DBFile.project_id == project_id,
+                DBFile.content_sha256 == content_sha256
+            )
+        ).first()
+        if existing_file:
+            return UploadResponse(
+                file_id=existing_file.id,
+                job_id=None,
+                filename=existing_file.filename,
+                modality=existing_file.modality,
+                status="success",
+                message="Duplicate file detected. Skipped ingestion.",
+                duplicate_of=existing_file.id,
+            )
+
     upload_result = storage.upload_bytes(
         data,
         filename=safe_filename,
@@ -96,6 +119,7 @@ async def upload_file(
         storage_path=upload_result.secure_url,
         size_bytes=len(data),
         project_id=project_id,
+        content_sha256=content_sha256,
     )
     job = orchestrator.create_job(file_id=file_record.id, stage=ingestion_stage(modality))
     orchestrator.mark_file_status(file_record.id, FileStatus.PROCESSING)

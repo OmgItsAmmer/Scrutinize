@@ -1,5 +1,6 @@
 .PHONY: help up down logs infra-up infra-down reset-qdrant backend-shell backend-dev worker-dev v2-dev v2-health \
-	db-migrate test test-unit test-integration test-system test-security lint install-backend install-frontend frontend-dev
+	db-migrate test test-unit test-integration test-system test-security test-evals lint install-backend install-frontend frontend-dev \
+	seed-eval-corpus reindex-project backend frontend
 
 # =============================================================================
 # Scrutinize — run the entire project
@@ -21,23 +22,39 @@
 #   API docs:    http://localhost:8000/docs
 #
 # OPTION B — Local backend with hot reload (best for v2 pipeline development)
-#   Terminal 1:  make v2-dev            # starts Qdrant + Redis, prints next steps
-#   Terminal 2:  make backend-dev       # FastAPI with --reload on :8000
-#   Terminal 3:  make worker-dev        # Celery worker (required for file uploads)
-#   Terminal 4:  make frontend-dev
-#   Search-only (no uploads): set CELERY_TASK_ALWAYS_EAGER=true in backend/.env
-#                             and skip worker-dev.
+#   Terminal 1:  make backend           # starts Qdrant + Redis, Phoenix serve, API server, and Celery worker
+#   Terminal 2:  make frontend          # starts Vite dev server
+#
+#   Alternative: you can still run components individually using:
+#     make infra-up, make backend-dev, make worker-dev, make frontend-dev, phoenix serve
 #
 # AFTER STARTUP
 #   make logs         — follow Docker service logs
 #   make v2-health    — check v2 LLM endpoints (local pipeline)
 #   make help         — list all commands
+#
+# V5 RETRIEVAL EVALS (Phase 0 baseline + regression checks)
+#   make seed-eval-corpus   — seed the fixture project used by test-evals (needs
+#                             Postgres + Qdrant + OPENAI_API_KEY configured)
+#   make test-evals         — run retrieval metrics (Recall@k/MRR/nDCG@k) against
+#                             the golden dataset; writes backend/app/evals/results/<sha>.json
+#   First run of the reranker/Docling downloads models from Hugging Face —
+#   expect a slower first request/ingestion.
+#
+# V5 REINDEXING (after a parsing/chunking/contextual-retrieval change)
+#   make reindex-project PROJECT_ID=<uuid> ARGS="--dry-run"   — preview
+#   make reindex-project PROJECT_ID=<uuid> ARGS="--sync"      — run without a worker
+#   make reindex-project PROJECT_ID=<uuid>                     — enqueue on Celery
 # =============================================================================
 
 help:
 	@echo "Scrutinize dev commands"
 	@echo ""
 	@echo "  Quick start: see instructions at the top of this Makefile."
+	@echo ""
+	@echo "  Run entire app (Local):"
+	@echo "    make backend           - starts Qdrant + Redis, Phoenix serve, API server, and Celery worker"
+	@echo "    make frontend          - starts Vite dev server"
 	@echo ""
 	@echo "  Full stack (Docker):     make up"
 	@echo "  v2 local backend:        make v2-dev          (infra + guide; then backend-dev in another terminal)"
@@ -48,6 +65,10 @@ help:
 	@echo "  Redis + Qdrant only:     make infra-up   (qdrant always; redis skipped if port 6379 busy)"
 	@echo "  Qdrant only:             make infra-qdrant"
 	@echo "  Check v2 LLM:            make v2-health"
+	@echo ""
+	@echo "  Unit/integration tests:  make test-unit / test-integration / test-system / test-security"
+	@echo "  V5 retrieval evals:      make seed-eval-corpus   then   make test-evals"
+	@echo "  V5 reindex a project:    make reindex-project PROJECT_ID=<uuid> [ARGS=\"--dry-run\"]"
 	@echo ""
 	@echo "v2 uses the same FastAPI app — search hits POST /v2/search (frontend: VITE_SEARCH_API=/v2/search)."
 
@@ -86,6 +107,11 @@ backend-shell:
 	docker compose exec backend bash
 
 # --- Local backend (v1 + v2 routes on same server) ---
+
+backend:
+	cd backend && python scripts/run_backend.py
+
+frontend: frontend-dev
 
 backend-dev:
 	cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -141,6 +167,15 @@ check-video-ingestion:
 check-search:
 	cd backend && python scripts/check_search.py $(QUERY)
 
+# V5 Phase 0 — seed/reset the reproducible fixture corpus used by test-evals.
+seed-eval-corpus:
+	cd backend && python scripts/seed_eval_corpus.py
+
+# V5 M7 — reindex every text file in a project (re-parse/chunk/enrich/embed).
+# Usage: make reindex-project PROJECT_ID=<uuid> [ARGS="--dry-run"]
+reindex-project:
+	cd backend && python scripts/reindex_project.py $(PROJECT_ID) $(ARGS)
+
 install-backend:
 	cd backend && pip install -e ".[dev]"
 
@@ -163,6 +198,11 @@ test-system:
 
 test-security:
 	pytest tests/security -m security -v
+
+# V5 Phase 0 — retrieval eval harness. Requires a real Postgres + Qdrant + OpenAI
+# environment seeded via `make seed-eval-corpus`. Not part of `make test` / CI.
+test-evals:
+	pytest tests/evals -m evals -v -s
 
 lint:
 	cd backend && ruff check app

@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from langsmith import traceable
 
@@ -8,6 +9,28 @@ from app.services.v2.conversation_format import (
 )
 from app.services.v2.llm_clients import BaseLlmClient, LlmResponse
 from app.services.v2.prompts import load_prompt
+
+# Some project-specific rewriter prompts (auto-generated per project, see
+# prompt_generator.py) omit the "output only the query" constraint that the
+# default prompt enforces. Models then prepend labels like "Optimized search
+# query:" or wrap the result in quotes, which pollutes the embedding/keyword
+# vectors built from this text. Strip that defensively regardless of prompt
+# quality, since it is cheap and this text feeds retrieval directly.
+_LABEL_PREFIX_RE = re.compile(
+    r"^\s*(?:optimized|rewritten|revised|final|search)\s+(?:search\s+)?quer(?:y|ies)\s*:\s*",
+    re.IGNORECASE,
+)
+_WRAPPING_QUOTES = ('"', "'", "“”", "‘’")
+
+
+def _sanitize_rewrite(text: str) -> str:
+    cleaned = _LABEL_PREFIX_RE.sub("", text).strip()
+    for quotes in _WRAPPING_QUOTES:
+        open_q, close_q = quotes[0], quotes[-1]
+        if len(cleaned) >= 2 and cleaned[0] == open_q and cleaned[-1] == close_q:
+            cleaned = cleaned[1:-1].strip()
+            break
+    return cleaned
 
 
 @dataclass(frozen=True)
@@ -57,7 +80,7 @@ class QueryRewriter:
             effective_system,
             "\n".join(user_lines),
         )
-        rewritten = llm_response.content.strip() or stripped
+        rewritten = _sanitize_rewrite(llm_response.content) or stripped
         return RewrittenQuery(text=rewritten, llm_call=llm_response)
 
 

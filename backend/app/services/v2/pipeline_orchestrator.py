@@ -88,6 +88,7 @@ class PipelineOrchestrator:
             query=stripped,
             modality_filter=modality_filter,
             conversation_context=conversation_context,
+            project_id=project_ctx.project_id if project_ctx else None,
         )
 
         gate_result = self._classify_route(
@@ -168,6 +169,7 @@ class PipelineOrchestrator:
                 query=stripped,
                 modality_filter=modality_filter,
                 conversation_context=conversation_context,
+                project_id=project_ctx.project_id if project_ctx else None,
             )
 
             yield emit("status", {

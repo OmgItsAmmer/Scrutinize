@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -21,6 +21,11 @@ from qdrant_client.models import (
     Prefetch,
     FusionQuery,
     Fusion,
+    ScalarQuantization,
+    ScalarQuantizationConfig,
+    ScalarType,
+    KeywordIndexParams,
+    KeywordIndexType,
 )
 
 from app.core.config import Settings
@@ -43,6 +48,13 @@ class VectorSegment:
     end_time: float | None = None
     created_at: datetime | None = None
     sparse_vector: SparseVector | dict[str, Any] | None = None
+    # V5 M4 — page/section position metadata.
+    page_number: int | None = None
+    section_path: str | None = None
+    block_type: str | None = None
+    # V5 Phase 3 M6 — generated situating header, embedded but never shown/cited as content.
+    context_header: str | None = None
+    is_poisoned: bool = False
 
 
 @dataclass(frozen=True)
@@ -107,6 +119,12 @@ class VectorStore:
                     )
                 )
             },
+            quantization_config=ScalarQuantization(
+                scalar=ScalarQuantizationConfig(
+                    type=ScalarType.INT8,
+                    always_ram=True,
+                )
+            ),
         )
 
     def _ensure_payload_indexes(self) -> None:
@@ -116,10 +134,16 @@ class VectorStore:
 
         for field_name in ("file_id", "modality", "project_id", "conversation_id"):
             try:
+                schema = PayloadSchemaType.KEYWORD
+                if field_name == "project_id":
+                    schema = KeywordIndexParams(
+                        type=KeywordIndexType.KEYWORD,
+                        is_tenant=True,
+                    )
                 self._client.create_payload_index(
                     collection_name=self._collection,
                     field_name=field_name,
-                    field_schema=PayloadSchemaType.KEYWORD,
+                    field_schema=schema,
                 )
             except UnexpectedResponse as exc:
                 # Index already exists — safe to ignore.
@@ -151,6 +175,7 @@ class VectorStore:
                     content=segment.content,
                     title=segment.title,
                     source_path=segment.source_path,
+                    context_header=segment.context_header,
                 )
                 for segment in missing_sparse
             ]
@@ -190,6 +215,11 @@ class VectorStore:
                         "end_time": segment.end_time,
                         "source_path": segment.source_path,
                         "title": segment.title,
+                        "page_number": segment.page_number,
+                        "section_path": segment.section_path,
+                        "block_type": segment.block_type,
+                        "context_header": segment.context_header,
+                        "is_poisoned": segment.is_poisoned,
                         "created_at": (
                             segment.created_at or datetime.now(UTC)
                         ).isoformat(),
@@ -312,13 +342,18 @@ class VectorStore:
         *,
         project_id: UUID,
         top_k: int = 10,
+        prefetch_limit: int | None = None,
         modality: str | None = None,
         query_sparse_vector: SparseVector | dict[str, Any],
         rrf_k: int = 60,
         conversation_id: UUID | None = None,
         include_project_wide: bool = True,
     ) -> HybridSearchResult:
-        """Run separate dense and sparse prefetches, fuse with RRF, return all lists."""
+        """Run separate dense and sparse prefetches, fuse with RRF, return all lists.
+
+        `prefetch_limit` (per-branch Qdrant limit) is independent from `top_k`
+        (the post-fusion cut) so RRF has a wide candidate pool to fuse over.
+        """
         from app.services.v2.retrieval_utils import fuse_rrf_hits
 
         self.ensure_collection()
@@ -329,19 +364,20 @@ class VectorStore:
             include_project_wide=include_project_wide,
         )
         sv = self._normalize_sparse_vector(query_sparse_vector)
+        branch_limit = max(prefetch_limit or top_k, top_k)
 
         dense_response = self._client.query_points(
             collection_name=self._collection,
             query=query_vector,
             using=self.TEXT_VECTOR_NAME,
-            limit=top_k,
+            limit=branch_limit,
             query_filter=query_filter,
         )
         sparse_response = self._client.query_points(
             collection_name=self._collection,
             query=sv,
             using="sparse_vector",
-            limit=top_k,
+            limit=branch_limit,
             query_filter=query_filter,
         )
 
@@ -356,6 +392,7 @@ class VectorStore:
             top_k=top_k,
             sparse_query_dimensions=sparse_dims,
         )
+        stats = replace(stats, prefetch_limit=branch_limit)
         return HybridSearchResult(
             hits=fused_hits,
             dense_hits=dense_hits,
@@ -385,4 +422,14 @@ class VectorStore:
                     ]
                 )
             ),
+        )
+
+    def delete_by_ids(self, point_ids: list[UUID]) -> None:
+        """Delete specific points by ID — used by reindex to remove only the pre-reindex
+        vectors, since a file_id filter-delete would also remove the freshly upserted ones."""
+        if not point_ids or not self.collection_exists():
+            return
+        self._client.delete(
+            collection_name=self._collection,
+            points_selector=[str(point_id) for point_id in point_ids],
         )

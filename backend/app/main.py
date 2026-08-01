@@ -55,6 +55,17 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.exception("Database init failed — check DATABASE_URL and Neon connectivity")
         raise
+
+    if settings.rerank_enabled:
+        try:
+            logger.info("Warm up reranker model: %s", settings.rerank_model)
+            from app.core import deps
+            reranker = deps.get_reranker(settings)
+            _ = reranker.model
+            logger.info("Reranker model warmed up successfully")
+        except Exception as e:
+            logger.warning("Failed to warm up reranker: %s", e)
+
     yield
 
 

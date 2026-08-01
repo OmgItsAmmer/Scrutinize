@@ -42,3 +42,10 @@ def get_job_status(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return JobStatusResponse.model_validate(job)
+
+
+@router.get("/notifications/", tags=["notifications"])
+@router.get("/notifications", tags=["notifications"])
+def dummy_notifications():
+    """Dummy notifications endpoint to suppress 404 logs from browser extensions or service workers."""
+    return []

@@ -33,3 +33,22 @@ def test_get_job_returns_none_for_missing_id(session):
     from uuid import uuid4
 
     assert orchestrator.get_job(uuid4()) is None
+
+
+@pytest.mark.unit
+def test_delete_segments_for_file_removes_rows_but_keeps_file(session):
+    orchestrator = JobOrchestrator(session)
+    file_record = orchestrator.create_file(
+        filename="doc.pdf",
+        modality=FileModality.TEXT,
+        storage_path="uploads/doc.pdf",
+        size_bytes=128,
+    )
+    orchestrator.create_segment(file_id=file_record.id, modality=FileModality.TEXT, content="chunk one")
+    orchestrator.create_segment(file_id=file_record.id, modality=FileModality.TEXT, content="chunk two")
+
+    deleted_count = orchestrator.delete_segments_for_file(file_record.id)
+
+    assert deleted_count == 2
+    assert orchestrator.list_segments_for_file(file_record.id) == []
+    assert orchestrator.get_file(file_record.id) is not None

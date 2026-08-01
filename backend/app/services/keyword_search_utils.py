@@ -72,11 +72,12 @@ def build_sparse_index_text(
     content: str,
     title: str = "",
     source_path: str = "",
+    context_header: str | None = None,
 ) -> str:
     """Enriched text for BM25 indexing (dense embeddings still use raw content)."""
     parts: list[str] = []
 
-    for source in (content, title, filename_stem(source_path)):
+    for source in (content, title, filename_stem(source_path), context_header or ""):
         for variant in keyword_variants(source):
             parts.append(variant)
 

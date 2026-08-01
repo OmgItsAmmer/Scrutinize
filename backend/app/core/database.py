@@ -26,12 +26,16 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(
-            normalize_database_url(settings.database_url),
-            echo=settings.debug,
-            pool_pre_ping=True,
-            connect_args={"connect_timeout": 15},
-        )
+        url = normalize_database_url(settings.database_url)
+        kwargs = {
+            "echo": settings.debug,
+            "pool_pre_ping": True,
+            "connect_args": {"connect_timeout": 15},
+        }
+        if "postgresql" in url:
+            kwargs["pool_size"] = settings.db_pool_size
+            kwargs["max_overflow"] = settings.db_max_overflow
+        _engine = create_engine(url, **kwargs)
     return _engine
 
 

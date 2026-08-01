@@ -111,6 +111,16 @@ class CloudLlmClient(BaseLlmClient):
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
 
+        prompt_tokens = 0
+        completion_tokens = 0
+        cached_tokens = 0
+        if hasattr(response, "usage") and response.usage:
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+            details = getattr(response.usage, "prompt_tokens_details", None)
+            if details:
+                cached_tokens = getattr(details, "cached_tokens", 0) or 0
+
         return LlmResponse(
             content=text,
             model_name=model,
@@ -119,6 +129,9 @@ class CloudLlmClient(BaseLlmClient):
             raw_thinking=raw_thinking,
             latency_ms=latency_ms,
             tool_calls=tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
         )
 
     @traceable(name="CloudLlmClient.generate_stream", run_type="llm")

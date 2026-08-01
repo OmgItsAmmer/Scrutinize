@@ -66,7 +66,7 @@ class RagGate:
                 use_cloud_llm,
             )
             result = agent.run_sync(user_prompt)
-            gate_res = result.data
+            gate_res = result.output
 
             # Enforce gate prompt rules: reply is only for generic route
             if gate_res.route != "generic":
@@ -76,6 +76,25 @@ class RagGate:
                     requested_tool=gate_res.requested_tool,
                     reply=None,
                 )
+
+            # Construct LlmResponse and attach it
+            from app.services.v2.llm_clients.base import LlmResponse
+            usage = result.usage
+            prompt_tokens = (usage.input_tokens or 0) if usage else 0
+            completion_tokens = (usage.output_tokens or 0) if usage else 0
+            cached_tokens = 0
+            if usage and usage.details and isinstance(usage.details, dict):
+                cached_tokens = usage.details.get("cached_tokens", 0) or 0
+
+            gate_res.llm_call = LlmResponse(
+                content=gate_res.model_dump_json() if hasattr(gate_res, "model_dump_json") else str(gate_res),
+                model_name=effective_model,
+                prompt_system=effective_system,
+                prompt_user=user_prompt,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_tokens=cached_tokens,
+            )
             return gate_res
 
         except Exception as exc:

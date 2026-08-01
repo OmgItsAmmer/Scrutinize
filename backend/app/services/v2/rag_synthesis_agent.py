@@ -38,15 +38,14 @@ class RagSynthesisAgent:
         effective_system = system_override or self._system
         if tools:
             effective_system += "\n\n### PDF GENERATION TOOL RULE:\nIf the user explicitly asks to generate a PDF or compile a document, you MUST invoke the 'generate_pdf' tool."
-        lines: list[str] = []
-        for index, source in enumerate(sources, start=1):
-            time_label = _format_time_range(source.start_time, source.end_time)
-            lines.append(
-                f"{index}. [{source.modality}] {source.title} {time_label} "
-                f"(score={source.score:.3f}): {source.content}"
-            )
-
-        user_lines = [f"Question: {query.strip()}", "", "Sources:", *lines]
+        
+        from app.services.v5.untrusted import wrap_untrusted
+        user_lines = [
+            f"Question: {query.strip()}",
+            "",
+            "Sources:",
+            wrap_untrusted(sources),
+        ]
         append_conversation_context(user_lines, conversation_context)
 
         llm_response = self._client.generate(
@@ -71,15 +70,13 @@ class RagSynthesisAgent:
     ) -> Iterator[str]:
         effective_model = model or self._model
         effective_system = system_override or self._system
-        lines: list[str] = []
-        for index, source in enumerate(sources, start=1):
-            time_label = _format_time_range(source.start_time, source.end_time)
-            lines.append(
-                f"{index}. [{source.modality}] {source.title} {time_label} "
-                f"(score={source.score:.3f}): {source.content}"
-            )
-
-        user_lines = [f"Question: {query.strip()}", "", "Sources:", *lines]
+        from app.services.v5.untrusted import wrap_untrusted
+        user_lines = [
+            f"Question: {query.strip()}",
+            "",
+            "Sources:",
+            wrap_untrusted(sources),
+        ]
         append_conversation_context(user_lines, conversation_context)
 
         return self._client.generate_stream(
@@ -108,3 +105,15 @@ def _format_time_range(start_time: float | None, end_time: float | None) -> str:
     if start_time is not None:
         return f"[{_seconds_to_timestamp(start_time)}]"
     return f"[–{_seconds_to_timestamp(end_time)}]" if end_time is not None else ""
+
+
+def _format_position_label(page_number: int | None, section_path: str | None) -> str:
+    """" p. 7 — §2.1 Payment Terms" style suffix; empty when no position metadata exists."""
+    parts: list[str] = []
+    if page_number is not None:
+        parts.append(f"p. {page_number}")
+    if section_path:
+        parts.append(f"§{section_path}")
+    if not parts:
+        return ""
+    return " (" + " — ".join(parts) + ")"

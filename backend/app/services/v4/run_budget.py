@@ -9,17 +9,22 @@ class BudgetExceededError(Exception):
 
 
 class RunBudget(BaseModel):
-    max_attempts: int = 2
-    max_llm_calls: int = 6
-    max_web_searches: int = 2
-    max_tools: int = 3
-    max_input_tokens: int = 20000
+    # Generous fallback ceilings — real limits normally come from Settings
+    # (run_budget_* in config.py) via BurrOrchestrator. These defaults only
+    # apply if a caller constructs RunBudget without overrides.
+    max_attempts: int = 10
+    max_llm_calls: int = 50
+    max_web_searches: int = 10
+    max_tools: int = 10
+    max_input_tokens: int = 200_000
+    max_cost_usd: float = 10.0
 
     attempts: int = 0
     llm_calls: int = 0
     web_searches: int = 0
     tools: int = 0
     input_tokens: int = 0
+    cost_usd: float = 0.0
 
     def check(self) -> None:
         """Check if any budget is exceeded. Raises BudgetExceededError if it is."""
@@ -42,4 +47,8 @@ class RunBudget(BaseModel):
         if self.input_tokens > self.max_input_tokens:
             raise BudgetExceededError(
                 f"Input tokens count ({self.input_tokens}) exceeded maximum allowed ({self.max_input_tokens})."
+            )
+        if self.cost_usd > self.max_cost_usd:
+            raise BudgetExceededError(
+                f"Cost budget ({self.cost_usd:.6f} USD) exceeded maximum allowed ({self.max_cost_usd:.6f} USD)."
             )

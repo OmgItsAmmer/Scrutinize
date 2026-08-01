@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   displayV2Answer,
   formatConfidencePercent,
+  formatPositionLabel,
   formatTimestampSeconds,
   V2_LOW_CONFIDENCE_DISCLAIMER,
 } from "../lib/format";
@@ -150,12 +151,16 @@ function ModalityBadge({ modality }: { modality: SearchSource["modality"] }) {
 }
 
 function TextSourceCard({ source, style }: { source: SearchSource; style?: React.CSSProperties }) {
+  const positionLabel = formatPositionLabel(source.page_number, source.section_path);
   return (
     <article className="rounded-2xl border p-4 shadow-sm backdrop-blur-md saturate-125" style={style}>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <ModalityBadge modality={source.modality} />
           <h3 className="text-sm font-semibold text-zinc-900 break-words">{source.title}</h3>
+          {positionLabel && (
+            <span className="text-xs text-zinc-500 shrink-0">{positionLabel}</span>
+          )}
         </div>
         <span className="text-xs text-zinc-500 shrink-0">{(source.score * 100).toFixed(0)}% match</span>
       </div>
@@ -481,6 +486,7 @@ type SourcePreviewModalProps = {
 };
 
 export function SourcePreviewModal({ source, index, onClose }: SourcePreviewModalProps) {
+  const positionLabel = formatPositionLabel(source.page_number, source.section_path);
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -512,6 +518,9 @@ export function SourcePreviewModal({ source, index, onClose }: SourcePreviewModa
               <span className="text-xs text-zinc-500 font-medium">
                 {(source.score * 100).toFixed(0)}% match
               </span>
+              {positionLabel && (
+                <span className="text-xs text-zinc-500 font-medium">{positionLabel}</span>
+              )}
             </div>
             <h3 className="text-lg font-bold text-zinc-900 dark:text-white break-words">
               {source.title}
