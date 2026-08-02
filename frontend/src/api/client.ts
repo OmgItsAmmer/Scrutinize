@@ -11,6 +11,9 @@ import type {
   ProjectInfo,
   AuthTokenResponse,
   UserProject,
+  PipelineTraceDto,
+  RetrievalCandidateMatch,
+  RetrievalCandidatesDto,
   SearchV2Response,
   UploadResponse,
 } from "../types/api";
@@ -114,6 +117,26 @@ export async function fetchPdfBlob(url: string): Promise<Blob> {
   }
 
   return response.blob();
+}
+
+export function isDevUiEnabled(): boolean {
+  return String(import.meta.env.VITE_DEV_UI ?? "").toLowerCase() === "true";
+}
+
+export function fetchPipelineTraceForMessage(messageId: string): Promise<PipelineTraceDto> {
+  return request<PipelineTraceDto>(`/v3/debug/messages/${messageId}/trace`);
+}
+
+export function fetchRetrievalCandidates(
+  runId: string,
+  conversationId: string,
+  options?: { attempt?: number; match?: RetrievalCandidateMatch; limit?: number },
+): Promise<RetrievalCandidatesDto> {
+  const params = new URLSearchParams({ conversation_id: conversationId });
+  if (options?.attempt !== undefined) params.set("attempt", String(options.attempt));
+  if (options?.match) params.set("match", options.match);
+  if (options?.limit) params.set("limit", String(options.limit));
+  return request<RetrievalCandidatesDto>(`/v3/debug/runs/${runId}/retrieval-candidates?${params.toString()}`);
 }
 
 export function isLocalDevApi(): boolean {

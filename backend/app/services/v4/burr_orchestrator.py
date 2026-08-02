@@ -51,7 +51,122 @@ LOW_CONFIDENCE_DISCLAIMER = "Note: answer may vary — retrieval confidence was 
 PDF_TITLE_FALLBACK = "generated-document"
 PDF_TOOL_NAME = "generate_pdf"
 FLOWCHART_TOOL_NAME = "generate_flowchart"
+WEB_SEARCH_TOOL_NAME = "web_search"
 TOOLS_REQUIRING_RAG = frozenset({PDF_TOOL_NAME, FLOWCHART_TOOL_NAME})
+
+
+def web_search_allowed(web_search_mode: str) -> bool:
+    """Single source of truth for 'is the model permitted to touch the web at all'."""
+    return web_search_mode != "never"
+
+
+def build_tool_context(
+    *, mcp_enabled: bool, enable_web_search: bool, web_search_mode: str
+) -> str:
+    """Advertise tools to the gate LLM — but only the ones it is actually allowed to use.
+
+    A model cannot request a tool it has never been told about. Listing `web_search`
+    while the user has web search set to "never" is what made the gate keep choosing
+    web/hybrid routes and setting requested_tool="web_search"; the route clamp then
+    rewrote the route but the tool request (and the model's whole framing of the
+    answer) survived. So the tool list is built per-turn from the user's preference
+    rather than being a static capability dump.
+    """
+    tools: list[str] = []
+    if mcp_enabled:
+        tools.append(
+            "- generate_pdf: Create a downloadable PDF document from synthesized "
+            "project content."
+        )
+        tools.append(
+            "- generate_flowchart: Generate a Mermaid flowchart diagram visualizing "
+            "processes/workflows."
+        )
+    if enable_web_search and web_search_allowed(web_search_mode):
+        tools.append(
+            "- web_search: Search the web for real-time technology/AI news, startup "
+            "funding, or recent tech developments."
+        )
+    return "\n".join(tools)
+
+
+def build_gate_policy_directive(web_search_mode: str) -> str:
+    """Hard routing policy injected into the gate system prompt at request time.
+
+    The base gate prompt is static and unconditionally teaches the model to route
+    real-time questions to "web"/"hybrid". Under an explicit user preference that
+    instruction is wrong, so it gets overridden here instead of being silently
+    contradicted after the fact by the route clamp.
+    """
+    if web_search_mode == "never":
+        return (
+            "MANDATORY ROUTING POLICY — OVERRIDES EVERY RULE ABOVE:\n"
+            "The user has DISABLED web search for this request. Live internet access "
+            "is unavailable to you.\n"
+            "- You MUST NOT return route \"web\" or route \"hybrid\". They are forbidden.\n"
+            "- The only permitted routes are \"rag\" and \"generic\".\n"
+            "- You MUST NOT set requested_tool to \"web_search\".\n"
+            "- If the question needs real-time information, still choose \"rag\" and "
+            "answer from local documents only. Do not promise or imply a web lookup."
+        )
+    if web_search_mode == "always":
+        return (
+            "MANDATORY ROUTING POLICY — OVERRIDES EVERY RULE ABOVE:\n"
+            "The user has FORCED web search on for this request. Every answer must be "
+            "backed by a live web lookup.\n"
+            "- You MUST NOT return route \"generic\" or route \"rag\". They are forbidden.\n"
+            "- The only permitted routes are \"web\" and \"hybrid\".\n"
+            "- Choose \"hybrid\" when local project documents are also relevant, "
+            "otherwise \"web\".\n"
+            "- Never answer conversationally instead of routing; a web search must happen."
+        )
+    return ""
+
+
+def build_synthesis_policy_directive(web_search_mode: str) -> str:
+    """Answer-time policy for the synthesis model (which also has tool-calling access)."""
+    if web_search_mode == "never":
+        return (
+            "MANDATORY POLICY — OVERRIDES EVERY RULE ABOVE:\n"
+            "Web search is DISABLED for this request. You have no internet access.\n"
+            "- You MUST NOT call the web_search tool under any circumstance.\n"
+            "- Answer strictly from the provided sources and the conversation.\n"
+            "- If the sources do not cover the question, say so plainly instead of "
+            "suggesting or pretending to look it up online."
+        )
+    if web_search_mode == "always":
+        return (
+            "POLICY: Web search is enabled and live web results are already included "
+            "in the provided sources. Ground the answer in them and cite them."
+        )
+    return ""
+
+
+def filter_tools_for_web_search_mode(
+    tools: list[dict] | None, web_search_mode: str
+) -> list[dict] | None:
+    """Strip web_search from the synthesis tool schema list when the user forbade it.
+
+    The synthesis model is handed the raw MCP tool list, which contains web_search.
+    Prompt text alone is not a guarantee, so the capability is removed outright.
+    """
+    if not tools or web_search_allowed(web_search_mode):
+        return tools
+    filtered = [
+        tool
+        for tool in tools
+        if (tool.get("function", {}).get("name") or tool.get("name"))
+        != WEB_SEARCH_TOOL_NAME
+    ]
+    return filtered or None
+
+
+def sanitize_requested_tool(
+    requested_tool: str | None, web_search_mode: str
+) -> str | None:
+    if requested_tool == WEB_SEARCH_TOOL_NAME and not web_search_allowed(web_search_mode):
+        return None
+    return requested_tool
 
 
 def count_tokens_fallback(text: str, model_name: str) -> int:
@@ -66,6 +181,28 @@ def count_tokens_fallback(text: str, model_name: str) -> int:
         return len(text) // 4
 
 
+def constrain_route_for_web_search_mode(route: str, web_search_mode: str) -> str:
+    """Clamp a route to what the user's web search preference actually allows.
+
+    The user's choice is a hard constraint, not a hint any one step can override:
+    "never" forbids web/hybrid outright, "always" guarantees a web component.
+    Every place that can (re)assign `route` — the initial gate decision AND the
+    decision/evaluator's retry suggestion — must call this, or a later step can
+    silently reintroduce a path the user explicitly excluded.
+    """
+    if web_search_mode == "always":
+        if route == "rag":
+            return "hybrid"
+        if route == "generic":
+            return "web"
+        return route
+    if web_search_mode == "never":
+        if route in ("web", "hybrid"):
+            return "rag"
+        return route
+    return route
+
+
 class PrecheckAction(SingleStepAction):
     def __init__(self, precheck: RetrievalPrecheck | None, settings: Settings):
         super().__init__()
@@ -74,7 +211,7 @@ class PrecheckAction(SingleStepAction):
 
     @property
     def reads(self) -> list[str]:
-        return ["query", "project_id", "conversation_id", "has_corpus", "client_requested_tool"]
+        return ["query", "project_id", "conversation_id", "has_corpus", "client_requested_tool", "conversation_context"]
 
     @property
     def writes(self) -> list[str]:
@@ -86,13 +223,21 @@ class PrecheckAction(SingleStepAction):
                 precheck_action="continue", precheck_reason=None
             )
 
+        web_search_mode = inputs.get("web_search_mode", "auto")
+
         precheck_res = self.precheck.evaluate(
             state["query"],
             project_id=state["project_id"],
             conversation_id=state["conversation_id"],
             has_corpus=state["has_corpus"],
             client_requested_tool=state["client_requested_tool"],
-            enable_web_search=self.settings.enable_web_search,
+            # The user's "never" preference is folded in here rather than being undone
+            # downstream: without it the precheck happily returns route_web (e.g. for an
+            # empty corpus), which the clamp then has to rewrite to rag.
+            enable_web_search=(
+                self.settings.enable_web_search and web_search_allowed(web_search_mode)
+            ),
+            conversation_context=state.get("conversation_context") or "",
         )
 
         route = None
@@ -141,7 +286,13 @@ class GateAction(SingleStepAction):
         return ["route", "gate_result", "llm_calls", "input_tokens", "cost_usd"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
-        # If precheck already determined the route, we skip gate classification
+        web_search_mode = inputs.get("web_search_mode", "auto")
+
+        # If precheck already determined the route, we skip gate classification — but
+        # web_search_mode ("always"/"never") must still be enforced on this path. It
+        # used to only be applied below, after an LLM gate call, so any query the cheap
+        # precheck resolved on its own (the common case: confident retrieval score, or
+        # no indexed corpus) silently ignored the user's web search preference entirely.
         if state["route"] is not None:
             gate_res = GateResult(
                 route=state["route"],
@@ -149,29 +300,28 @@ class GateAction(SingleStepAction):
                 requested_tool=state["client_requested_tool"],
                 reply=None,
             )
-            return {"route": state["route"]}, state.update(gate_result=gate_res)
+            gate_res = self._apply_web_search_mode(gate_res, web_search_mode)
+            return {"route": gate_res.route}, state.update(route=gate_res.route, gate_result=gate_res)
 
         project_ctx = state["project_ctx"]
 
-        # Build tool context
-        tools = []
-        if self.mcp_manager and self.mcp_manager.is_enabled():
-            tools.append(
-                "- generate_pdf: Create a downloadable PDF document from synthesized "
-                "project content."
-            )
-            tools.append(
-                "- generate_flowchart: Generate a Mermaid flowchart diagram visualizing "
-                "processes/workflows."
-            )
-        if self.settings.enable_web_search:
-            tools.append(
-                "- web_search: Search the web for real-time technology/AI news, startup funding, or recent tech developments."
-            )
-        tool_context = "\n".join(tools)
+        # Tool advertisement and routing policy are both rebuilt per request from the
+        # user's web search preference — the model is never told about a capability it
+        # is not allowed to use, and is explicitly forced when the user demands web.
+        tool_context = build_tool_context(
+            mcp_enabled=bool(self.mcp_manager and self.mcp_manager.is_enabled()),
+            enable_web_search=self.settings.enable_web_search,
+            web_search_mode=web_search_mode,
+        )
+        policy_directive = build_gate_policy_directive(web_search_mode)
 
         # Estimate input tokens before calling LLM
-        prompt_len = len(state["query"]) + len(tool_context) + len(state["conversation_context"])
+        prompt_len = (
+            len(state["query"])
+            + len(tool_context)
+            + len(policy_directive)
+            + len(state["conversation_context"])
+        )
 
         gate_res = self.gate.classify(
             state["query"],
@@ -183,31 +333,37 @@ class GateAction(SingleStepAction):
             conversation_context=state["conversation_context"],
             tool_context=tool_context,
             client_requested_tool=state["client_requested_tool"],
+            policy_directive=policy_directive,
         )
 
         # Apply web search mode overrides if any
-        web_search_mode = inputs.get("web_search_mode", "auto")
-        if web_search_mode == "always":
-            new_route = (
-                "hybrid"
-                if gate_res.route == "rag"
-                else ("web" if gate_res.route == "generic" else gate_res.route)
-            )
-            gate_res = GateResult(
-                route=new_route,
-                reason=f"{gate_res.reason} (Web search mode: ALWAYS)",
-                reply=None if new_route != "generic" else gate_res.reply,
-                requested_tool=gate_res.requested_tool,
-            )
-        elif web_search_mode == "never":
-            new_route = "rag" if gate_res.route in ("web", "hybrid") else gate_res.route
-            gate_res = GateResult(
-                route=new_route,
-                reason=f"{gate_res.reason} (Web search mode: NEVER)",
-                reply=gate_res.reply,
-                requested_tool=gate_res.requested_tool,
-            )
+        gate_res = self._apply_web_search_mode(gate_res, web_search_mode)
 
+        return self._finalize(state, gate_res, prompt_len, web_search_mode)
+
+    @staticmethod
+    def _apply_web_search_mode(gate_res: GateResult, web_search_mode: str) -> GateResult:
+        new_route = constrain_route_for_web_search_mode(gate_res.route, web_search_mode)
+        # The tool request is clamped alongside the route. Clamping only the route left
+        # requested_tool="web_search" alive under "never", which then reached synthesis
+        # and got executed there.
+        new_tool = sanitize_requested_tool(gate_res.requested_tool, web_search_mode)
+        if new_route == gate_res.route and new_tool == gate_res.requested_tool:
+            return gate_res
+        return GateResult(
+            route=new_route,
+            reason=f"{gate_res.reason} (Web search mode: {web_search_mode.upper()})",
+            reply=None if new_route != "generic" else gate_res.reply,
+            requested_tool=new_tool,
+        )
+
+    def _finalize(
+        self,
+        state: State,
+        gate_res: GateResult,
+        prompt_len: int = 0,
+        web_search_mode: str = "auto",
+    ) -> tuple[dict, State]:
         # Maybe force RAG for tools
         tool = gate_res.requested_tool or state["client_requested_tool"]
         if tool in TOOLS_REQUIRING_RAG:
@@ -218,6 +374,11 @@ class GateAction(SingleStepAction):
                     reply=None,
                     requested_tool=tool,
                 )
+            # Forcing "rag" here happens *after* the web search mode clamp, so without
+            # re-clamping, asking for a PDF with web search set to "always" silently
+            # dropped the web half of the request. Re-clamp so both constraints hold:
+            # "always" lands on hybrid (retrieval + web, then the document).
+            gate_res = self._apply_web_search_mode(gate_res, web_search_mode)
 
         llm_calls = state.get("llm_calls", 0)
         input_tokens = state.get("input_tokens", 0)
@@ -331,11 +492,12 @@ class RetrieveAction(SingleStepAction):
             "conversation_id",
             "web_searches",
             "cost_usd",
+            "gate_result",
         ]
 
     @property
     def writes(self) -> list[str]:
-        return ["sources", "web_searches", "cost_usd", "retrieval_stats", "source_rank_fields", "retrieval_prompt_tokens", "retrieval_cost_usd"]
+        return ["sources", "web_searches", "cost_usd", "retrieval_stats", "source_rank_fields", "retrieval_candidates", "retrieval_candidate_rank_fields", "retrieval_prompt_tokens", "retrieval_cost_usd", "route", "gate_result"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
         rewritten_text = state["rewritten_query"]
@@ -345,9 +507,29 @@ class RetrieveAction(SingleStepAction):
         conversation_id = state["conversation_id"]
         web_search_mode = inputs.get("web_search_mode", "auto")
 
-        disable_web = web_search_mode == "never"
+        disable_web = not web_search_allowed(web_search_mode)
+        force_web = web_search_mode == "always"
         web_searches = state.get("web_searches", 0)
         cost_usd = state.get("cost_usd", 0.0)
+
+        # Last line of defence for "always": whatever the gate, the tool forcing, or a
+        # decision-agent retry decided upstream, a run the user marked "always" does not
+        # reach synthesis without live web results. Treating a leftover "rag" as hybrid
+        # here means no future routing change can quietly drop the web half again.
+        gate_result = state.get("gate_result")
+        if force_web and route == "rag":
+            logger.info("web_search_mode=always: upgrading leftover rag route to hybrid.")
+            route = "hybrid"
+            # Keep gate_result in sync — it is what the final response and the pipeline
+            # logs report as "route", so leaving it on "rag" would show the user RAG
+            # while web results were actually used.
+            if gate_result is not None:
+                gate_result = GateResult(
+                    route="hybrid",
+                    reason=f"{gate_result.reason} (Web search mode: ALWAYS)",
+                    reply=None,
+                    requested_tool=gate_result.requested_tool,
+                )
 
         if route == "web":
             if disable_web:
@@ -360,6 +542,8 @@ class RetrieveAction(SingleStepAction):
                 web_searches=web_searches,
                 retrieval_stats=None,
                 source_rank_fields=None,
+                retrieval_candidates=None,
+                retrieval_candidate_rank_fields=None,
                 retrieval_prompt_tokens=0,
                 retrieval_cost_usd=0.0,
             )
@@ -374,6 +558,8 @@ class RetrieveAction(SingleStepAction):
         )
         sources = retrieval.sources
         source_rank_fields = retrieval.source_rank_fields
+        retrieval_candidates = retrieval.candidates
+        retrieval_candidate_rank_fields = retrieval.candidate_rank_fields
 
         if route == "hybrid" and not disable_web:
             web_sources = self._retrieve_web(rewritten_text)
@@ -413,10 +599,14 @@ class RetrieveAction(SingleStepAction):
 
         return {"sources": sources}, state.update(
             sources=sources,
+            route=route,
+            gate_result=gate_result,
             web_searches=web_searches,
             cost_usd=cost_usd,
             retrieval_stats=retrieval.stats,
             source_rank_fields=source_rank_fields,
+            retrieval_candidates=retrieval_candidates,
+            retrieval_candidate_rank_fields=retrieval_candidate_rank_fields,
             retrieval_prompt_tokens=num_tokens,
             retrieval_cost_usd=embedding_cost,
         )
@@ -558,6 +748,8 @@ class SynthesizeAction(SingleStepAction):
         conversation_context = state["conversation_context"]
         project_ctx = state["project_ctx"]
         on_chunk = inputs.get("on_chunk")
+        web_search_mode = inputs.get("web_search_mode", "auto")
+        policy_directive = build_synthesis_policy_directive(web_search_mode)
 
         # Synthesis-only retry (citation/groundedness failure, sources unchanged):
         # fold the verifier's feedback into the prompt so regeneration actually
@@ -577,7 +769,7 @@ class SynthesizeAction(SingleStepAction):
         if not sources:
             if pdf_requested:
                 gen_res = self._draft_document_content(
-                    rewritten_text, conversation_context, project_ctx
+                    rewritten_text, conversation_context, project_ctx, policy_directive
                 )
                 answer = gen_res.answer
                 llm_call = gen_res.llm_call
@@ -594,7 +786,7 @@ class SynthesizeAction(SingleStepAction):
                 synthesis_result = gen_res
             elif flowchart_requested:
                 gen_res = self._draft_document_content(
-                    rewritten_text, conversation_context, project_ctx
+                    rewritten_text, conversation_context, project_ctx, policy_directive
                 )
                 answer = gen_res.answer
                 llm_call = gen_res.llm_call
@@ -636,6 +828,11 @@ class SynthesizeAction(SingleStepAction):
             )
             else None
         )
+        # The MCP tool list contains web_search. Handing it to the synthesis model on a
+        # "never" run let the model perform a web search after routing had already been
+        # constrained — the single biggest way the toggle was being ignored. Remove the
+        # capability rather than relying on the prompt to discourage it.
+        tools = filter_tools_for_web_search_mode(tools, web_search_mode)
 
         sources_len = sum(len(s.content) for s in sources)
         prompt_length = len(rewritten_text) + sources_len + len(conversation_context)
@@ -651,6 +848,7 @@ class SynthesizeAction(SingleStepAction):
                 ),
                 conversation_context=conversation_context,
                 tools=tools,
+                policy_directive=policy_directive,
             )
             answer = synthesis_result.answer
             llm_call = synthesis_result.llm_call
@@ -786,6 +984,15 @@ class SynthesizeAction(SingleStepAction):
                             answer = f"Sandbox execution failed: {e}"
                         break
                     elif tool_name == "web_search":
+                        # Defence in depth: the schema was already withheld above, so a
+                        # call here means the model invented the tool. Refuse it rather
+                        # than executing a search the user switched off.
+                        if not web_search_allowed(web_search_mode):
+                            logger.warning(
+                                "Blocked web_search tool call: web_search_mode=%s.",
+                                web_search_mode,
+                            )
+                            break
                         try:
                             results = self.mcp_manager.call_tool(
                                 tool_name, tool_call.arguments
@@ -832,6 +1039,7 @@ class SynthesizeAction(SingleStepAction):
                     project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
                 ),
                 conversation_context=conversation_context,
+                policy_directive=policy_directive,
             ):
                 answer += chunk
                 if on_chunk:
@@ -879,7 +1087,11 @@ class SynthesizeAction(SingleStepAction):
         )
 
     def _draft_document_content(
-        self, query: str, conversation_context: str, project_ctx: ProjectContext | None = None
+        self,
+        query: str,
+        conversation_context: str,
+        project_ctx: ProjectContext | None = None,
+        policy_directive: str = "",
     ) -> RagSynthesisResult:
         generic_result = self.rag_synthesis.synthesize(
             query,
@@ -889,6 +1101,7 @@ class SynthesizeAction(SingleStepAction):
                 project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
             ),
             conversation_context=conversation_context,
+            policy_directive=policy_directive,
         )
         return generic_result
 
@@ -1323,6 +1536,15 @@ class DecisionAction(SingleStepAction):
             prompt_len = len(state["query"]) + len(state["rewritten_query"]) + len(state["answer"]) + sources_len
             input_tokens += (prompt_len // 4 + 400)
 
+        # The evaluator suggests a "correct route" for the retry with no awareness of
+        # the user's web search preference — it must be clamped the same way the
+        # initial gate decision is, or a retry can silently reintroduce (or drop) web
+        # search against the user's explicit choice.
+        web_search_mode = inputs.get("web_search_mode", "auto")
+        next_route = constrain_route_for_web_search_mode(
+            decision.correct_route or state["route"], web_search_mode
+        )
+
         return {
             "verdict": verdict,
             "confidence": confidence,
@@ -1334,7 +1556,7 @@ class DecisionAction(SingleStepAction):
             confidence=confidence,
             attempt=state["attempt"] + 1,
             prev_feedback=feedback,
-            route=decision.correct_route or state["route"],
+            route=next_route,
             decision_result=decision,
             llm_calls=llm_calls,
             input_tokens=input_tokens,
@@ -1479,6 +1701,8 @@ class BurrOrchestrator:
             conversation_context=conversation_context,
             project_id=project_id,
         )
+        if run_id:
+            yield emit("status", {"phase": "run_start", "step": "run_start", "run_id": str(run_id)})
 
         max_attempts = (
             project_ctx.max_attempts
@@ -1656,7 +1880,26 @@ class BurrOrchestrator:
 
             # Yield status updates AFTER running
             # Yield status updates AFTER running
-            if action.name == "gate":
+            if action.name == "precheck":
+                precheck_action = state.get("precheck_action", "continue")
+                precheck_reason = state.get("precheck_reason")
+                route = state.get("route")
+                self.db_logger.log_precheck(
+                    run_id=run_id,
+                    action=precheck_action,
+                    reason=precheck_reason,
+                    route=route,
+                )
+                yield emit(
+                    "status",
+                    {
+                        "step": "precheck_end",
+                        "action": precheck_action,
+                        "reason": precheck_reason,
+                        "message": f"Pre-check complete: {precheck_action}",
+                    },
+                )
+            elif action.name == "gate":
                 gate_res = state.get("gate_result")
                 self.db_logger.log_gate(run_id=run_id, gate_result=gate_res, attempt=state.get("attempt", 1))
                 yield emit(
@@ -1690,6 +1933,8 @@ class BurrOrchestrator:
                     sources=sources,
                     retrieval_stats=state.get("retrieval_stats"),
                     source_rank_fields=state.get("source_rank_fields"),
+                    candidates=state.get("retrieval_candidates"),
+                    candidate_rank_fields=state.get("retrieval_candidate_rank_fields"),
                     prompt_tokens=state.get("retrieval_prompt_tokens"),
                     cost_usd=state.get("retrieval_cost_usd"),
                     model_name=self.settings.embedding_model,
@@ -1741,7 +1986,7 @@ class BurrOrchestrator:
             elif action.name == "synthesize":
                 self.db_logger.log_synthesis(
                     run_id=run_id,
-                    attempt=state.get("attempt", 1) - 1,
+                    attempt=state.get("attempt", 1),
                     synthesis_result=state.get("synthesis_result"),
                 )
             elif action.name == "generic":
@@ -1760,7 +2005,7 @@ class BurrOrchestrator:
                 if decision_res:
                     self.db_logger.log_evaluation(
                         run_id=run_id,
-                        attempt=state.get("attempt", 1) - 1,
+                        attempt=state.get("attempt", 1),
                         decision=decision_res,
                     )
 

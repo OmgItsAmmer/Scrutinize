@@ -58,6 +58,10 @@ class RetrieveResult:
     rerank_applied: bool = False
     rerank_latency_ms: int = 0
     rerank_error: str | None = None
+    # Full pre-rerank RRF candidate pool (up to rerank_candidate_pool), for debug UIs
+    # that want to inspect everything retrieval considered, not just the final top-k.
+    candidates: list[SearchSource] = field(default_factory=list)
+    candidate_rank_fields: list[dict[str, Any]] = field(default_factory=list)
 
 
 def hit_to_source(hit: dict[str, Any]) -> SearchSource:

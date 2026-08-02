@@ -111,6 +111,16 @@ export function IconX(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconBug(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M9 8V6a3 3 0 116 0v2" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="6" y="8" width="12" height="11" rx="4" />
+      <path d="M6 12H3m18 0h-3M6 16H4m16 0h-2M9 8L6.5 5.5M15 8l2.5-2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconDownload(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>

@@ -200,12 +200,12 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
 
   return (
     <>
-      <aside className={`hidden h-full shrink-0 flex-col border-r border-[var(--app-border)] bg-[var(--app-bg-glass)] backdrop-blur-3xl lg:flex relative z-10 shadow-[4px_0_20px_rgba(0,0,0,0.06),_8px_0_40px_rgba(0,0,0,0.03)] ${compact ? "w-24" : "w-64"}`}>
-        <div className="flex items-center gap-2 px-5 py-5"><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--app-primary)] font-bold text-[var(--app-primary-text)]">S</div>{!compact && <div><b className="block text-sm text-[var(--app-text)]">Scrutinize</b><span className="block max-w-40 truncate text-[11px] text-[var(--app-text-muted)]">{state.project?.projectName}</span></div>}</div>
+      <aside className={`hidden h-full shrink-0 flex-col border-r border-[var(--app-border)] bg-[var(--app-bg-glass)] backdrop-blur-3xl lg:flex relative z-10 shadow-[4px_0_20px_rgba(0,0,0,0.06),_8px_0_40px_rgba(0,0,0,0.03)] ${compact ? "w-24" : "w-80"}`}>
+        <div className="flex items-center gap-2 px-5 py-5"><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--app-primary)] font-bold text-[var(--app-primary-text)]">S</div>{!compact && <div><b className="block text-base text-[var(--app-text)]">Scrutinize</b><span className="block max-w-[220px] truncate text-xs text-[var(--app-text-muted)]">{state.project?.projectName}</span></div>}</div>
         {!compact && <div className="glass-sidebar-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         <section className="mt-2">
           <div className="flex items-center justify-between px-3 pb-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--app-text-faint)]">Projects</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--app-text-faint)]">Projects</p>
             <button
               onClick={() => setShowCreateModal(true)}
               className="flex h-7 w-7 items-center justify-center rounded-lg bg-transparent text-zinc-950 transition-colors hover:bg-black/5"
@@ -243,10 +243,10 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
               );
             })}
             {loading && projects.length === 0 && (
-              <p className="px-3 py-2 text-xs text-[var(--app-text-faint)]">Loading projects...</p>
+              <p className="px-3 py-2 text-sm text-[var(--app-text-faint)]">Loading projects...</p>
             )}
             {!loading && projects.length === 0 && (
-              <p className="px-3 py-2 text-xs text-[var(--app-text-faint)]">No projects yet</p>
+              <p className="px-3 py-2 text-sm text-[var(--app-text-faint)]">No projects yet</p>
             )}
           </div>
         </section>
@@ -286,7 +286,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
         <div className="mt-auto border-t border-[var(--app-border)] p-4">
           {!compact && (
             <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] p-2">
-              <span className="truncate text-xs font-medium text-[var(--app-text-soft)]" title={userEmail}>
+              <span className="truncate text-sm font-medium text-[var(--app-text-soft)]" title={userEmail}>
                 {userEmail || "Loading profile..."}
               </span>
               <button
@@ -298,7 +298,7 @@ export function Sidebar({ compact = false }: { compact?: boolean }) {
               </button>
             </div>
           )}
-          <button onClick={logout} className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] py-2 text-xs font-semibold text-[var(--app-text)] transition-colors hover:bg-white/70">Sign out</button>
+          <button onClick={logout} className="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-glass-strong)] py-2 text-sm font-semibold text-[var(--app-text)] transition-colors hover:bg-white/70">Sign out</button>
         </div>
       </aside>  
 

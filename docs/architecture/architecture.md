@@ -146,34 +146,27 @@ This `web_search_mode` field travels from `ChatInput` → `AppContext` → `Mess
 
 | Module | Role | LLM / External |
 |---|---|---|
-| `pipeline_orchestrator.py` | Central hub: wires precheck → gate → generic/decision or RAG/web/hybrid loop; applies web_search_mode override; logs runs | — |
-| `retrieval_precheck.py` | Fast embed + retrieve to bypass the gate LLM for high/low-confidence cases | EmbeddingService + Qdrant |
-| `conversation_memory.py` | Rolling snapshot of last N chat exchanges (UTC timestamps); not an LLM call | — |
-| `conversation_format.py` | Greeting/chitchat detection (`is_standalone_message`) and context formatting | — |
-| `rag_gate.py` | Classifies queries into `rag | web | hybrid | generic`; optionally returns a cached reply | Gate Model |
-| `query_rewriter.py` | Keyword-focused query rewrite (RAG path only); incorporates retry feedback | Rewriter Model |
-| `generic_agent.py` | Fallback conversational reply when gate routes generic without a pre-built reply | Gate Model |
+| `burr_orchestrator.py` | Apache Burr state machine: orchestrates precheck → gate → rewrite → retrieve → assess_evidence → synthesize → verify_and_evaluate → decision | — |
+| `retrieval_precheck.py` | Fast embed + retrieve to bypass gate LLM for clear-cut queries | EmbeddingService + Qdrant |
+| `conversation_memory.py` | Rolling snapshot of last N chat exchanges (UTC timestamps) | — |
+| `memory_manager.py` | Letta persistent user/project memory synchronization | Letta API |
+| `rag_gate.py` | Classifies queries into `rag \| web \| hybrid \| generic` | Gate Model |
+| `query_rewriter.py` | Keyword-focused query rewrite; incorporates retry feedback | Rewriter Model |
 | `rrf_retriever.py` | Dense + keyword retrieval orchestration → fuse_rrf_hits() → `SearchSource` list | EmbeddingService + Qdrant |
-| `retrieval_utils.py` | RRF fusion, `SearchSource` mapping, retrieval stats | — |
-| `keyword_search_utils.py` | NFKC normalization, compound collapsing, sparse index text building | fastembed BM25 |
-| `vector_store.py` | Qdrant upsert / `search_hybrid()` with `project_id` filter | Qdrant |
-| `embedding_service.py` | Dense embeddings for ingest + query | OpenAI |
-| `rag_synthesis_agent.py` | Grounded cited answer from top-k chunks or combined sources | Rewriter Model |
-| `decision_agent.py` | Quality-scores drafts; triggers retry feedback or generic→RAG escalation | Decision Model |
-| `pipeline_logger.py` | `pipeline_runs` + `pipeline_steps` in Neon Postgres for full observability | Neon Postgres |
-| `mcp_manager.py` | `McpClientManager` — spawns `unified_server.py` via stdio JSON-RPC; graceful local fallback | FastMCP SDK / stdio |
-| `mcp_servers/unified_server.py` | FastMCP server exposing `generate_pdf` (ReportLab) and `web_search` tools | FastMCP |
-| `web_search.py` | `WebSearchService` — queries Brave/Tavily API, scrapes full content via Jina Reader or direct HTTP | Brave / Tavily / Jina |
-| `json_utils.py` | Robust JSON extraction from raw LLM responses (handles code fences) | — |
-| `llm_clients/base.py` | `BaseLlmClient` abstract class and `LlmResponse` type | — |
+| `evidence_assessor.py` | Evaluates if retrieved chunks contain sufficient facts to answer | Gate Model |
+| `rag_synthesis_agent.py` | Grounded cited answer generation from top-k or web sources | Synthesis Model |
+| `citation_verifier.py` | Validates every claim/citation in answer draft against retrieved sources | Gate Model |
+| `groundedness_evaluator.py` | Scores draft answer groundedness (0.0 to 1.0) | Gate Model |
+| `decision_agent.py` | Quality evaluation; computes confidence & verdict | Decision Model |
+| `pipeline_logger.py` | Relational execution log (`pipeline_runs` + `pipeline_steps`) in Neon Postgres | Neon Postgres |
+| `mcp_manager.py` | Spawns `unified_server.py` via stdio JSON-RPC; graceful local fallback | FastMCP SDK / stdio |
+| `mcp_servers/unified_server.py` | FastMCP server exposing `generate_pdf` and `web_search` tools | FastMCP |
+| `web_search.py` | `WebSearchService` — Brave/Tavily API search + Jina Reader scraping | Brave / Tavily / Jina |
 | `llm_clients/local.py` | OpenAI-compatible HTTP client for local Ollama via ngrok | Ollama |
 | `llm_clients/cloud.py` | OpenAI Chat Completions client | OpenAI |
-| `auth_service.py` | Google OAuth login (`login_or_create_google_user`); password signup/OTP routes disabled | Google OAuth |
-| `conversation_service.py` | CRUD for `ChatConversation` and `ChatMessage`; turn lifecycle (`begin_turn`, `complete`, `fail`); scoped to `general` vs `project` | Neon Postgres |
-| `project_service.py` | Project creation, admin/client keys, per-project settings resolution (`settings` JSON) | Neon Postgres |
-| `prompt_generator.py` | Auto-generates per-project system prompt overrides and SVG icons on project creation | Gate Model |
+| `conversation_service.py` | CRUD for `ChatConversation` and `ChatMessage`; turn lifecycle | Neon Postgres |
+| `project_service.py` | Project creation, admin/client keys, per-project model settings | Neon Postgres |
 | `job_orchestrator.py` | Enqueues Celery ingestion tasks (text/audio/video), polls job status | Redis + Celery |
-| `fly_scaler.py` | Wakes stopped Fly worker machines on upload via Fly Machines API | Fly.io API |
 
 ---
 

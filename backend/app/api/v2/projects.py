@@ -70,19 +70,11 @@ def create_user_project(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_app_settings),
 ) -> UserProjectResponse:
-    from app.services.v2.prompt_generator import generate_project_prompts
+    from app.services.v2.prompt_generator import DEFAULT_SVG, generate_project_prompts
     prompts = generate_project_prompts(
         name=body.name.strip(),
         description=body.description.strip(),
         settings=settings,
-    )
-
-    DEFAULT_SVG = (
-        '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
-        '<rect width="100" height="100" rx="15" fill="#1f2937"/>'
-        '<circle cx="50" cy="50" r="30" fill="#4b5563"/>'
-        '<text x="50" y="55" font-family="system-ui" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">PROJ</text>'
-        '</svg>'
     )
 
     project_settings = body.settings or {}

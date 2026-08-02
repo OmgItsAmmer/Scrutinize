@@ -135,8 +135,59 @@ export type PersistedMessage = {
   content: string;
   status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
   citations: Array<Record<string, unknown>>;
+  pipeline_run_id?: string | null;
   created_at: string;
   completed_at: string | null;
+};
+
+export type PipelineStepDto = {
+  id: string;
+  step_type: "rewrite" | "gate" | "retrieval" | "synthesis" | "evaluation" | "assess_evidence" | "verify_citations" | "evaluate_groundedness" | string;
+  attempt: number;
+  model_name: string | null;
+  model_input: { system?: string; user?: string } | Record<string, unknown> | null;
+  raw_thinking: string | null;
+  model_output: string | null;
+  structured_output: Record<string, unknown> | null;
+  retrieved_sources: Array<Record<string, unknown>> | null;
+  has_candidates: boolean;
+  candidate_count: number;
+  latency_ms: number | null;
+  status: "success" | "failure" | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  cached_tokens: number | null;
+  cost_usd: number | null;
+  created_at: string;
+};
+
+export type PipelineTraceDto = {
+  id: string;
+  original_query: string;
+  modality_filter: string | null;
+  conversation_context: string | null;
+  start_time: string;
+  end_time: string | null;
+  final_route: string | null;
+  final_answer: string | null;
+  final_confidence: number | null;
+  attempts_count: number;
+  disclaimer_appended: boolean;
+  total_cost_usd: number | null;
+  total_tokens: number | null;
+  created_at: string;
+  steps: PipelineStepDto[];
+};
+
+export type RetrievalCandidateMatch = "all" | "semantic" | "keyword" | "both";
+
+export type RetrievalCandidatesDto = {
+  step_id: string;
+  attempt: number;
+  total_candidates: number;
+  matched_count: number;
+  match: RetrievalCandidateMatch;
+  candidates: Array<Record<string, unknown>>;
 };
 
 export type UploadJobState = {

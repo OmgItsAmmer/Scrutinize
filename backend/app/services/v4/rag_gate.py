@@ -30,11 +30,16 @@ class RagGate:
         conversation_context: str = "",
         tool_context: str = "",
         client_requested_tool: str | None = None,
+        policy_directive: str = "",
     ) -> GateResult:
         effective_model = model or self._model
         effective_system = system_override or self._system
         if tool_context.strip():
             effective_system = f"{effective_system}\n\nAvailable application tools:\n{tool_context.strip()}"
+        # Appended last so it wins over both the base prompt and any per-project
+        # override — this is the user's explicit web search choice, not a suggestion.
+        if policy_directive.strip():
+            effective_system = f"{effective_system}\n\n{policy_directive.strip()}"
 
         user_lines = [f"Current user query: {original.strip()}"]
         if client_requested_tool:

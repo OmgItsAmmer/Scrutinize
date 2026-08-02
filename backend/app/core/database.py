@@ -50,7 +50,15 @@ def reset_engine() -> None:
 
 
 def init_db() -> None:
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    try:
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            conn.execute(text("ALTER TABLE pipeline_steps DROP CONSTRAINT IF EXISTS pipeline_steps_step_type_check;"))
+            conn.commit()
+    except Exception:
+        pass
 
 
 def get_session() -> Generator[Session, None, None]:

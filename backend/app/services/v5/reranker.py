@@ -7,6 +7,7 @@ fails to load or exceeds the timeout budget, callers fall back to RRF order.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, replace
@@ -39,6 +40,10 @@ class Reranker:
         self._settings = settings
         self._model = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reranker")
+        # Guards replacing _executor — a timed-out submission can't be killed (Python
+        # threads aren't cancellable), so we swap in a fresh executor rather than let
+        # every future call queue forever behind one permanently stuck worker thread.
+        self._executor_lock = threading.Lock()
 
     @property
     def model(self) -> object:
@@ -65,7 +70,9 @@ class Reranker:
             return RerankResult(sources=ranked[:top_k], applied=False, latency_ms=0)
 
         try:
-            future = self._executor.submit(self._score, query, sources)
+            with self._executor_lock:
+                executor = self._executor
+            future = executor.submit(self._score, query, sources)
             scores = future.result(timeout=self._settings.rerank_timeout_s)
         except FutureTimeoutError:
             latency_ms = int((time.monotonic() - started) * 1000)
@@ -73,6 +80,7 @@ class Reranker:
                 "Reranker timed out after %.1fs; falling back to RRF order.",
                 self._settings.rerank_timeout_s,
             )
+            self._replace_stuck_executor(executor)
             return RerankResult(
                 sources=ranked[:top_k],
                 applied=False,
@@ -97,6 +105,21 @@ class Reranker:
         latency_ms = int((time.monotonic() - started) * 1000)
         return RerankResult(sources=scored[:top_k], applied=True, latency_ms=latency_ms)
 
+    def _replace_stuck_executor(self, timed_out: ThreadPoolExecutor) -> None:
+        """Swap in a fresh executor so future calls don't queue behind a hung worker.
+
+        The timed-out submission keeps running in the background forever (Python
+        threads can't be force-cancelled) — we just stop routing new work to it.
+        """
+        with self._executor_lock:
+            if self._executor is timed_out:
+                logger.warning("Replacing stuck reranker executor after timeout.")
+                self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reranker")
+
     def _score(self, query: str, sources: list[SearchSource]) -> list[float]:
-        documents = [source.content for source in sources]
+        # Cross-encoder cost scales with total token count across all pairs — scoring the
+        # full chunk (often 1500-2000+ chars) for every one of up to rerank_candidate_pool
+        # candidates is what was blowing the timeout budget. Relevance judgments don't need
+        # the whole chunk, so cap what's fed to the model.
+        documents = [source.content[: self._settings.rerank_max_doc_chars] for source in sources]
         return list(self.model.rerank(query, documents))

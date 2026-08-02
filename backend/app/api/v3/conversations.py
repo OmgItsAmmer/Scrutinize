@@ -323,149 +323,79 @@ async def stream_message(
     async def generate():
         yield _sse("message.accepted", {"user_message": user_message_data})
         answer = ""
+        result: SearchV2Response | None = None
         citations: list[dict] = []
+        pipeline_run_id: str | None = None
         try:
-            use_pipeline = (
-                retrieval_policy != RetrievalPolicy.WEB_ONLY
-                or has_corpus
+            web_search_mode = body.web_search_mode if retrieval_policy != RetrievalPolicy.WEB_ONLY else ("always" if body.web_search_mode == "auto" else body.web_search_mode)
+            retrieval_citations: list[dict] = []
+
+            generator = burr_orchestrator.search_stream(
+                turn_content,
+                project_ctx=project_ctx,
+                conversation=ConversationState(messages=history),
+                web_search_mode=web_search_mode,
+                client_requested_tool=requested_tool,
+                conversation_id=conversation_id,
+                has_corpus=has_corpus,
+                use_cloud_llm=body.use_cloud_llm or False,
             )
-            if not use_pipeline:
-                yield _sse("status", {"phase": "web_search", "step": "web_search", "label": "Searching the web"})
                 
+            def get_next_block(gen):
+                try:
+                    return next(gen)
+                except StopIteration:
+                    return None
+                    
+            while True:
                 if await request.is_disconnected():
                     await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
                     return
-
-                results = await web.search(turn_content, limit=5)
-                citations = [
-                    {
-                        "title": item.get("title", "Web result"),
-                        "url": item.get("url", ""),
-                        "snippet": item.get("snippet", ""),
-                    }
-                    for item in results
-                ]
+                block = await asyncio.to_thread(get_next_block, generator)
+                if block is None:
+                    break
                 
-                if await request.is_disconnected():
-                    await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
-                    return
-
-                yield _sse(
-                    "status",
-                    {
-                        "phase": "web_search",
-                        "step": "web_search_end",
-                        "label": f"Found {len(citations)} web results",
-                        "sources_count": len(citations),
-                        "sources": citations,
-                    },
-                )
-                web_context = "\n\n".join(
-                    f"[{index + 1}] {item['title']}\n{item['url']}\n{item['snippet']}"
-                    for index, item in enumerate(citations)
-                ) or "No web results were available. Be transparent about this."
-                history_text = "\n".join(f"{m.role}: {m.content}" for m in history[-10:])
-                prompt = (
-                    f"Conversation:\n{history_text}\n\nUser: {turn_content}"
-                    f"\n\nWeb results:\n{web_context}"
-                )
-                system = (
-                    "You are Scrutinize general chat. Answer conversationally using only "
-                    "the provided web results for factual claims. Cite sources as markdown "
-                    "links. Never claim access to project files or project retrieval."
-                )
-                
-                if await request.is_disconnected():
-                    await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
-                    return
-
-                yield _sse("status", {"phase": "synthesis", "step": "synthesis", "label": "Generating reply"})
-                
-                generator = llm.generate_stream(settings.local_llm_gate_model, system, prompt)
-                
-                def get_next_chunk(gen):
-                    try:
-                        return next(gen)
-                    except StopIteration:
-                        return None
-                        
-                while True:
-                    if await request.is_disconnected():
-                        await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
-                        return
-                    chunk = await asyncio.to_thread(get_next_chunk, generator)
-                    if chunk is None:
-                        break
+                event = _parse_v2_sse(block)
+                if not event:
+                    continue
+                event_name = event.get("event")
+                data = event.get("data") or {}
+                if event_name == "status":
+                    if data.get("step") == "run_start":
+                        pipeline_run_id = data.get("run_id")
+                    if data.get("step") == "retrieval_end":
+                        retrieval_citations = list(data.get("sources") or [])
+                    yield _sse("status", data)
+                elif event_name == "chunk":
+                    chunk = data.get("text", "")
                     answer += chunk
                     yield _sse("delta", {"assistant_message_id": assistant_id, "text": chunk})
-            else:
-                web_search_mode = body.web_search_mode
-                retrieval_citations: list[dict] = []
-                
-                generator = burr_orchestrator.search_stream(
-                    turn_content,
-                    project_ctx=project_ctx,
-                    conversation=ConversationState(messages=history),
-                    web_search_mode=web_search_mode,
-                    client_requested_tool=requested_tool,
-                    conversation_id=conversation_id,
-                    has_corpus=has_corpus,
-                    use_cloud_llm=body.use_cloud_llm or False,
-                )
-                
-                def get_next_block(gen):
+                elif event_name == "result":
                     try:
-                        return next(gen)
-                    except StopIteration:
-                        return None
-                        
-                while True:
-                    if await request.is_disconnected():
-                        await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
-                        return
-                    block = await asyncio.to_thread(get_next_block, generator)
-                    if block is None:
-                        break
-                    
-                    event = _parse_v2_sse(block)
-                    if not event:
-                        continue
-                    event_name = event.get("event")
-                    data = event.get("data") or {}
-                    if event_name == "status":
-                        if data.get("step") == "retrieval_end":
-                            retrieval_citations = list(data.get("sources") or [])
-                        yield _sse("status", data)
-                    elif event_name == "chunk":
-                        chunk = data.get("text", "")
-                        answer += chunk
-                        yield _sse("delta", {"assistant_message_id": assistant_id, "text": chunk})
-                    elif event_name == "result":
-                        try:
-                            result = SearchV2Response.model_validate(data)
-                            answer = result.answer
-                            citations = [source.model_dump(mode="json") for source in result.sources]
-                        except Exception as exc:
-                            import logging
-                            logging.getLogger(__name__).warning(
-                                "Pipeline result validation failed; falling back to streamed answer: %s",
-                                exc,
-                            )
-                    elif event_name == "error":
-                        raise RuntimeError(data.get("message", "Project search failed"))
-                        
-                if result is None:
-                    if not answer.strip():
-                        raise RuntimeError("Project search ended before a final result was received.")
-                    if not citations and retrieval_citations:
-                        citations = retrieval_citations
+                        result = SearchV2Response.model_validate(data)
+                        answer = result.answer
+                        citations = [source.model_dump(mode="json") for source in result.sources]
+                    except Exception as exc:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "Pipeline result validation failed; falling back to streamed answer: %s",
+                            exc,
+                        )
+                elif event_name == "error":
+                    raise RuntimeError(data.get("message", "Project search failed"))
+
+            if result is None:
+                if not answer.strip():
+                    raise RuntimeError("Project search ended before a final result was received.")
+                if not citations and retrieval_citations:
+                    citations = retrieval_citations
 
             if await request.is_disconnected():
                 await asyncio.to_thread(db_fail_message, assistant_id, "cancelled")
                 return
 
             assistant_data, conversation_data = await asyncio.to_thread(
-                db_complete_message, assistant_id, conversation_id, answer, citations, settings, llm
+                db_complete_message, assistant_id, conversation_id, answer, citations, settings, llm, pipeline_run_id
             )
             yield _sse(
                 "message.completed",
@@ -478,7 +408,7 @@ async def stream_message(
             import traceback, sys
             traceback.print_exc(file=sys.stderr)
             abstention_message = str(exc) or "I could not find sufficient information in the provided sources."
-            await asyncio.to_thread(db_abstain_message, assistant_id, abstention_message)
+            await asyncio.to_thread(db_abstain_message, assistant_id, abstention_message, pipeline_run_id)
             yield _sse(
                 "error",
                 {"code": "StopReason.insufficient_evidence", "retryable": False, "message": abstention_message},
@@ -518,6 +448,7 @@ def db_complete_message(
     citations: list[dict],
     settings_obj: Settings,
     llm_obj: BaseLlmClient,
+    pipeline_run_id: str | None = None,
 ) -> tuple[dict | None, dict | None]:
     from app.core.database import get_engine
     from sqlmodel import Session as DBSession
@@ -532,6 +463,9 @@ def db_complete_message(
             conv = db.get(ChatConversation, conversation_id)
             if ast:
                 svc.complete(ast, answer, citations)
+                if pipeline_run_id:
+                    ast.pipeline_run_id = UUID(pipeline_run_id)
+                    db.add(ast)
                 db.commit()
             if conv:
                 if conv.project_id:
@@ -575,7 +509,7 @@ def db_fail_message(assistant_id: UUID, status: str) -> None:
                 db.commit()
 
 
-def db_abstain_message(assistant_id: UUID, message: str) -> None:
+def db_abstain_message(assistant_id: UUID, message: str, pipeline_run_id: str | None = None) -> None:
     from app.core.database import get_engine
     from sqlmodel import Session as DBSession
     from app.services.conversation_service import ConversationService
@@ -586,4 +520,7 @@ def db_abstain_message(assistant_id: UUID, message: str) -> None:
             ast = db.get(ChatMessage, assistant_id)
             if ast:
                 svc.complete(ast, message, [])
+                if pipeline_run_id:
+                    ast.pipeline_run_id = UUID(pipeline_run_id)
+                    db.add(ast)
                 db.commit()

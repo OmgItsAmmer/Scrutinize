@@ -76,6 +76,10 @@ class RrfRetriever:
         )
         sources = [hit_to_source(hit) for hit in hybrid.hits]
         source_rank_fields = [source_log_fields(hit) for hit in hybrid.hits]
+        # Snapshot the full post-fusion candidate pool before rerank/slicing discards it —
+        # this is what the dev debug UI's "show top 50 candidates" view reads from.
+        candidates = list(sources)
+        candidate_rank_fields = list(source_rank_fields)
 
         rerank_applied = False
         rerank_latency_ms = 0
@@ -124,4 +128,6 @@ class RrfRetriever:
             rerank_applied=rerank_applied,
             rerank_latency_ms=rerank_latency_ms,
             rerank_error=rerank_error,
+            candidates=candidates,
+            candidate_rank_fields=candidate_rank_fields,
         )

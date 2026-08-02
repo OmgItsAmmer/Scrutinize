@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     app_name: str = "Scrutinize"
     environment: str = "development"
     debug: bool = False
+    # Gates the read-only pipeline-trace debug endpoints/UI — never enable in production.
+    dev_ui_enabled: bool = Field(default=False, validation_alias="DEV_UI")
 
     # Neon Postgres — set via .env (pooled connection string recommended).
     database_url: str = ""
@@ -118,16 +120,30 @@ class Settings(BaseSettings):
     use_cloud_llm: bool = False
     v2_max_pipeline_attempts: int = 2
     v2_confidence_threshold: float = 0.7
-    v2_rrf_top_k: int = 5
+    # top_k raised 5 -> 8: accuracy over latency — more borderline-relevant chunks reach
+    # synthesis instead of being cut just past a narrow cutoff.
+    v2_rrf_top_k: int = 8
     v2_rrf_k: int = 60
-    v2_rrf_prefetch_limit: int = 50  # V5 M1 — widen dense/sparse candidate pools before RRF fusion
+    # V5 M1 — widen dense/sparse candidate pools before RRF fusion.
+    # Raised 50 -> 100: max recall over compute cost.
+    v2_rrf_prefetch_limit: int = 100
 
     # V5 M2 — cross-encoder reranker
     rerank_enabled: bool = True
     rerank_model: str = "BAAI/bge-reranker-base"
-    rerank_candidate_pool: int = 50
-    rerank_top_k: int = 5
-    rerank_timeout_s: float = 15.0
+    # Raised 50 -> 100 alongside v2_rrf_prefetch_limit: consider the full fused pool,
+    # not just half of it. Accuracy over compute cost.
+    rerank_candidate_pool: int = 100
+    rerank_top_k: int = 8
+    # Generous headroom — correctness over latency. Scoring 100 full-length candidates
+    # on CPU can legitimately take a while; we'd rather wait than silently fall back
+    # to un-reranked RRF order (which is what was burying the correct chunk before).
+    rerank_timeout_s: float = 90.0
+    # Chars of chunk content fed per candidate to the cross-encoder. Effectively
+    # unlimited for this project's ~400-token (~1600-2000 char) chunks — full context,
+    # no information loss. (The reranker's own tokenizer still caps input length
+    # internally; this just stops us from pre-truncating ahead of that.)
+    rerank_max_doc_chars: int = 4000
     v2_conversation_window_size: int = 10  # max chat exchanges kept (2 messages each)
     v2_retrieval_precheck_high_score: float = 0.025
     v2_retrieval_precheck_low_score: float = 0.012

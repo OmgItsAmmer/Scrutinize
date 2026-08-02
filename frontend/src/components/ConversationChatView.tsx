@@ -3,6 +3,7 @@ import {
   createConversation,
   fetchConversationMessages,
   fetchConversationSources,
+  isDevUiEnabled,
   streamConversationMessage,
   uploadConversationSource,
   type ConversationSource,
@@ -22,11 +23,15 @@ import {
 } from "../lib/chatTools";
 import type { ConversationScope, PersistedMessage, SearchSource } from "../types/api";
 import { ChatInput } from "./ChatInput";
+import { DebugDrawer } from "./DebugDrawer";
+import { IconBug } from "./icons";
 import { PdfDownloadButton } from "./PdfDownloadButton";
 import { renderMarkdown, SourcePreviewModal, CitationButton } from "./SourceCard";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { ToolButtons } from "./ToolButtons";
 import { PdfViewer } from "./PdfViewer";
+
+const devUiEnabled = isDevUiEnabled();
 
 function citationToSource(citation: Record<string, unknown>, index: number): SearchSource {
   const title = String(citation.title ?? `Source ${index + 1}`);
@@ -104,10 +109,12 @@ function MessageBubble({
   message,
   streaming = false,
   onSourceClick,
+  onDebugClick,
 }: {
   message: PersistedMessage;
   streaming?: boolean;
   onSourceClick: (source: SearchSource, index: number) => void;
+  onDebugClick?: (messageId: string) => void;
 }) {
   const isUser = message.role === "user";
   const [showPdfPreview, setShowPdfPreview] = useState(false);
@@ -187,6 +194,17 @@ function MessageBubble({
         </div>
       )}
       {message.status === "failed" && <span className="mt-2 block text-xs text-rose-500">Failed</span>}
+      {!streaming && onDebugClick && message.pipeline_run_id && (
+        <button
+          type="button"
+          onClick={() => onDebugClick(message.id)}
+          className="mt-2 inline-flex items-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--app-bg-glass)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-text-muted)] hover:text-[var(--app-text)]"
+          title="Inspect pipeline trace"
+        >
+          <IconBug className="h-3 w-3" />
+          Debug
+        </button>
+      )}
     </div>
   );
 }
@@ -201,9 +219,10 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
   const [sources, setSources] = useState<ConversationSource[]>([]);
   const [uploading, setUploading] = useState(false);
   const [agentOutputs, setAgentOutputs] = useState<AgentOutput[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeSource, setActiveSource] = useState<{ source: SearchSource; index: number } | null>(null);
+  const [debugMessageId, setDebugMessageId] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const activeStreamRef = useRef(0);
   const messagesRef = useRef<PersistedMessage[]>([]);
@@ -526,9 +545,9 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
               message={message}
               streaming={message.status === "streaming" && loading}
               onSourceClick={(source, index) => setActiveSource({ source, index })}
+              onDebugClick={devUiEnabled ? (messageId) => setDebugMessageId(messageId) : undefined}
             />
           ))}
-          {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
           <div ref={endRef} />
         </div>
       </div>
@@ -553,6 +572,13 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
           source={activeSource.source}
           index={activeSource.index}
           onClose={() => setActiveSource(null)}
+        />
+      )}
+      {devUiEnabled && conversationId && (
+        <DebugDrawer
+          messageId={debugMessageId}
+          conversationId={conversationId}
+          onClose={() => setDebugMessageId(null)}
         />
       )}
     </div>

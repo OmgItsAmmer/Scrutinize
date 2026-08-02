@@ -449,6 +449,7 @@ class PipelineOrchestrator:
                 has_corpus=has_corpus,
                 client_requested_tool=client_requested_tool,
                 enable_web_search=enable_web,
+                conversation_context=conversation_context,
             )
             if precheck.action == "route_rag":
                 return self._maybe_force_rag_for_tool(

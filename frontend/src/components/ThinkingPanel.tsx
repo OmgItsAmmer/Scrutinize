@@ -9,10 +9,14 @@ type ThinkingPanelProps = {
 
 function getAgentCatchyName(agentName: string) {
   const name = agentName.toLowerCase();
+  if (name.includes("precheck") || name.includes("pre-check")) return "Pre-Check";
   if (name.includes("router") || name.includes("gate")) return "Gate";
-  if (name.includes("optimizer") || name.includes("rewriter")) return "Rewriter";
-  if (name.includes("synthesizer") || name.includes("synthesis") || name.includes("writer")) return "Synthesis";
-  if (name.includes("verifier") || name.includes("decision") || name.includes("decide")) return "Decide";
+  if (name.includes("optimizer") || name.includes("rewriter") || name.includes("rewrite")) return "Rewriter";
+  if (name.includes("evidence") || name.includes("assess_evidence")) return "Assess Evidence";
+  if (name.includes("synthesizer") || name.includes("synthesis") || name.includes("synthesize") || name.includes("writer")) return "Synthesis";
+  if (name.includes("citation") || name.includes("verify_citations") || name.includes("verify_and_evaluate")) return "Verify Citations";
+  if (name.includes("groundedness") || name.includes("evaluate_groundedness")) return "Groundedness";
+  if (name.includes("verifier") || name.includes("decision") || name.includes("decide") || name.includes("evaluation")) return "Decision";
   if (name.includes("retriever") || name.includes("search") || name.includes("retrieval")) return "Retrieval";
   return agentName;
 }

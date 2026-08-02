@@ -42,6 +42,11 @@ class PipelineStep(SQLModel, table=True):
     model_output: str | None = None
     structured_output: dict | list | None = Field(default=None, sa_column=Column(JSONB().with_variant(JSON, "sqlite")))
     retrieved_sources: list | dict | None = Field(default=None, sa_column=Column(JSONB().with_variant(JSON, "sqlite")))
+    retrieval_candidates: list | dict | None = Field(
+        default=None,
+        sa_column=Column(JSONB().with_variant(JSON, "sqlite")),
+        description="Full pre-rerank RRF candidate pool (up to rerank_candidate_pool) for retrieval debugging.",
+    )
     latency_ms: int | None = None
     status: str | None = None
     prompt_tokens: int | None = Field(default=None)

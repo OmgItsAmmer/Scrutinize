@@ -501,7 +501,7 @@ body {
   border-radius: 0.75rem;
   padding: 0.5rem 0.75rem;
   text-align: left;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   line-height: 1.25rem;
   color: var(--app-text-soft);
   background: transparent;
@@ -681,7 +681,7 @@ body {
 
 .project-hover-card__chats-label {
   margin: 0 0 0.15rem;
-  font-size: 0.625rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -710,7 +710,7 @@ body {
 .project-hover-card__status {
   margin: 0;
   padding: 0.35rem 0.5rem;
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   color: rgba(255, 255, 255, 0.55);
 }
 
@@ -720,7 +720,7 @@ body {
   border-radius: 0.5rem;
   padding: 0.45rem 0.55rem;
   text-align: left;
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.82);
   background: rgba(255, 255, 255, 0.06);
@@ -846,7 +846,7 @@ body {
   border-radius: 0.5rem;
   padding: 0.4rem 0.55rem;
   text-align: left;
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.65);
   background: transparent;
@@ -864,7 +864,7 @@ body {
   border: 0;
   border-radius: 9999px;
   padding: 0.55rem 0.75rem;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 700;
   color: #050505;
   background: #fff;

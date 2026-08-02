@@ -46,6 +46,7 @@ class RetrievalPrecheck:
         modality_filter: FileModality | None = None,
         client_requested_tool: str | None = None,
         enable_web_search: bool = True,
+        conversation_context: str = "",
     ) -> RetrievalPrecheckResult:
         if client_requested_tool in ("generate_pdf", "generate_flowchart") and has_corpus:
             return RetrievalPrecheckResult(
@@ -58,6 +59,18 @@ class RetrievalPrecheck:
             return RetrievalPrecheckResult(
                 action="call_gate",
                 reason=f"Tool selected ({client_requested_tool}); gate decides routing.",
+                top_score=None,
+            )
+
+        if conversation_context.strip():
+            # This check only embeds the current turn's raw text — for a short
+            # follow-up ("really?", "what else do you know?") that has almost no
+            # retrievable signal on its own, so the score-based fast path below would
+            # misroute straight to web/generic before the context-aware gate+rewrite
+            # ever get a chance to expand the query using prior turns. Defer instead.
+            return RetrievalPrecheckResult(
+                action="call_gate",
+                reason="Conversation context present; deferring to gate for context-aware routing.",
                 top_score=None,
             )
 

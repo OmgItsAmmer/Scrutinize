@@ -62,6 +62,7 @@ class MessageRead(BaseModel):
     content: str
     status: str
     citations: list = Field(default_factory=list)
+    pipeline_run_id: UUID | None = None
     created_at: datetime
     completed_at: datetime | None
 

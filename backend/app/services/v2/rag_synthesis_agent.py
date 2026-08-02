@@ -33,12 +33,16 @@ class RagSynthesisAgent:
         system_override: str | None = None,
         conversation_context: str = "",
         tools: list[dict] | None = None,
+        policy_directive: str = "",
     ) -> SynthesisResult:
         effective_model = model or self._model
         effective_system = system_override or self._system
         if tools:
             effective_system += "\n\n### PDF GENERATION TOOL RULE:\nIf the user explicitly asks to generate a PDF or compile a document, you MUST invoke the 'generate_pdf' tool."
-        
+        # Appended last so it outranks the base prompt and any per-project override.
+        if policy_directive.strip():
+            effective_system += f"\n\n{policy_directive.strip()}"
+
         from app.services.v5.untrusted import wrap_untrusted
         user_lines = [
             f"Question: {query.strip()}",
@@ -67,9 +71,12 @@ class RagSynthesisAgent:
         model: str | None = None,
         system_override: str | None = None,
         conversation_context: str = "",
+        policy_directive: str = "",
     ) -> Iterator[str]:
         effective_model = model or self._model
         effective_system = system_override or self._system
+        if policy_directive.strip():
+            effective_system += f"\n\n{policy_directive.strip()}"
         from app.services.v5.untrusted import wrap_untrusted
         user_lines = [
             f"Question: {query.strip()}",

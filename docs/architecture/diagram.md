@@ -1,524 +1,431 @@
-# Scrutinize Architecture Diagrams
+```mermaid
+flowchart TD
+    START["POST /v3/conversations/{id}/messages/stream<br/>{ content, web_search_mode, tool, use_cloud_llm }"]
 
-Visual reference for the **active stack** — MCP tool-based hybrid search (RAG + web), persistent conversations, project workspaces, multi-modal ingestion, and pipeline observability.
+    POLICY{"conversation.retrieval_policy"}
+    POLICY_WEB["scope=general → web_only<br/>web_search_mode: auto ⇒ <b>always</b>"]
+    POLICY_PROJ["scope=project → project_rag<br/>web_search_mode passed through"]
 
-Primary entry points:
-- `POST /v3/conversations/{id}/messages` — Streaming SSE chat (current)
-- `POST /v2/search` — Non-streaming search (legacy)
-- `POST /v2/projects/files` — File ingestion
+    MEM["ConversationMemory.prepare()<br/>last 10 exchanges, UTC stamps<br/>+ Letta user memory prepended (if configured)"]
 
-Orchestrator: `backend/app/services/v2/pipeline_orchestrator.py`
+    PRE{"PrecheckAction<br/>retrieval_precheck.evaluate()"}
+    P1["tool = generate_pdf/generate_flowchart<br/>AND has_corpus"]
+    P2["any other client tool selected"]
+    P3["conversation_context non-empty"]
+    P4["has_corpus = false"]
+    P5["Qdrant top-3 probe (no rerank)<br/>top_score"]
 
----
+    GATE{"GateAction"}
+    GATE_SKIP["route already set by precheck<br/><b>no LLM call</b>"]
+    GATE_LLM["RagGate.classify() — PydanticAI<br/>Gate Model + <b>mode-aware tool_context</b><br/>+ <b>policy_directive</b> (appended last, outranks overrides)<br/>→ route | reason | requested_tool | reply"]
+    CLAMP["constrain_route_for_web_search_mode()<br/>always: rag→hybrid, generic→web<br/>never: web→rag, hybrid→rag<br/>+ sanitize_requested_tool (never ⇒ web_search→null)"]
+    FORCE["TOOLS_REQUIRING_RAG<br/>pdf/flowchart ⇒ force route=rag<br/><b>then re-clamp</b> so always ⇒ hybrid"]
 
-## 1. System Context
+    ROUTE{"route"}
 
-Complete view of all components and their connections:
+    GEN["GenericAction<br/>gate.reply if cached,<br/>else GenericAgent.reply_stream()"]
+
+    RW["RewriteAction — QueryRewriter.rewrite()<br/>skipped for greetings (is_standalone_message)<br/>carries prev_feedback on retry"]
+    RET{"RetrieveAction<br/>always + route=rag ⇒ upgrade to hybrid<br/>branch on route"}
+    R_WEB["<b>web</b>: web only"]
+    R_RAG["<b>rag</b>: RRF retrieve"]
+    R_HYB["<b>hybrid</b>: RRF + web"]
+    R_FALL["rag returned 0 sources<br/>AND enable_web_search<br/>⇒ implicit web fallback"]
+    GRAPH["+ Graphiti temporal graph sources<br/>(rag/hybrid, if Neo4j configured)"]
+    SORT["sources.sort(score desc)"]
+
+    ASSESS{"AssessEvidenceAction<br/>EvidenceAssessor.evaluate()"}
+    ABSTAIN["🟩 InsufficientEvidenceError<br/>SSE error: insufficient_evidence<br/>message status = abstained"]
+
+    SYN{"SynthesizeAction<br/>sources empty?"}
+    SYN_NONE["'No matching indexed content found.'"]
+    SYN_DOC["pdf/flowchart requested with 0 sources<br/>→ draft content from LLM, then attach artifact"]
+    SYN_TOOL["tools available or pdf/flowchart requested<br/>→ blocking synthesize() with tool calling<br/><b>never ⇒ web_search schema withheld</b><br/>+ synthesis policy_directive"]
+    SYN_STREAM["→ synthesize_stream()<br/>token-by-token SSE chunks"]
+    TOOLCALL["tool_calls returned?<br/>permission + approval gate<br/>generate_pdf | generate_flowchart<br/>execute_python | web_search"]
+
+    VER["VerifyAndEvaluateAction (parallel threads)<br/>CitationVerifier · GroundednessEvaluator"]
+
+    DEC{"DecisionAction"}
+    DEC_GEN["route=generic ⇒ auto verdict=good, conf=1.0"]
+    DEC_LLM["DecisionAgent.evaluate()<br/>verdict · confidence · correct_route"]
+    DEC_OVR["citations invalid ⇒ bad, retry_target=synthesize<br/>ungrounded ⇒ bad, retry_target=synthesize"]
+    OK{"verdict=good<br/>AND confidence ≥ 0.7?"}
+    MORE{"attempt ≤ max_attempts (2)?"}
+    TGT{"retry_target"}
+
+    DONE["🟩 SSE result + message.completed<br/>persist ChatMessage + citations<br/>update Letta memory<br/>pipeline_runs.end_run()"]
+    DISC["🟩 Append low-confidence disclaimer<br/>then persist + result"]
+    BUDGET["🟩 BudgetExceededError<br/>attempts/llm_calls/web_searches/tools/<br/>tokens/cost caps → SSE error"]
+    FAIL["🟩 Exception → execution_failed<br/>client disconnect → cancelled"]
+
+    START --> POLICY
+    POLICY --> POLICY_WEB --> MEM
+    POLICY --> POLICY_PROJ --> MEM
+    MEM --> PRE
+
+    PRE --> P1 -->|route_rag| GATE_SKIP
+    PRE --> P2 -->|call_gate| GATE_LLM
+    PRE --> P3 -->|call_gate| GATE_LLM
+    PRE --> P4 -->|"web on → route_web<br/>web off → route_generic"| GATE_SKIP
+    PRE --> P5
+    P5 -->|"≥ 0.025 → route_rag"| GATE_SKIP
+    P5 -->|"≤ 0.012 → route_web / route_generic"| GATE_SKIP
+    P5 -->|"between → call_gate"| GATE_LLM
+
+    GATE_SKIP --> CLAMP
+    GATE_LLM --> CLAMP --> FORCE --> ROUTE
+    GATE --- GATE_SKIP
+
+    ROUTE -->|generic| GEN --> DEC
+    ROUTE -->|rag / web / hybrid| RW --> RET
+
+    RET --> R_WEB --> SORT
+    RET --> R_RAG --> R_FALL --> SORT
+    RET --> R_HYB --> SORT
+    R_RAG --> GRAPH --> SORT
+    R_HYB --> GRAPH
+    SORT --> ASSESS
+
+    ASSESS -->|is_sufficient=false| ABSTAIN
+    ASSESS -->|sufficient / no assessor| SYN
+
+    SYN -->|yes, plain| SYN_NONE --> VER
+    SYN -->|yes, doc tool| SYN_DOC --> VER
+    SYN -->|no| SYN_TOOL --> TOOLCALL --> VER
+    SYN -->|no| SYN_STREAM --> VER
+
+    VER --> DEC
+    DEC --> DEC_GEN --> OK
+    DEC --> DEC_LLM --> DEC_OVR --> OK
+
+    OK -->|yes| DONE
+    OK -->|no| MORE
+    MORE -->|no| DISC
+    MORE -->|yes| TGT
+    TGT -->|synthesize<br/>citation/groundedness only| SYN
+    TGT -->|rewrite<br/>bad retrieval/routing| RW
+
+    PRE -.->|any step| BUDGET
+    SYN -.-> FAIL
+
+    classDef term fill:#1b4332,stroke:#2d6a4f,color:#fff
+    class DONE,DISC,ABSTAIN,BUDGET,FAIL term
+```
 
 ```mermaid
-flowchart TB
-    subgraph Client["Frontend (React + Vite)"]
-        UI["ConversationChatView\nChatInput (web_search_mode toggle)\nSidebar (projects + general chats)\nUploadView / LibraryView\nSourceCard (citations)"]
+flowchart TD
+    Q["query + conversation_context<br/>+ client_requested_tool + has_corpus"]
+
+    subgraph PC["Stage A — RetrievalPrecheck (cheap, no LLM except Qdrant probe)"]
+        direction TB
+        A1{"tool = pdf/flowchart<br/>and has_corpus?"}
+        A2{"any other tool selected?"}
+        A3{"conversation_context<br/>non-empty?"}
+        A4{"has_corpus?"}
+        A5["Embed query → Qdrant hybrid top-3<br/>apply_rerank=False"]
+        A6{"top_score"}
     end
 
-    subgraph API["FastAPI — /v2 + /v3"]
-        AUTH["POST /v2/auth/*\nJWT + OTP + Google OAuth"]
-        SEARCH["POST /v2/search\nnon-streaming"]
-        CONV["POST /v3/conversations/*\npersistent chat + SSE streaming"]
-        UPLOAD["POST /v2/projects/files\nfile ingestion"]
-        PDF_API["POST /v2/pdf/generate\nGET /v2/pdf/download/:filename"]
+    subgraph GT["Stage B — Gate LLM (only if precheck says call_gate)"]
+        B1["RagGate.classify()<br/>PydanticAI structured output<br/>tool_context lists available tools"]
+        B2["GateResult:<br/>route ∈ rag|web|hybrid|generic<br/>+ reason, requested_tool, reply"]
+        B3["parse/LLM failure ⇒ route=generic"]
     end
 
-    subgraph Orchestration["Agentic Pipeline (v2/services)"]
-        ORCH["PipelineOrchestrator\nsearch() / search_stream()"]
-        PRE["RetrievalPrecheck\nfast embed + score thresholds"]
-        MGR["McpClientManager\nspawns unified_server.py via stdio"]
+    subgraph CL["Stage C — Hard clamps (always applied)"]
+        C1["web_search_mode clamp<br/>auto: pass through<br/>always: rag→hybrid, generic→web<br/>never: web/hybrid→rag (+ disable_web)"]
+        C2["TOOLS_REQUIRING_RAG<br/>(gate-LLM path only)"]
     end
 
-    subgraph MCP["MCP Tool Layer (FastMCP subprocess)"]
-        UNIFIED["unified_server.py\n├── generate_pdf (ReportLab)\n└── web_search → WebSearchService"]
+    OUT["final route"]
+
+    Q --> A1
+    A1 -->|yes| RAG1["route_rag"]
+    A1 -->|no| A2
+    A2 -->|yes| CALL["call_gate"]
+    A2 -->|no| A3
+    A3 -->|yes| CALL
+    A3 -->|no| A4
+    A4 -->|no, web on| WEB1["route_web"]
+    A4 -->|no, web off| GEN1["route_generic"]
+    A4 -->|yes| A5 --> A6
+    A6 -->|"≥ high (0.025)"| RAG1
+    A6 -->|"≤ low (0.012), web on"| WEB1
+    A6 -->|"≤ low, web off"| GEN1
+    A6 -->|"0.012 – 0.025"| CALL
+
+    CALL --> B1 --> B2
+    B1 -.->|exception| B3 --> C1
+    B2 --> C1
+    RAG1 & WEB1 & GEN1 --> C1
+    C1 --> C2 --> OUT
+```
+
+```mermaid
+flowchart TD
+    IN["route = rag"]
+    RW["QueryRewriter.rewrite()<br/>Rewriter Model + current date<br/>strips 'Optimized query:' labels/quotes"]
+    SKIP["greeting/ack (is_standalone_message)<br/>⇒ pass query through unchanged"]
+
+    subgraph RRF["RrfRetriever.retrieve()"]
+        E1["EmbeddingService.embed_texts()<br/>text-embedding-3-small (1536-d)"]
+        E2["embed_sparse_query()<br/>fastembed Qdrant/bm25 + variants"]
+        VS["VectorStore.search_hybrid()<br/>2 separate Qdrant queries<br/>branch limit = v2_rrf_prefetch_limit (100)"]
+        FUSE["fuse_rrf_hits(k=60)<br/>cut to fusion_top_k = 100 (rerank pool)"]
+        RR["Reranker.rerank()<br/>BAAI/bge-reranker-base cross-encoder<br/>90s timeout, 4000 char cap<br/>→ top 8"]
+        FBK["timeout/failure ⇒ keep RRF order<br/>(rerank_applied=false, logged)"]
     end
 
-    subgraph WebSearch["Web Search (WebSearchService)"]
+    GRAPH["MemoryManager.query_temporal_graph()<br/>Graphiti/Neo4j — appended if configured"]
+    NOSRC{"0 sources?"}
+    WEBFB["implicit web fallback<br/>(if enable_web_search and mode ≠ never)"]
+    SORT["sort by score desc"]
+    NEXT["→ assess_evidence"]
+
+    IN --> RW
+    RW -.-> SKIP -.-> E1
+    RW --> E1 & E2
+    E1 & E2 --> VS --> FUSE --> RR --> GRAPH
+    RR -.-> FBK -.-> GRAPH
+    GRAPH --> NOSRC
+    NOSRC -->|yes| WEBFB --> SORT
+    NOSRC -->|no| SORT --> NEXT
+```
+
+```mermaid
+flowchart TD
+    IN["route = web"]
+    NEVER{"web_search_mode = never?"}
+    EMPTY["sources = [] → synthesis has nothing"]
+    RW["QueryRewriter.rewrite()"]
+
+    subgraph WS["RetrieveAction._retrieve_web()"]
+        M1{"MCP manager enabled?"}
+        MCP["McpClientManager.call_tool('web_search')<br/>stdio JSON-RPC → unified_server.py"]
+        DIRECT["direct WebSearchService fallback<br/>(on MCP exception or empty result)"]
+        ENG{"web_search_engine"}
         BRAVE["Brave Search API"]
-        TAVILY["Tavily API"]
-        JINA["Jina Reader / direct HTTP"]
+        TAVILY["Tavily API<br/>(only if tavily_api_key set)"]
+        NONE["no API key ⇒ empty list"]
+        SCRAPE["scrape_urls_parallel()<br/>Jina Reader r.jina.ai → Markdown<br/>fallback: direct GET + strip_tags<br/>fallback: snippet"]
+        CAP["truncate content to 8000 chars"]
+        MAP["→ SearchSource<br/>uuid5(url) ids, source_path=url<br/>score = 0.016 − 0.002·rank"]
     end
 
-    subgraph Workers["Celery Workers (Redis broker)"]
-        WTXT["process_text\nchunk + embed"]
-        WAUD["process_audio\nWhisper + embed"]
-        WVID["process_video\nFFmpeg + Whisper + GPT-4o-mini + embed"]
-    end
+    NEXT["→ assess_evidence → synthesize"]
 
-    subgraph External["External Services"]
-        OPENAI_EMB["OpenAI text-embedding-3-small\nembedding only"]
-        OPENAI_MEDIA["OpenAI Whisper + GPT-4o-mini vision\ningestion only"]
-        LLM["Gate / Rewriter / Decision LLMs\nOllama (local) or OpenAI (cloud)"]
-    end
-
-    subgraph Data["Data Layer"]
-        NEON["Neon Postgres\nusers, projects, files, segments, jobs\nchat_conversations, chat_messages\npipeline_runs, pipeline_steps"]
-        QDRANT["Qdrant  segments  collection\ndense text_vector + sparse BM25\nproject_id payload filter"]
-        CDN["Cloudinary\nraw file storage + CDN playback URLs"]
-        REDIS["Redis\nCelery broker + result backend"]
-    end
-
-    UI --> AUTH
-    UI --> CONV
-    UI --> UPLOAD
-    UI --> PDF_API
-    CONV --> ORCH
-    SEARCH --> ORCH
-    ORCH --> PRE --> QDRANT
-    ORCH --> MGR --> UNIFIED
-    UNIFIED --> BRAVE
-    UNIFIED --> TAVILY
-    UNIFIED --> JINA
-    PDF_API --> MGR
-    ORCH --> LLM
-    ORCH --> OPENAI_EMB
-    ORCH --> QDRANT
-    ORCH --> NEON
-
-    UPLOAD --> CDN
-    UPLOAD --> NEON
-    UPLOAD --> REDIS
-    REDIS --> WTXT & WAUD & WVID
-    WTXT & WAUD & WVID --> OPENAI_EMB
-    WVID --> OPENAI_MEDIA
-    WAUD --> OPENAI_MEDIA
-    WTXT & WAUD & WVID --> QDRANT
-    WTXT & WAUD & WVID --> NEON
+    IN --> NEVER
+    NEVER -->|yes| EMPTY
+    NEVER -->|no| RW --> M1
+    M1 -->|yes| MCP --> ENG
+    M1 -->|no| DIRECT --> ENG
+    MCP -.->|error / empty| DIRECT
+    ENG -->|tavily| TAVILY --> SCRAPE
+    ENG -->|brave / default| BRAVE --> SCRAPE
+    ENG -->|neither| NONE
+    SCRAPE --> CAP --> MAP --> NEXT
 ```
-
----
-
-## 2. Full Query Pipeline
-
-End-to-end routing from frontend request to SSE response:
 
 ```mermaid
 flowchart TD
-    subgraph API["API — /v3/conversations/{id}/messages"]
-        REQ["POST body: { content, web_search_mode, client_message_id }\nSSE response: StreamingResponse"]
-    end
+    IN["route = hybrid<br/>(gate choice, or rag+always clamp)"]
+    RW["QueryRewriter.rewrite()<br/>one rewritten query feeds both branches"]
+    RAGB["RrfRetriever.retrieve()<br/>dense + sparse + RRF + rerank"]
+    WEBB["_retrieve_web()<br/>skipped if web_search_mode = never"]
+    GRAPH["Graphiti graph sources (if configured)"]
+    CONCAT["sources = rag + web + graph"]
+    SORT["sort(score desc)<br/>RAG RRF scores and web synthetic scores<br/>share one scale — this is the ranking merge"]
+    NEXT["→ assess_evidence → synthesize"]
 
-    subgraph Memory["ConversationMemory"]
-        PREP["prepare()\ntrim to last N exchanges\nUTC timestamps per message\nnot an LLM call"]
-    end
-
-    subgraph Precheck["RetrievalPrecheck (fast path)"]
-        PRE{"Embed query → Qdrant top-3\nhas_corpus? tool_selected?"}
-        PRE_RAG["→ route_rag\nscore ≥ high_threshold (0.025)\nor generate_pdf tool selected"]
-        PRE_WEB["→ route_web\nscore ≤ low_threshold (0.012)\nor no corpus + web enabled"]
-        PRE_GEN["→ route_generic\nno corpus + web disabled"]
-        PRE_GATE["→ call_gate\nscore is ambiguous"]
-    end
-
-    subgraph Stage1["Stage 1 — Route (Gate LLM)"]
-        GATE{"RagGate.classify()\nquery + conversation context\n+ tool_context\nLLM: Gate Model"}
-        WMODE{"web_search_mode\noverride?"}
-    end
-
-    subgraph GenericPath["Generic Path"]
-        GREPLY["Gate direct reply\nor GenericAgent.reply_stream()\nLLM: Gate Model"]
-        GDEC{"DecisionAgent.evaluate()\nLLM: Decision Model\nverdict + confidence + correct_route"}
-        GESCALATE["Escalate → RAG\nif correct_route = rag"]
-    end
-
-    subgraph WebPath["Web Path"]
-        WSEARCH["McpClientManager.call_tool('web_search')\nBrave/Tavily → URLs → Jina Reader"]
-        WSOURCES["web_sources as SearchSource[]"]
-    end
-
-    subgraph RAGPath["RAG Path (retry loop, max attempts)"]
-        RW["QueryRewriter.rewrite()\nkeyword-focused rewrite\nLLM: Rewriter Model\n(skipped if standalone)"]
-        RRF["RrfRetriever.retrieve()\nnot an LLM call"]
-        DENSE["EmbeddingService\ntext_vector dense prefetch"]
-        KW["keyword_search_utils\nnormalize + variants + BM25"]
-        HYBRID_Q["VectorStore.search_hybrid()\nproject_id + modality filter"]
-        FUSE["fuse_rrf_hits()\nReciprocal Rank Fusion (k=60)"]
-        RAGSOURCES["rag_sources as SearchSource[]"]
-        EMPTY{"Any chunks retrieved?"}
-        NOIDX["Fixed: No indexed content found"]
-    end
-
-    subgraph MergeRank["Merge & Rerank (hybrid only)"]
-        MERGE["Combine rag_sources + web_sources\nSort by score desc\nBest sources on top"]
-    end
-
-    subgraph Synthesis["Synthesis"]
-        PDF_CHK{"generate_pdf\ntool requested?"}
-        MCP_PDF["McpClientManager.call_tool('generate_pdf')\nReportLab → .pdf filepath"]
-        SYN["RagSynthesisAgent.synthesize()\nLLM: Rewriter Model\nfull conversation context\nstreaming chunks via SSE"]
-    end
-
-    subgraph Eval["Evaluation"]
-        RDEC{"DecisionAgent.evaluate()\nLLM: Decision Model"}
-        OK{"verdict=good\nconfidence ≥ 0.7?"}
-        RETRY{"Attempts\nremaining?"}
-        DISCLAIM["Append low-confidence disclaimer"]
-    end
-
-    subgraph Output["Response & Recording"]
-        RECORD["ConversationMemory.record_exchange()\nWrite ChatMessage rows to Neon\nappend user + assistant turns"]
-        RESP["SSE done event\nanswer, sources, route, confidence, citations"]
-    end
-
-    subgraph Observability["Observability (Neon Postgres)"]
-        LOG["PipelineLogger\npipeline_runs + pipeline_steps\ngate, rewrite, retrieval, synthesis, evaluation"]
-    end
-
-    REQ --> PREP --> PRE
-    PRE -->|"score ≥ high"| PRE_RAG --> RW
-    PRE -->|"score ≤ low"| PRE_WEB --> WSEARCH
-    PRE -->|"no corpus"| PRE_GEN --> GREPLY
-    PRE -->|"ambiguous"| PRE_GATE --> GATE
-
-    GATE --> WMODE
-    WMODE -->|"always: rag→hybrid, generic→web"| WMODE
-    WMODE -->|"never: web/hybrid→rag"| WMODE
-    WMODE -->|"route=generic"| GREPLY
-    WMODE -->|"route=rag"| RW
-    WMODE -->|"route=web"| WSEARCH
-    WMODE -->|"route=hybrid"| RW
-
-    GREPLY --> GDEC
-    GDEC -->|"correct_route ≠ rag"| RECORD
-    GDEC -->|"correct_route = rag"| GESCALATE --> RW
-
-    WSEARCH --> WSOURCES
-
-    RW --> RRF
-    RRF --> DENSE & KW --> HYBRID_Q --> FUSE --> EMPTY
-    EMPTY -->|"no"| NOIDX --> PDF_CHK
-    EMPTY -->|"yes"| RAGSOURCES
-
-    RAGSOURCES -->|"route=hybrid"| MERGE
-    WSOURCES -->|"route=hybrid"| MERGE
-    MERGE --> PDF_CHK
-    RAGSOURCES -->|"route=rag"| PDF_CHK
-    WSOURCES -->|"route=web"| PDF_CHK
-    NOIDX --> PDF_CHK
-
-    PDF_CHK -->|"yes"| MCP_PDF --> SYN
-    PDF_CHK -->|"no"| SYN
-
-    SYN --> RDEC --> OK
-    OK -->|"yes"| RECORD
-    OK -->|"no"| RETRY
-    RETRY -->|"yes"| RW
-    RETRY -->|"no"| DISCLAIM --> RECORD
-    RECORD --> RESP
-
-    GATE -..-> LOG
-    RW -..-> LOG
-    RRF -..-> LOG
-    SYN -..-> LOG
-    RDEC -..-> LOG
-    RESP -..-> LOG
+    IN --> RW
+    RW --> RAGB --> CONCAT
+    RW --> WEBB --> CONCAT
+    RAGB --> GRAPH --> CONCAT
+    CONCAT --> SORT --> NEXT
 ```
-
----
-
-## 3. Hybrid Retrieval (Dense + Keyword)
-
-Both paths search the same Qdrant `segments` collection. Dense uses raw chunk `content`; keyword uses enriched BM25 text built at ingest time.
-
-### Spelling Normalization & Variant Expansion (`keyword_search_utils.py`)
-
-Applied at both ingest and search time for high recall:
-- **Normalization**: Lowercase, Unicode NFKC, punctuation → spaces
-- **Compound Collapsing**: `open ai` → `openai` (and reverse)
-- **Filename Stems**: Strip directory prefixes, extensions, URL encoding
-- **Index Enrichment**: `content + title + filename variants` fed to BM25
-
-```mermaid
-flowchart LR
-    subgraph QueryTime["Query time (RrfRetriever)"]
-        Q["Rewritten query"]
-        Q --> D_EMB["EmbeddingService\ndense vector"]
-        Q --> K_UTIL["keyword_search_utils\nnormalize + variants\ne.g. open ai ↔ openai"]
-        K_UTIL --> K_EMB["fastembed Qdrant/bm25\nmerge variant sparse vectors"]
-    end
-
-    subgraph Qdrant["VectorStore.search_hybrid()"]
-        D_PREF["Dense prefetch\ntext_vector\nlimit = V2_RRF_TOP_K"]
-        S_PREF["Keyword prefetch\nsparse_vector\nlimit = V2_RRF_TOP_K"]
-        D_EMB --> D_PREF
-        K_EMB --> S_PREF
-        D_PREF --> RRF["fuse_rrf_hits()\nReciprocal Rank Fusion (k=60)"]
-        S_PREF --> RRF
-        RRF --> TOP["Top-k fused chunks\n+ semantic/keyword origin flags"]
-    end
-
-    subgraph Ingest["Ingest time (VectorStore.upsert_segments)"]
-        C["Chunk content"]
-        T["Title + filename stem"]
-        C --> SPARSE_TEXT["build_sparse_index_text()\ncontent + title + path variants"]
-        T --> SPARSE_TEXT
-        SPARSE_TEXT --> SPARSE_IDX["BM25 sparse_vector"]
-        C --> DENSE_IDX["text-embedding-3-small\ntext_vector"]
-    end
-```
-
-**Logged per retrieval step** (`pipeline_steps.structured_output.retrieval`): `semantic_prefetch_count`, `keyword_prefetch_count`, `qdrant_retrieved_count`, RRF breakdown (`semantic_only`, `keyword_only`, `both_lists`).
-
----
-
-## 4. MCP Tool Layer
 
 ```mermaid
 flowchart TD
-    subgraph Orchestrator["PipelineOrchestrator"]
-        ORCH_CALL["_run_web_search()\n_run_rag_pipeline()\n_handle_pdf_tool()"]
-    end
+    IN["route = generic<br/>(no corpus + web off, low score + web off,<br/>or gate classified as chitchat)"]
+    CACHE{"gate returned a reply?"}
+    USE["emit cached gate reply as one chunk<br/><b>zero extra LLM calls</b>"]
+    STREAM["GenericAgent.reply_stream()<br/>Gate Model, token SSE"]
+    DEC["DecisionAction:<br/>route=generic ⇒ verdict=good, confidence=1.0<br/>no DecisionAgent call"]
+    DONE["🟩 result — never retries"]
 
-    subgraph Manager["McpClientManager"]
-        LIST["list_tools()\n→ asyncio.run(_list_tools_async())"]
-        CALL["call_tool(name, args)\n→ asyncio.run(_call_tool_async())"]
-        FALLBACK["_call_local_tool_fallback()\nif mcp package unavailable"]
-    end
-
-    subgraph Server["unified_server.py (FastMCP subprocess)"]
-        direction LR
-        GEN_PDF["generate_pdf(title, content)\nReportLab → .pdf path\nscratch/generated_pdfs/"]
-        WEB_SEARCH_T["web_search(query, limit)\nWebSearchService.search()\n→ scrape_urls_parallel()\n→ JSON results"]
-    end
-
-    subgraph WebSearchSvc["WebSearchService (web_search.py)"]
-        BRAVE_API["Brave Search API"]
-        TAVILY_API["Tavily Search API"]
-        JINA_R["Jina Reader (r.jina.ai)\n→ clean Markdown"]
-        DIRECT["Direct HTTP GET\n+ HTML tag stripping (fallback)"]
-    end
-
-    ORCH_CALL --> LIST
-    ORCH_CALL --> CALL
-    LIST -.-|"stdio JSON-RPC\ntools/list"| Server
-    CALL -.-|"stdio JSON-RPC\ntools/call"| Server
-    CALL -->|"ModuleNotFoundError or exception"| FALLBACK
-
-    GEN_PDF -.-> FALLBACK
-    WEB_SEARCH_T --> JINA_R
-    WEB_SEARCH_T --> DIRECT
-    Server --> BRAVE_API
-    Server --> TAVILY_API
+    IN --> CACHE
+    CACHE -->|yes| USE --> DEC
+    CACHE -->|no| STREAM --> DEC --> DONE
 ```
 
-**Tool schemas** (injected into Gate LLM system prompt via `tool_context`):
+```mermaid
+flowchart TD
+    ENTRY{"how was the tool requested?"}
+    UI["client_requested_tool from UI"]
+    MODEL["LLM emitted tool_calls<br/>(tools listed only when neither<br/>pdf nor flowchart was pre-requested)"]
 
-| Tool | Parameters | Returns |
-|---|---|---|
-| `generate_pdf` | `title: str`, `content: str` | Absolute path to PDF file |
-| `web_search` | `query: str`, `limit: int = 3` | JSON list of `{title, url, snippet, content}` |
+    UI --> FORCE["precheck route_rag (if has_corpus)<br/>or GateAction._finalize forces route=rag"]
+    FORCE --> BLOCK["synthesize() blocking, not streaming"]
+    MODEL --> BLOCK
 
----
+    BLOCK --> PERM{"PermissionChecker.check_permission<br/>(tool, user_role, provenance)"}
+    PERM -->|denied| DENY["🟩 'Permission Denied: role X …'"]
+    PERM -->|allowed| APPR{"requires_approval(tool)?"}
 
-## 5. Web Search Mode — Frontend to Backend Flow
+    APPR -->|yes| WAIT["insert ToolApproval(status=waiting)<br/>SSE approval.required<br/>poll DB every 1s until approved/rejected"]
+    WAIT -->|rejected| REJ["🟩 'Execution rejected by user'"]
+    WAIT -->|approved| EXEC
+    APPR -->|no| EXEC
+
+    EXEC{"tool name"}
+    EXEC -->|generate_pdf| PDF["MCP generate_pdf → ReportLab<br/>append a /v2/pdf/download/ link<br/>filename via optional renamer LLM"]
+    EXEC -->|generate_flowchart| FLOW["MCP generate_flowchart<br/>append a mermaid code block"]
+    EXEC -->|execute_python| PY["MCP execute_python sandbox<br/>append output block"]
+    EXEC -->|web_search| WST["MCP web_search<br/>append 'Search Results:' block"]
+
+    PDF & FLOW & PY & WST --> BACKSTOP["if pdf/flowchart was requested<br/>but no tool_call fired ⇒ generate anyway<br/>from the drafted answer"]
+    BACKSTOP --> VER["→ verify_and_evaluate"]
+
+    ROLEBOX["role source: project scope ⇒ ProjectMember.role<br/>general/null project ⇒ owner"]
+    PROVBOX["provenance = 'user' if the tool matches<br/>client_requested_tool or gate.requested_tool,<br/>else 'model'"]
+    PERM -.- ROLEBOX
+    PERM -.- PROVBOX
+```
+
+```mermaid
+flowchart TD
+    SYN["synthesize → answer"]
+    VER["VerifyAndEvaluateAction<br/>ThreadPoolExecutor(2), both on (query, answer, sources)"]
+    CV["CitationVerifier.verify()<br/>→ has_valid_citations"]
+    GE["GroundednessEvaluator.evaluate()<br/>→ score, is_grounded"]
+    DA["DecisionAgent.evaluate()<br/>→ verdict, confidence, correct_route, feedback"]
+
+    OVR{"override checks"}
+    BAD_CITE["invalid citations ⇒<br/>verdict=bad, conf=0.0<br/><b>retry_target = synthesize</b>"]
+    BAD_GRND["ungrounded ⇒<br/>verdict=bad, conf=score<br/><b>retry_target = synthesize</b>"]
+    BAD_DEC["decision agent said bad /<br/>confidence < threshold<br/><b>retry_target = rewrite</b>"]
+    GOOD["verdict=good and conf ≥ 0.7"]
+
+    CLAMP2["next route = clamp(correct_route, web_search_mode)"]
+    CAP{"attempt ≤ max_attempts (2)?"}
+
+    LOOP_S["→ back to synthesize<br/>same sources, feedback injected as<br/>'[Regeneration instruction: …]'"]
+    LOOP_R["→ back to rewrite<br/>full re-retrieval with prev_feedback"]
+    DISC["🟩 append low-confidence disclaimer, finish"]
+    DONE["🟩 finish clean"]
+
+    SYN --> VER
+    VER --> CV --> OVR
+    VER --> GE --> OVR
+    VER --> DA --> OVR
+    OVR --> BAD_CITE --> CAP
+    OVR --> BAD_GRND --> CAP
+    OVR --> BAD_DEC --> CLAMP2 --> CAP
+    OVR --> GOOD --> DONE
+    CAP -->|yes, target=synthesize| LOOP_S
+    CAP -->|yes, target=rewrite| LOOP_R
+    CAP -->|no| DISC
+```
+
+```mermaid
+flowchart TD
+    Q["query in flight"]
+    O1["🟩 Clean answer<br/>verdict=good, confidence ≥ 0.7<br/>SSE result → message.completed<br/>status: completed"]
+    O2["🟩 Low-confidence answer<br/>retries exhausted<br/>disclaimer appended<br/>status: completed"]
+    O3["🟩 No indexed content<br/>0 sources, no doc tool<br/>status: completed"]
+    O4["🟩 Abstention<br/>EvidenceAssessor.is_sufficient=false<br/>SSE error insufficient_evidence<br/>status: abstained"]
+    O5["🟩 Budget exceeded<br/>any run_budget_* cap hit<br/>SSE error budget_exceeded<br/>status: budget_exceeded"]
+    O6["🟩 Permission denied<br/>PermissionChecker rejects tool<br/>status: completed"]
+    O7["🟩 Approval rejected<br/>user rejects ToolApproval<br/>status: completed"]
+    O8["🟩 Cancelled<br/>client disconnects mid-stream<br/>status: cancelled"]
+    O9["🟩 Failure<br/>any other exception<br/>SSE error execution_failed (retryable)<br/>status: execution_failed"]
+
+    Q --> O1
+    Q --> O2
+    Q --> O3
+    Q --> O4
+    Q --> O5
+    Q --> O6
+    Q --> O7
+    Q --> O8
+    Q --> O9
+
+    classDef term fill:#1b4332,stroke:#2d6a4f,color:#fff
+    class O1,O2,O3,O4,O5,O6,O7,O8,O9 term
+```
+
+```mermaid
+flowchart TD
+    MODE["web_search_mode from ChatInput toggle<br/>auto | always | never"]
+
+    subgraph E1["Checkpoint 1 — PrecheckAction"]
+        C1A["enable_web_search AND web_search_allowed(mode)<br/>never ⇒ precheck picks route_generic, not route_web"]
+    end
+
+    subgraph E2["Checkpoint 2 — Gate prompt construction (realtime)"]
+        C2A["build_tool_context()<br/>never ⇒ web_search tool NOT listed<br/>the model cannot request what it never saw"]
+        C2B["build_gate_policy_directive()<br/>never ⇒ 'route web/hybrid FORBIDDEN'<br/>always ⇒ 'route rag/generic FORBIDDEN'<br/>appended last, outranks project overrides"]
+    end
+
+    subgraph E3["Checkpoint 3 — Route + tool clamp"]
+        C3A["constrain_route_for_web_search_mode()"]
+        C3B["sanitize_requested_tool()<br/>never ⇒ requested_tool web_search → null"]
+        C3C["re-clamp AFTER TOOLS_REQUIRING_RAG forcing<br/>fixes: always + PDF silently dropping web"]
+    end
+
+    subgraph E4["Checkpoint 4 — RetrieveAction"]
+        C4A["never ⇒ disable_web:<br/>no web branch, no empty-RAG web fallback"]
+        C4B["always ⇒ leftover rag upgraded to hybrid<br/>gate_result.route synced so UI shows HYBRID"]
+    end
+
+    subgraph E5["Checkpoint 5 — SynthesizeAction capability"]
+        C5A["filter_tools_for_web_search_mode()<br/>never ⇒ web_search schema stripped from MCP tool list"]
+        C5B["build_synthesis_policy_directive()<br/>never ⇒ 'you have no internet access'"]
+    end
+
+    subgraph E6["Checkpoint 6 — Execution guard"]
+        C6A["web_search tool_call arrives anyway ⇒ refused + logged"]
+    end
+
+    OUT["🟩 user's toggle honoured end-to-end"]
+
+    MODE --> E1 --> E2 --> E3 --> E4 --> E5 --> E6 --> OUT
+
+    classDef term fill:#1b4332,stroke:#2d6a4f,color:#fff
+    class OUT term
+```
 
 ```mermaid
 sequenceDiagram
-    participant FE as ChatInput.tsx
-    participant CTX as AppContext (setWebSearchMode)
-    participant API as POST /v3/conversations/{id}/messages
-    participant ORCH as PipelineOrchestrator.search_stream()
-    participant GATE as RagGate
+    participant FE as ConversationChatView
+    participant API as /v3/conversations/{id}/messages/stream
+    participant B as BurrOrchestrator
+    participant DB as Neon (pipeline_runs/steps)
 
-    FE->>CTX: setWebSearchMode("always" | "auto" | "never")
-    CTX->>CTX: state.search.webSearchMode updated
-    FE->>API: { content, web_search_mode: "always", client_message_id }
-    API->>ORCH: search_stream(query, web_search_mode="always", ...)
-    ORCH->>GATE: classify(query, conversation_context)
-    GATE-->>ORCH: GateResult { route="rag", ... }
-    Note over ORCH: web_search_mode="always"<br/>rag → hybrid override applied
-    ORCH->>ORCH: GateResult { route="hybrid" }
-    Note over ORCH: Run RAG + web_search in parallel<br/>Merge + rerank results by score
-    ORCH-->>API: SSE stream (status, chunks, done)
-    API-->>FE: EventSource events
+    FE->>API: POST { content, web_search_mode, tool, use_cloud_llm }
+    API-->>FE: message.accepted (user_message)
+    B->>DB: start_run() → run_id
+    B-->>FE: status run_start (run_id)
+    B-->>FE: status precheck → precheck_end (action, reason)
+    B-->>FE: status gate → gate_end (route)
+    B-->>FE: status rewrite → rewrite_end (rewritten)
+    B-->>FE: status retrieve → retrieval_end (sources[], count)
+    B-->>FE: status assess_evidence → assess_evidence_end
+    B-->>FE: status synthesis
+    loop streaming route only
+        B-->>FE: delta (token text)
+    end
+    opt tool needs approval
+        B-->>FE: approval.required (approval_id, tool_name, arguments)
+    end
+    B-->>FE: status verify_citations_end, evaluate_groundedness_end
+    B-->>FE: status decision → evaluation_end (verdict, confidence)
+    alt retry
+        B-->>FE: status retry (feedback) — loop back
+    else finish
+        B->>DB: end_run(cost, tokens, attempts)
+        B-->>FE: result (answer, sources, route, confidence)
+        API-->>FE: message.completed (persisted message + citations)
+    end
 ```
-
----
-
-## 6. V3 Conversation System
-
-```mermaid
-flowchart TD
-    subgraph UserAuth["Authentication"]
-        SIGNUP["POST /v2/auth/signup\nemail + password → OTP sent"]
-        VERIFY["POST /v2/auth/verify\nOTP → JWT issued"]
-        GOOGLE["POST /v2/auth/google\nid_token → JWT issued"]
-    end
-
-    subgraph ConvScopes["Conversation Scopes"]
-        GENERAL["scope=general\nretrieval_policy=web_only\nNo project attached\nAlways web search"]
-        PROJECT["scope=project\nretrieval_policy=project_rag\nproject_id required\nFull pipeline: RAG + web"]
-    end
-
-    subgraph ConvAPI["Conversation API (/v3/conversations)"]
-        CREATE["POST /\nConversationCreate { scope, project_id, title }"]
-        LIST["GET /\nList user's conversations"]
-        SEND["POST /{id}/messages\nMessageCreate { content, web_search_mode, client_message_id }"]
-        GET_MSG["GET /{id}/messages\nList persisted ChatMessage rows"]
-        SOURCES["GET /{id}/sources\nList indexed files for this project"]
-    end
-
-    subgraph Persistence["Neon Postgres"]
-        CHATCONV["chat_conversations\nid, owner_user_id, project_id\nscope, retrieval_policy, title\ncreated_at, updated_at, archived_at"]
-        CHATMSG["chat_messages\nid, conversation_id, role\ncontent, status, citations (JSON)\nclient_message_id, pipeline_run_id\ncreated_at, completed_at"]
-    end
-
-    UserAuth --> ConvScopes
-    ConvScopes --> ConvAPI
-    ConvAPI --> Persistence
-```
-
-**Message lifecycle statuses:** `pending → streaming → completed` (or `failed` / `cancelled`).
-
-**Citations** are stored as JSON on each assistant `ChatMessage` — a list of `SearchSource` objects (file_id, title, url, modality, score, start_time, end_time).
-
----
-
-## 7. LLM Client Routing
-
-```mermaid
-flowchart TD
-    subgraph AgentLayer["Agent Layer"]
-        GATE_A["RagGate.classify()"]
-        GEN_A["GenericAgent.reply() / reply_stream()"]
-        RW_A["QueryRewriter.rewrite()"]
-        SYN_A["RagSynthesisAgent.synthesize()"]
-        DEC_A["DecisionAgent.evaluate()"]
-    end
-
-    subgraph ClientRouting["LLM Client Routing"]
-        CLIENT{"get_v2_llm_client()\nuse_cloud_llm?"}
-        LOCAL["LocalLlmClient\nOllama / ngrok\nOpenAI-compatible HTTP"]
-        CLOUD["CloudLlmClient\nOpenAI Chat Completions"]
-    end
-
-    subgraph Models["Model Targets (configurable per project)"]
-        M_GATE["Gate Model\nLocal: Qwen/Qwen3.5-2B\nCloud: gpt-4o-mini"]
-        M_REWRITE["Rewriter / Synthesis\nLocal: Qwen/Qwen3.5-2B\nCloud: gpt-4o-mini"]
-        M_DECISION["Decision Model\nLocal: qwen3.5:4b\nCloud: gpt-4o-mini"]
-    end
-
-    subgraph ToolContext["MCP Tool Context"]
-        MGR_T["McpClientManager.list_tools()\ninjected into Gate system prompt"]
-    end
-
-    AgentLayer --> CLIENT
-    MGR_T -..->|"tool_context injected"| GATE_A
-
-    CLIENT -->|"False"| LOCAL
-    CLIENT -->|"True"| CLOUD
-
-    LOCAL --> M_GATE & M_REWRITE & M_DECISION
-    CLOUD --> M_GATE & M_REWRITE & M_DECISION
-```
-
-> **Note:** Dense embeddings (`text-embedding-3-small`) and ingestion media APIs (Whisper, GPT-4o-mini vision) always use OpenAI regardless of `use_cloud_llm`.
-
----
-
-## 8. Ingestion Pipeline
-
-```mermaid
-flowchart TD
-    UP["POST /v2/projects/files\nAdmin X-Project-Key"] --> CDN["Cloudinary upload\nraw binary stored"]
-    CDN --> JOB["Neon: file row + processing_job row\nstatus=pending"]
-    JOB --> CELERY["Celery task enqueued\nRedis broker"]
-
-    CELERY --> DETECT{"modality?"}
-    DETECT -->|"text"| TXT["process_text\nchunk (tiktoken 400-tok, 50 overlap)"]
-    DETECT -->|"audio"| AUD["process_audio\nWhisper transcribe\n(~15-30s segments)"]
-    DETECT -->|"video"| VID["process_video\nFFmpeg audio + keyframes\nWhisper + GPT-4o-mini vision\nmerge time-aligned segments"]
-
-    TXT & AUD & VID --> EMBED["Embed content\ntext-embedding-3-small → text_vector"]
-    TXT & AUD & VID --> SPARSE["Build sparse index text\nbuild_sparse_index_text()\ncontent + title + filename variants → BM25"]
-
-    EMBED & SPARSE --> UPSERT["Qdrant upsert\ntext_vector + sparse_vector\npayload: project_id, file_id, modality, content, timestamps"]
-    UPSERT --> SEG["Neon: segments row\nfile status = indexed"]
-```
-
----
-
-## 9. Component Map
-
-| Module | Role | LLM / External |
-|---|---|---|
-| `pipeline_orchestrator.py` | Hub: wires precheck → gate → routing paths; web_search_mode override; SSE emission; logging | — |
-| `retrieval_precheck.py` | Fast Qdrant probe to bypass gate LLM for unambiguous routing | EmbeddingService + Qdrant |
-| `conversation_memory.py` | Rolling chat snapshot (default 10 exchanges, UTC timestamps) | — |
-| `conversation_format.py` | Standalone greeting check; context formatting for LLM inputs | — |
-| `rag_gate.py` | Route `rag \| web \| hybrid \| generic`; optional cached reply; tool_context injection | Gate Model |
-| `query_rewriter.py` | Keyword-focused rewrite; retry feedback incorporated | Rewriter Model |
-| `generic_agent.py` | Fallback conversational reply with streaming support | Gate Model |
-| `rrf_retriever.py` | Dense + keyword retrieval orchestration; returns `SearchSource[]` | EmbeddingService + Qdrant |
-| `retrieval_utils.py` | `fuse_rrf_hits()` RRF, `SearchSource` mapping, retrieval stats | — |
-| `keyword_search_utils.py` | NFKC normalization, compound collapsing, BM25 sparse index text | fastembed BM25 |
-| `vector_store.py` | Qdrant upsert / `search_hybrid()` with project + modality filter | Qdrant |
-| `embedding_service.py` | Dense embeddings for ingest and query | OpenAI |
-| `rag_synthesis_agent.py` | Cited, grounded answer from top-k sources (RAG, web, or hybrid) | Rewriter Model |
-| `decision_agent.py` | Quality scoring; retry or generic→RAG escalation | Decision Model |
-| `pipeline_logger.py` | `pipeline_runs` + `pipeline_steps` in Neon Postgres | Neon Postgres |
-| `mcp_manager.py` | `McpClientManager` — spawns `unified_server.py` via stdio; fallback to local functions | FastMCP SDK |
-| `mcp_servers/unified_server.py` | FastMCP server: `generate_pdf` (ReportLab) + `web_search` tool | FastMCP |
-| `web_search.py` | `WebSearchService` — Brave/Tavily search + Jina Reader content scraping | Brave / Tavily / Jina |
-| `json_utils.py` | Robust JSON extraction from LLM responses (handles code fences) | — |
-| `llm_clients/base.py` | `BaseLlmClient` abstract class + `LlmResponse` | — |
-| `llm_clients/local.py` | OpenAI-compatible local HTTP client (Ollama / ngrok) | Ollama |
-| `llm_clients/cloud.py` | OpenAI Chat Completions | OpenAI |
-| `auth_service.py` | Signup, OTP verify, login, Google OAuth | Resend email |
-| `conversation_service.py` | CRUD for `ChatConversation` + `ChatMessage` | Neon Postgres |
-| `project_service.py` | Project keys, per-project model overrides | Neon Postgres |
-| `job_orchestrator.py` | Enqueue Celery tasks; poll job status | Redis + Celery |
-| `fly_scaler.py` | Trigger Fly.io worker machine wakeup on upload; idle shutdown monitor | Fly Machines API |
-
----
-
-## 10. API Surface
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| `POST` | `/v2/auth/signup` | — | Register (sends OTP) |
-| `POST` | `/v2/auth/verify` | — | Verify OTP → JWT |
-| `POST` | `/v2/auth/login` | — | Email/password → JWT |
-| `POST` | `/v2/auth/google` | — | Google id_token → JWT |
-| `GET` | `/v2/llm-health` | — | Probe gate LLM reachability |
-| `POST` | `/v2/search` | Optional `X-Project-Key` | Non-streaming agentic search (legacy) |
-| `GET/POST` | `/v2/projects/…` | Admin key | Project management and model config |
-| `POST` | `/v2/projects/files` | Admin key | Upload + enqueue ingestion |
-| `POST` | `/v2/pdf/generate` | Optional key | Compile Markdown to PDF via MCP |
-| `GET` | `/v2/pdf/download/{filename}` | — | Download compiled PDF |
-| `POST` | `/v3/conversations` | JWT | Create conversation (general or project) |
-| `GET` | `/v3/conversations` | JWT | List user's conversations |
-| `GET` | `/v3/conversations/{id}` | JWT | Get conversation details |
-| `PATCH` | `/v3/conversations/{id}` | JWT | Rename or archive |
-| `GET` | `/v3/conversations/{id}/messages` | JWT | List persisted messages |
-| `POST` | `/v3/conversations/{id}/messages` | JWT | Send message → SSE stream |
-| `GET` | `/v3/conversations/{id}/sources` | JWT | List indexed files for project |
-| `POST` | `/v3/conversations/{id}/files` | JWT | Upload file to conversation's project |
-
----
-
-## 11. Configuration Defaults
-
-| Setting | Default | Purpose |
-|---|---|---|
-| `use_cloud_llm` | `false` | Route LLM calls to OpenAI (true) or local Ollama (false) |
-| `v2_rrf_top_k` | `5` | Fused segments returned from Qdrant |
-| `v2_rrf_k` | `60` | RRF smoothing constant |
-| `v2_max_pipeline_attempts` | `2` | RAG retry loop cap |
-| `v2_confidence_threshold` | `0.7` | Decision agent pass threshold |
-| `v2_conversation_window_size` | `10` | Chat exchanges kept in rolling memory |
-| `v2_retrieval_precheck_high_score` | `0.025` | Score ≥ this → skip gate, route RAG |
-| `v2_retrieval_precheck_low_score` | `0.012` | Score ≤ this → skip gate, route web/generic |
-| `embedding_model` | `text-embedding-3-small` | Dense vectors (1536-d) |
-| `qdrant_collection` | `segments` | Hybrid vector collection |
-| `enable_web_search` | `true` | Master switch for all web search paths |
-| `web_search_engine` | `brave` | `"brave"` or `"tavily"` |
-| `mcp_pdf_server_enabled` | `true` | Enables FastMCP tool subprocess |
-| `jwt_expiry_minutes` | `1440` | JWT token TTL (24 hours) |
-| `otp_expiry_minutes` | `15` | Email OTP TTL |
