@@ -75,7 +75,7 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
-        web_search_mode: str = "auto",
+        web_search_mode: str = "never",
         client_requested_tool: str | None = None,
         conversation_id: UUID | None = None,
         has_corpus: bool = True,
@@ -147,7 +147,7 @@ class PipelineOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
-        web_search_mode: str = "auto",
+        web_search_mode: str = "never",
         client_requested_tool: str | None = None,
         conversation_id: UUID | None = None,
         has_corpus: bool = True,
@@ -644,7 +644,7 @@ class PipelineOrchestrator:
         modality_filter: FileModality | None,
         project_ctx: ProjectContext | None,
         emit,
-        web_search_mode: str = "auto",
+        web_search_mode: str = "never",
         conversation_id: UUID | None = None,
     ) -> typing.Generator[str, None, None]:
         max_attempts = (
@@ -1123,7 +1123,7 @@ class PipelineOrchestrator:
         conversation_context: str,
         modality_filter: FileModality | None,
         project_ctx: ProjectContext | None = None,
-        web_search_mode: str = "auto",
+        web_search_mode: str = "never",
         conversation_id: UUID | None = None,
     ) -> SearchV2Response:
         max_attempts = (
@@ -1416,7 +1416,7 @@ class PipelineOrchestrator:
         project_id: UUID,
         modality_filter: FileModality | None,
         route: str,
-        web_search_mode: str = "auto",
+        web_search_mode: str = "never",
         conversation_id: UUID | None = None,
     ) -> tuple[list[SearchSource], Any, list[Any], int]:
         import time

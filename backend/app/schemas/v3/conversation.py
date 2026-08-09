@@ -45,7 +45,7 @@ class MessageCreate(BaseModel):
     content: str = Field(default="", max_length=32000)
     client_message_id: UUID
     requested_tool: str | None = Field(default=None, max_length=64)
-    web_search_mode: Literal["auto", "always", "never"] = "auto"
+    web_search_mode: Literal["always", "never"] = "never"
     use_cloud_llm: bool | None = None
 
     @model_validator(mode="after")

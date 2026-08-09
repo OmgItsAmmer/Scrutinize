@@ -6,7 +6,8 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Generator
+from dataclasses import replace
+from typing import Any, Callable, Generator, Literal
 from uuid import UUID
 
 from burr.core import ApplicationBuilder, State, default, expr
@@ -54,14 +55,19 @@ FLOWCHART_TOOL_NAME = "generate_flowchart"
 WEB_SEARCH_TOOL_NAME = "web_search"
 TOOLS_REQUIRING_RAG = frozenset({PDF_TOOL_NAME, FLOWCHART_TOOL_NAME})
 
+# Binary only — there is no "auto" mode. The toggle in the UI is either off (never,
+# the default) or on (always); nothing in this pipeline should reintroduce a
+# score-based/ambiguous middle mode.
+WebSearchMode = Literal["always", "never"]
 
-def web_search_allowed(web_search_mode: str) -> bool:
+
+def web_search_allowed(web_search_mode: WebSearchMode) -> bool:
     """Single source of truth for 'is the model permitted to touch the web at all'."""
     return web_search_mode != "never"
 
 
 def build_tool_context(
-    *, mcp_enabled: bool, enable_web_search: bool, web_search_mode: str
+    *, mcp_enabled: bool, enable_web_search: bool, web_search_mode: WebSearchMode
 ) -> str:
     """Advertise tools to the gate LLM — but only the ones it is actually allowed to use.
 
@@ -90,7 +96,7 @@ def build_tool_context(
     return "\n".join(tools)
 
 
-def build_gate_policy_directive(web_search_mode: str) -> str:
+def build_gate_policy_directive(web_search_mode: WebSearchMode) -> str:
     """Hard routing policy injected into the gate system prompt at request time.
 
     The base gate prompt is static and unconditionally teaches the model to route
@@ -123,7 +129,7 @@ def build_gate_policy_directive(web_search_mode: str) -> str:
     return ""
 
 
-def build_synthesis_policy_directive(web_search_mode: str) -> str:
+def build_synthesis_policy_directive(web_search_mode: WebSearchMode) -> str:
     """Answer-time policy for the synthesis model (which also has tool-calling access)."""
     if web_search_mode == "never":
         return (
@@ -142,8 +148,37 @@ def build_synthesis_policy_directive(web_search_mode: str) -> str:
     return ""
 
 
+def normalize_source_citations(answer: str, sources: list) -> str:
+    """Normalize bracketed source tags like [Source 1] or [Source 1, Source 2] to [post_1105.txt]."""
+    if not answer or not sources:
+        return answer
+
+    def _replace_source_match(match: re.Match) -> str:
+        content = match.group(1)
+        source_nums = re.findall(r"(?:Source|source)\s*(\d+)", content)
+        if not source_nums:
+            return match.group(0)
+
+        replaced_citations = []
+        for num_str in source_nums:
+            idx = int(num_str) - 1
+            if 0 <= idx < len(sources):
+                title = getattr(sources[idx], "title", f"Source {num_str}")
+                replaced_citations.append(f"[{title}]")
+            else:
+                replaced_citations.append(f"[Source {num_str}]")
+        return " ".join(replaced_citations)
+
+    normalized = re.sub(
+        r"\[((?:Source|source)\s*\d+(?:\s*,\s*(?:Source|source)\s*\d+)*)\]",
+        _replace_source_match,
+        answer,
+    )
+    return normalized
+
+
 def filter_tools_for_web_search_mode(
-    tools: list[dict] | None, web_search_mode: str
+    tools: list[dict] | None, web_search_mode: WebSearchMode
 ) -> list[dict] | None:
     """Strip web_search from the synthesis tool schema list when the user forbade it.
 
@@ -162,7 +197,7 @@ def filter_tools_for_web_search_mode(
 
 
 def sanitize_requested_tool(
-    requested_tool: str | None, web_search_mode: str
+    requested_tool: str | None, web_search_mode: WebSearchMode
 ) -> str | None:
     if requested_tool == WEB_SEARCH_TOOL_NAME and not web_search_allowed(web_search_mode):
         return None
@@ -181,7 +216,7 @@ def count_tokens_fallback(text: str, model_name: str) -> int:
         return len(text) // 4
 
 
-def constrain_route_for_web_search_mode(route: str, web_search_mode: str) -> str:
+def constrain_route_for_web_search_mode(route: str, web_search_mode: WebSearchMode) -> str:
     """Clamp a route to what the user's web search preference actually allows.
 
     The user's choice is a hard constraint, not a hint any one step can override:
@@ -223,7 +258,7 @@ class PrecheckAction(SingleStepAction):
                 precheck_action="continue", precheck_reason=None
             )
 
-        web_search_mode = inputs.get("web_search_mode", "auto")
+        web_search_mode = inputs.get("web_search_mode", "never")
 
         precheck_res = self.precheck.evaluate(
             state["query"],
@@ -286,7 +321,7 @@ class GateAction(SingleStepAction):
         return ["route", "gate_result", "llm_calls", "input_tokens", "cost_usd"]
 
     def run_and_update(self, state: State, **inputs) -> tuple[dict, State]:
-        web_search_mode = inputs.get("web_search_mode", "auto")
+        web_search_mode = inputs.get("web_search_mode", "never")
 
         # If precheck already determined the route, we skip gate classification — but
         # web_search_mode ("always"/"never") must still be enforced on this path. It
@@ -342,7 +377,7 @@ class GateAction(SingleStepAction):
         return self._finalize(state, gate_res, prompt_len, web_search_mode)
 
     @staticmethod
-    def _apply_web_search_mode(gate_res: GateResult, web_search_mode: str) -> GateResult:
+    def _apply_web_search_mode(gate_res: GateResult, web_search_mode: WebSearchMode) -> GateResult:
         new_route = constrain_route_for_web_search_mode(gate_res.route, web_search_mode)
         # The tool request is clamped alongside the route. Clamping only the route left
         # requested_tool="web_search" alive under "never", which then reached synthesis
@@ -362,7 +397,7 @@ class GateAction(SingleStepAction):
         state: State,
         gate_res: GateResult,
         prompt_len: int = 0,
-        web_search_mode: str = "auto",
+        web_search_mode: WebSearchMode = "never",
     ) -> tuple[dict, State]:
         # Maybe force RAG for tools
         tool = gate_res.requested_tool or state["client_requested_tool"]
@@ -505,7 +540,7 @@ class RetrieveAction(SingleStepAction):
         modality_filter = state["modality_filter"]
         route = state["route"]
         conversation_id = state["conversation_id"]
-        web_search_mode = inputs.get("web_search_mode", "auto")
+        web_search_mode = inputs.get("web_search_mode", "never")
 
         disable_web = not web_search_allowed(web_search_mode)
         force_web = web_search_mode == "always"
@@ -748,7 +783,7 @@ class SynthesizeAction(SingleStepAction):
         conversation_context = state["conversation_context"]
         project_ctx = state["project_ctx"]
         on_chunk = inputs.get("on_chunk")
-        web_search_mode = inputs.get("web_search_mode", "auto")
+        web_search_mode = inputs.get("web_search_mode", "never")
         policy_directive = build_synthesis_policy_directive(web_search_mode)
 
         # Synthesis-only retry (citation/groundedness failure, sources unchanged):
@@ -1044,6 +1079,36 @@ class SynthesizeAction(SingleStepAction):
                 answer += chunk
                 if on_chunk:
                     on_chunk(chunk)
+            
+            evidence_res = state.get("evidence_assessment_result")
+            is_sufficient = evidence_res.is_sufficient if evidence_res else True
+            top_score = sources[0].score if sources else 0.0
+
+            # Deterministic Refusal Recovery: If sources exist and evidence assessment confirmed sufficiency (or top score is high), but synthesis outputted abstention refusal string
+            if sources and (is_sufficient or top_score >= 0.015) and "could not find sufficient information" in answer.strip().lower():
+                logger.info("Deterministic refusal override triggered: retrieved %d sources but synthesis refused. Forcing summary generation.", len(sources))
+                forced_directive = (
+                    f"{policy_directive}\n\nCRITICAL MANDATORY INSTRUCTION: You MUST answer the user query using the provided retrieved sources. "
+                    "Summarize the facts, articles, and details present in the sources to directly address the user's query. "
+                    "Do NOT output 'I could not find sufficient information'."
+                ).strip()
+                answer = ""
+                for chunk in self.rag_synthesis.synthesize_stream(
+                    rewritten_text,
+                    sources,
+                    model=project_ctx.synthesis_model if project_ctx else None,
+                    system_override=(
+                        project_ctx.system_prompt_overrides.get("synthesis") if project_ctx else None
+                    ),
+                    conversation_context=conversation_context,
+                    policy_directive=forced_directive,
+                ):
+                    answer += chunk
+                    if on_chunk:
+                        on_chunk(chunk)
+
+            # Normalize [Source 1] -> [post_1105.txt] filenames for consistent citation tracking
+            answer = normalize_source_citations(answer, sources)
             
             # Estimate tokens
             model_name = project_ctx.synthesis_model if project_ctx else self.settings.local_llm_rewriter_model
@@ -1501,23 +1566,20 @@ class DecisionAction(SingleStepAction):
         retry_target = "rewrite"
         if verdict == "good":
             if citation_map and not citation_map.has_valid_citations:
-                verdict = "bad"
+                verdict = "retry"
                 confidence = 0.0
                 feedback = "Fabricated or invalid citations detected. Please regenerate with valid source citations."
                 retry_target = "synthesize"
             elif groundedness and not groundedness.is_grounded:
-                verdict = "bad"
+                verdict = "retry"
                 confidence = groundedness.score
                 feedback = f"Ungrounded claims detected (score {groundedness.score:.2f}). Please regenerate and stick strictly to the sources: {groundedness.reasoning}."
                 retry_target = "synthesize"
-        elif citation_map and not citation_map.has_valid_citations:
-            verdict = "bad"
-            confidence = 0.0
-            feedback = "Fabricated or invalid citations detected. Please regenerate with valid source citations."
-        elif groundedness and not groundedness.is_grounded:
-            verdict = "bad"
-            confidence = groundedness.score
-            feedback = f"Ungrounded claims detected (score {groundedness.score:.2f}). Please regenerate and stick strictly to the sources: {groundedness.reasoning}."
+        elif verdict == "retry" and decision and decision.feedback:
+            # Preserve decision agent's feedback when decision agent triggered the retry
+            feedback = decision.feedback
+            if any(k in feedback.lower() for k in ("synthesize", "citation", "groundedness", "summarize")):
+                retry_target = "synthesize"
 
         llm_calls = state.get("llm_calls", 0)
         input_tokens = state.get("input_tokens", 0)
@@ -1540,9 +1602,19 @@ class DecisionAction(SingleStepAction):
         # the user's web search preference — it must be clamped the same way the
         # initial gate decision is, or a retry can silently reintroduce (or drop) web
         # search against the user's explicit choice.
-        web_search_mode = inputs.get("web_search_mode", "auto")
+        web_search_mode = inputs.get("web_search_mode", "never")
         next_route = constrain_route_for_web_search_mode(
             decision.correct_route or state["route"], web_search_mode
+        )
+
+        # `decision` may still hold the DecisionAgent's raw, pre-override verdict (e.g.
+        # "good"/1.0 when it judged the ROUTE as correct) even though the citation/
+        # groundedness checks above just overrode verdict/confidence/feedback to force a
+        # retry. Logging `decision` as-is would show a "good, confidence 1.0" evaluation
+        # step right next to a failed citation/groundedness check with no visible link
+        # between them — log the corrected values that actually drove the retry instead.
+        logged_decision = replace(
+            decision, verdict=verdict, confidence=confidence, feedback=feedback
         )
 
         return {
@@ -1557,7 +1629,7 @@ class DecisionAction(SingleStepAction):
             attempt=state["attempt"] + 1,
             prev_feedback=feedback,
             route=next_route,
-            decision_result=decision,
+            decision_result=logged_decision,
             llm_calls=llm_calls,
             input_tokens=input_tokens,
             cost_usd=cost_usd,
@@ -1671,7 +1743,7 @@ class BurrOrchestrator:
         project_ctx: ProjectContext | None = None,
         modality_filter: FileModality | None = None,
         conversation: ConversationState | None = None,
-        web_search_mode: str = "auto",
+        web_search_mode: WebSearchMode = "never",
         client_requested_tool: str | None = None,
         conversation_id: UUID | None = None,
         has_corpus: bool = True,

@@ -1,27 +1,31 @@
 # Scrutinize
 
-Multi-modal AI embedding and retrieval system. Upload text, audio, and video; search across all modalities with natural language.
+Multi-modal AI ingestion, retrieval, and agentic search system. Upload text, audio, and video; ask natural-language questions answered by local RAG, live web search, or a hybrid of both, with persistent chat history and tool use (PDF/flowchart generation, sandboxed code execution).
 
 ---
 
 ## System Architecture
 
+> This section is a summary. See [Architecture](docs/architecture/architecture.md) and [Diagrams](docs/architecture/diagram.md) for the full, current design (Burr state machine, tool approval/sandboxing, web-search-mode clamping, hybrid retrieval internals).
+
 ### 1. Overview
 
-**Scrutinize** is a unified ingestion and retrieval system that allows users to upload **text, audio, and video**, and subsequently perform natural-language search across all modalities. The system is split into four layers:
+**Scrutinize** is a unified ingestion and retrieval platform that lets users upload **text, audio, and video**, then ask natural-language questions answered by either local document retrieval, live web search, or a combination of both. The system is split into four layers:
 
-1. **Client** — React chat-style UI (upload + search in one surface).
-2. **API Layer** — FastAPI, the single entry point for the frontend, routing queries to V1 or V2 services.
-3. **Processing Layer** — Async Celery workers that process raw files, extract transcriptions/captions, and generate embeddings.
-4. **Data Layer** — **Qdrant** (native vector database) for similarity search, **Neon Postgres** for metadata/jobs/logs, and **Cloudinary** for raw file storage.
+1. **Client** — React chat-style UI (conversation, upload, library) with persistent project workspaces.
+2. **API Layer** — FastAPI, hosting unversioned legacy routes, **v2** project/search/auth APIs, and **v3** persistent conversations (the primary chat path).
+3. **Processing Layer** — Async Celery workers that process raw files (extract transcriptions/captions) and generate embeddings.
+4. **Data Layer** — **Qdrant** for hybrid (dense + sparse) vector search, **Neon Postgres** for relational data and pipeline observability, and **Cloudinary** for raw file storage.
 
-A local **Agentic RAG pipeline (V2)** sits on top of the data layer at query time, orchestrating query understanding, routing, multi-stage retrieval, confidence evaluation, and synthesis.
+A **Burr-based agentic pipeline** orchestrates all query-time logic: precheck → gate routing → query rewrite → hybrid retrieval → evidence assessment → synthesis (with tool calling) → citation/groundedness verification → decision/retry. It supports **MCP tools** (PDF/flowchart generation, sandboxed Python execution via E2B, live web search) behind role-based permissions and a human-in-the-loop approval gate for high-risk actions.
 
 ---
 
-### 2. High-Level Architecture
+### 2. High-Level Architecture (legacy v2 view)
 
-The query flow is orchestrated by the `PipelineOrchestrator` (`POST /v2/search`), using local LLMs (or cloud LLMs) for agentic routing, rewriting, and validation:
+The section below documents the original v2-only query flow for historical reference. The current production path (`POST /v3/conversations/{id}/messages/stream`) wraps this same orchestration with persistent conversations, SSE streaming, tool use, and the Burr state machine — see [architecture.md](docs/architecture/architecture.md) for that flow.
+
+The v2 query flow is orchestrated by the `PipelineOrchestrator` (`POST /v2/search`), using local LLMs (or cloud LLMs) for agentic routing, rewriting, and validation:
 
 ```mermaid
 flowchart TD
@@ -439,6 +443,7 @@ See `docs/plan.md` for the full test tier breakdown.
 ## Documentation
 
 - [Architecture](docs/architecture/architecture.md)
+- [Diagrams](docs/architecture/diagram.md)
 - [Project plan](docs/plan.md)
 - [Modules](docs/modules/README.md)
 - [Runbooks](docs/runbooks/README.md)

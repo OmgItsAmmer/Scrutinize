@@ -1,0 +1,170 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, positioning}
+
+\title{\textbf{Harness Engineering in Scrutinize}}
+\author{\textbf{AI Architecture Team}}
+\date{\textbf{Document Version:} 1.0 \\ \textbf{Status:} Active / Architectural Standard}
+
+\begin{document}
+
+\maketitle
+
+\hrule
+\vspace{0.5cm}
+
+\section{What is ``Harness Engineering'' and Why Is It Called a Harness?}
+
+\subsection{Why Call It a ``Harness''?}
+In physical engineering, a \textbf{harness} (such as a safety harness, wiring harness, or horse harness) is a structural framework that constrains, directs, secures, and channels raw power into predictable, controlled work.
+
+In modern generative AI and agentic software (particularly across Scrutinize V4 and V5):
+\begin{quote}
+\textbf{Harness Engineering} is the design pattern of building a strict, deterministic, policy-controlled, and observable safety \& validation framework \emph{around} non-deterministic Large Language Models (LLMs) and tools.
+\end{quote}
+
+Instead of letting an LLM run directly as a loose, unpredictable chatbot (where bad outputs, hallucinated citations, prompt injections, or infinite loops can break the system), the LLM operates inside an \textbf{engineered software harness}.
+
+The harness acts as a \textbf{containment vessel}:
+\begin{enumerate}
+    \item \textbf{Constrains inputs}: Scans and sanitizes user queries and retrieved context before the LLM sees them.
+    \item \textbf{Structures orchestration}: Enforces explicit state machine transitions (Apache Burr) instead of unmonitored recursive agent calls.
+    \item \textbf{Validates outputs}: Subjects model drafts to automated evidence, citation, and groundedness gates before sending data to the client.
+    \item \textbf{Controls execution}: Enforces strict run budgets, role-based tool permission policies, and human-in-the-loop approval gates.
+    \item \textbf{Isolates risk}: Executes untrusted code inside Firecracker MicroVM sandboxes (E2B).
+\end{enumerate}
+
+\hrule
+\vspace{0.5cm}
+
+\section{Comprehensive Trace of Harness Engineering Across the System}
+
+Harness engineering principles are embedded deeply across Scrutinize's backend, middleware, database, and evaluation layers. Below is a structured trace of how harness engineering is realized in the architecture.
+
+\subsection{Architecture Execution Flow}
+
+\begin{center}
+\begin{tikzpicture}[node distance=1.5cm, auto,
+    block/.style={rectangle, draw, fill=blue!5, text width=16em, text centered, rounded corners, minimum height=3em},
+    line/.style={draw, ->, thick}]
+    
+    \node [block] (input) {\textbf{1. Input \& Safety Harness}\\Policy Scan \& RunBudget};
+    \node [block, below=of input] (state) {\textbf{2. State Orchestration Harness}\\Burr State Machine \& Memory};
+    \node [block, below=of state] (route) {\textbf{3. Routing \& Schema Harness}\\RagGate Classifier \& Routes};
+    \node [block, below=of route] (val) {\textbf{4. Quality \& Gate Harness}\\Evidence, Citation \& Groundedness};
+    \node [block, below=of val] (tool) {\textbf{5. Tool \& Sandbox Harness}\\Approval Gate \& E2B MicroVM};
+    \node [block, below=of tool] (eval) {\textbf{6. Observability \& CI Harness}\\Arize Phoenix \& DeepEval Metrics};
+
+    \path [line] (input) -- (state);
+    \path [line] (state) -- (route);
+    \path [line] (route) -- (val);
+    \path [line] (val) -- (tool);
+    \path [line] (tool) -- (eval);
+\end{tikzpicture}
+\end{center}
+
+\hrule
+\vspace{0.5cm}
+
+\subsection{Component Trace Details}
+
+\subsubsection{2.1 State Orchestration \& State Machine Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Rather than writing arbitrary async LLM loops, the entire query lifecycle is compiled into an \textbf{Apache Burr} state machine.
+    \item \textbf{Why it matters:} Burr provides explicit state transitions (\texttt{input\_validated} $\rightarrow$ \texttt{routed} $\rightarrow$ \texttt{retrieved} $\rightarrow$ \texttt{validated\_citations} $\rightarrow$ \texttt{responded}). State is immutable, step execution is deterministic, and execution can be paused for user interaction.
+\end{itemize}
+
+\subsubsection{2.2 Input Safety \& Injection Containment Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Validates incoming text and tool call actions against security rules prior to pipeline execution.
+    \item \textbf{Why it matters:} Retrieved web content or user prompts can contain prompt injection attacks (``ignore previous instructions''). The input harness acts as a security firewall.
+\end{itemize}
+
+\subsubsection{2.3 Type Safety \& Schema Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Uses \textbf{PydanticAI} and strict Pydantic schemas for classification and agent output parsing.
+    \item \textbf{Why it matters:} LLMs natively output loose string tokens. By wrapping prompts with Pydantic schemas, the harness enforces strict JSON output contracts. If the LLM generates invalid fields, PydanticAI automatically catches the validation error and prompts the LLM to auto-correct.
+\end{itemize}
+
+\subsubsection{2.4 Deterministic Quality Gates (Evidence, Citations, Groundedness)}
+The core of Scrutinize's RAG trust model relies on three sequential downstream quality gates:
+\begin{enumerate}
+    \item \textbf{Evidence Sufficiency Gate}
+    \begin{itemize}
+        \item \textbf{Mechanism:} Evaluates retrieved vector search chunks before synthesis. If retrieved facts do not actually contain the answer, the harness forces an immediate \textbf{abstention flow} instead of allowing the LLM to hallucinate.
+    \end{itemize}
+    \item \textbf{Citation Verifier Gate}
+    \begin{itemize}
+        \item \textbf{Mechanism:} Parses claims and claim source IDs \texttt{[doc\_id]}. Deterministically validates whether the cited chunk exists and semantically supports the claim. If invalid, it triggers targeted regeneration.
+    \end{itemize}
+    \item \textbf{Groundedness Evaluator Gate}
+    \begin{itemize}
+        \item \textbf{Mechanism:} Computes a numerical groundedness score ($0.0$ to $1.0$). If the score falls below threshold ($\ge 0.90$), the harness rejects the response draft and loops back to synthesis.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{2.5 Resource \& Budget Limitation Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Tracks max iterations, maximum token budgets, cost limits, and wall-clock execution time per run.
+    \item \textbf{Why it matters:} Prevents runaway agent loops, accidental high API bills, or infinite retry loops during failure states.
+\end{itemize}
+
+\subsubsection{2.6 Sandboxed Execution \& Approval Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Sensitive tool invocations require approval entries in PostgreSQL and SSE notification to the client. Executable code generated by LLMs runs exclusively inside \textbf{E2B Sandboxes} (isolated Firecracker MicroVMs).
+    \item \textbf{Why it matters:} Ensures that generated Python code or web execution cannot access system memory, environment variables, or private networks on the host backend server.
+\end{itemize}
+
+\subsubsection{2.7 Temporal Memory \& Context Boundary Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Integrates \textbf{Letta} (Core and Archival Memory) and \textbf{Graphiti} (Temporal Knowledge Graphs).
+    \item \textbf{Why it matters:} Instead of dumping unformatted chat histories into context windows (which degrades model performance and introduces stale facts), the memory harness structures evolving project knowledge deterministically across temporal state graphs.
+\end{itemize}
+
+\subsubsection{2.8 Evaluation \& Benchmark Harness}
+\begin{itemize}
+    \item \textbf{Harness Mechanism:} Defines standardized measurement pipelines for NDCG@k, MRR, Hit Rate, precision, recall, and adversarial security testing.
+    \item \textbf{Why it matters:} Allows developers to run CI/CD regression tests against retrieval quality and system prompts before deploying updates to production.
+\end{itemize}
+
+\hrule
+\vspace{0.5cm}
+
+\section{Summary Matrix of Harness Controls}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Harness Layer} & \textbf{Primary Purpose / Control} \\
+\midrule
+\textbf{State Machine Harness} & Explicit step-by-step state machine execution via Burr \\
+\textbf{Type \& Schema Harness} & PydanticAI type enforcement and self-correcting outputs \\
+\textbf{Evidence Gate Harness} & Pre-synthesis retrieval relevance check \& forced abstention \\
+\textbf{Citation Verification Harness} & Factual claim-level verification against vector sources \\
+\textbf{Groundedness Harness} & Faithfulness scoring and rejection threshold ($\ge 0.90$) \\
+\textbf{Budget Control Harness} & Token count, cost limit, iteration count, and timeout limits \\
+\textbf{Security \& Sandbox Harness} & E2B MicroVM execution \& sensitive action approvals \\
+\textbf{Memory State Harness} & Letta permanent memory state and Graphiti temporal fact graphs \\
+\textbf{Evaluation Harness} & Automated metrics (NDCG@k, Hit Rate, MRR) and DeepEval CI \\
+\bottomrule
+\end{tabular}
+\caption{Summary of Harness Engineering Controls across Scrutinize.}
+\end{table}
+
+\hrule
+\vspace{0.5cm}
+
+\section{Architectural Conclusion}
+
+In Scrutinize, \textbf{Harness Engineering} is not just an auxiliary testing framework---it is the \textbf{primary runtime control architecture}. It transforms probabilistic LLM generations into deterministic enterprise software by placing safety, verification, memory, budget, and execution harnesses around every generative call.
+
+\end{document}

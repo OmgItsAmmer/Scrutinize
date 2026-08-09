@@ -327,7 +327,12 @@ async def stream_message(
         citations: list[dict] = []
         pipeline_run_id: str | None = None
         try:
-            web_search_mode = body.web_search_mode if retrieval_policy != RetrievalPolicy.WEB_ONLY else ("always" if body.web_search_mode == "auto" else body.web_search_mode)
+            # General-chat conversations (no project) have no local corpus to fall back
+            # to, so web search is always on there regardless of the toggle. Project
+            # conversations honor whatever the user set (default: never).
+            web_search_mode = (
+                "always" if retrieval_policy == RetrievalPolicy.WEB_ONLY else body.web_search_mode
+            )
             retrieval_citations: list[dict] = []
 
             generator = burr_orchestrator.search_stream(

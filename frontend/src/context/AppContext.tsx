@@ -43,7 +43,7 @@ type SearchState = {
   query: string;
   activeQuery: string | null;
   modalityFilter: ModalityFilter;
-  webSearchMode: "auto" | "always" | "never";
+  webSearchEnabled: boolean;
   model: string;
   loading: boolean;
   error: string | null;
@@ -102,7 +102,7 @@ type Action =
   | { type: "SET_HEALTH"; health: HealthResponse | null; error: string | null }
   | { type: "SET_SEARCH_QUERY"; query: string }
   | { type: "SET_MODALITY_FILTER"; filter: ModalityFilter }
-  | { type: "SET_WEB_SEARCH_MODE"; mode: "auto" | "always" | "never" }
+  | { type: "SET_WEB_SEARCH_ENABLED"; enabled: boolean }
   | { type: "SEARCH_START" }
   | { type: "SEARCH_STREAM_UPDATE"; step: string | null; model: string | null; message: string | null; sources?: any[]; route?: string; rewritten?: string; sources_count?: number; confidence?: number; verdict?: string; feedback?: string }
   | { type: "SEARCH_STREAM_CHUNK"; text: string }
@@ -146,7 +146,7 @@ const initialState: AppState = {
     query: "",
     activeQuery: null,
     modalityFilter: "all",
-    webSearchMode: "auto",
+    webSearchEnabled: false,
     model: "gpt-4o-mini",
     loading: false,
     error: null,
@@ -277,8 +277,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, search: { ...state.search, query: action.query } };
     case "SET_MODALITY_FILTER":
       return { ...state, search: { ...state.search, modalityFilter: action.filter } };
-    case "SET_WEB_SEARCH_MODE":
-      return { ...state, search: { ...state.search, webSearchMode: action.mode } };
+    case "SET_WEB_SEARCH_ENABLED":
+      return { ...state, search: { ...state.search, webSearchEnabled: action.enabled } };
     case "SET_MODEL":
       return { ...state, search: { ...state.search, model: action.model } };
     case "SEARCH_START":
@@ -482,7 +482,7 @@ type AppContextValue = {
   selectConversation: (conversationId: string | null, view: AppView) => void;
   setSearchQuery: (query: string) => void;
   setModalityFilter: (filter: ModalityFilter) => void;
-  setWebSearchMode: (mode: "auto" | "always" | "never") => void;
+  setWebSearchEnabled: (enabled: boolean) => void;
   setModel: (model: string) => void;
   runSearch: () => Promise<void>;
   clearSearch: () => void;
@@ -633,7 +633,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         query,
         state.search.modalityFilter,
         state.search.conversation,
-        state.search.webSearchMode,
+        state.search.webSearchEnabled ? "always" : "never",
         (event) => {
           if (event.event === "status") {
             dispatch({
@@ -670,7 +670,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       dispatch({ type: "SEARCH_ERROR", error: formatError(error) });
     }
-  }, [state.apiConnected, state.search.conversation, state.search.modalityFilter, state.search.query, state.search.webSearchMode]);
+  }, [state.apiConnected, state.search.conversation, state.search.modalityFilter, state.search.query, state.search.webSearchEnabled]);
 
   const uploadFilesHandler = useCallback(async (files: FileList | File[]) => {
     if (!state.apiConnected) {
@@ -831,7 +831,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectConversation: (conversationId, view) => dispatch({ type: "SELECT_CONVERSATION", conversationId, view }),
       setSearchQuery: (query) => dispatch({ type: "SET_SEARCH_QUERY", query }),
       setModalityFilter: (filter) => dispatch({ type: "SET_MODALITY_FILTER", filter }),
-      setWebSearchMode: (mode) => dispatch({ type: "SET_WEB_SEARCH_MODE", mode }),
+      setWebSearchEnabled: (enabled) => dispatch({ type: "SET_WEB_SEARCH_ENABLED", enabled }),
       setModel: (model) => dispatch({ type: "SET_MODEL", model }),
       runSearch,
       clearSearch: () => dispatch({ type: "CLEAR_SEARCH" }),

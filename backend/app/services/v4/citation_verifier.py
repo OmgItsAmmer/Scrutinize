@@ -33,7 +33,8 @@ class CitationVerifier:
         effective_model = model or self._model
         effective_system = system_override or self._system
 
-        if not draft_answer.strip():
+        lowered = draft_answer.strip().lower()
+        if not draft_answer.strip() or "could not find sufficient information" in lowered:
             return CitationMapResult(has_valid_citations=True, mappings=[])
 
         source_lines = []

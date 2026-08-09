@@ -203,7 +203,7 @@ export async function searchContentStream(
   query: string,
   modalityFilter: ModalityFilter,
   conversation: ConversationState | undefined,
-  webSearchMode: "auto" | "always" | "never",
+  webSearchMode: "always" | "never",
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
   const path = "/v2/search/stream";
@@ -430,7 +430,7 @@ export async function streamConversationMessage(
   content: string,
   clientMessageId: string,
   onEvent: (event: ConversationStreamEvent) => void,
-  options?: { requestedTool?: string; webSearchMode?: "auto" | "always" | "never"; useCloudLlm?: boolean },
+  options?: { requestedTool?: string; webSearchEnabled?: boolean; useCloudLlm?: boolean },
 ): Promise<{ completed: boolean }> {
   const headers = new Headers({ "Content-Type": "application/json" });
   const token = localStorage.getItem("scrutinize_access_token");
@@ -439,9 +439,8 @@ export async function streamConversationMessage(
   if (options?.requestedTool) {
     body.requested_tool = options.requestedTool;
   }
-  if (options?.webSearchMode) {
-    body.web_search_mode = options.webSearchMode;
-  }
+  // Always send explicitly — there is no "auto"/unset middle state on the backend.
+  body.web_search_mode = options?.webSearchEnabled ? "always" : "never";
   if (options?.useCloudLlm !== undefined) {
     body.use_cloud_llm = options.useCloudLlm;
   }

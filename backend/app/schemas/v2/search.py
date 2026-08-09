@@ -29,7 +29,7 @@ class SearchV2Request(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     modality_filter: FileModality | None = None
     conversation: ConversationState | None = None
-    web_search_mode: str = "auto"
+    web_search_mode: Literal["always", "never"] = "never"
 
 
 class SearchV2Response(BaseModel):

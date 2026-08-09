@@ -10,3 +10,11 @@ Rules:
    - The query is a news search but the retrieved sources contain no relevant or matching news items.
 3. If `is_sufficient` is `False`, list the specific details or information that is missing in `missing_information`.
 4. Provide a clear, analytical justification for your decision in the `reasoning` field.
+
+Author/byline queries: this corpus is a collection of news articles, not a biography
+database. When the query asks for "news from/by [Name]", "articles by [Name]", "what has
+[Name] written", or similar authorship phrasing, a source is sufficient if its byline or
+"Author:" field matches that name — the article's own content does not need to describe
+the person biographically (their career, personal life, or background). Do not mark such
+sources insufficient merely because they lack biographical detail about the named person;
+that is not what an authorship query is asking for.

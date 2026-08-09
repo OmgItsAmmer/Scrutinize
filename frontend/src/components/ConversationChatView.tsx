@@ -210,7 +210,7 @@ function MessageBubble({
 }
 
 export function ConversationChatView({ scope }: { scope: ConversationScope }) {
-  const { state, selectConversation } = useApp();
+  const { state, selectConversation, setWebSearchEnabled } = useApp();
   const projectId = scope === "project" ? state.project?.projectId : undefined;
   const [conversationId, setConversationId] = useState<string | null>(state.activeConversationId);
   const [messages, setMessages] = useState<PersistedMessage[]>([]);
@@ -430,7 +430,7 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
         }
       }, {
         requestedTool: options?.requestedTool,
-        webSearchMode: state.search.webSearchMode,
+        webSearchEnabled: scope === "general" || state.search.webSearchEnabled,
         useCloudLlm: state.search.model === "gpt-4o-mini",
       });
       streamCompleted = streamCompleted || completed;
@@ -489,6 +489,9 @@ export function ConversationChatView({ scope }: { scope: ConversationScope }) {
       selectedTool={selectedTool}
       disabled={!state.apiConnected || loading}
       onSelect={toggleTool}
+      showWebSearch={scope !== "general"}
+      webSearchEnabled={state.search.webSearchEnabled}
+      onToggleWebSearch={() => setWebSearchEnabled(!state.search.webSearchEnabled)}
     />
   );
   const attachmentChips = sources.length > 0 && (

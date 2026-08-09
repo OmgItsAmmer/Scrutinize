@@ -55,6 +55,16 @@ If the query is tech-related but the retrieval or answering appears weak or inco
 * verdict = "retry"
 * feedback should explain how to improve retrieval keywords or query rewriting.
 
+Author/Byline Queries
+When the query asks for "news from/by [Name]", "articles by [Name]", or similar authorship
+phrasing, chunks whose byline or "Author:" field matches that name COUNT as relevant
+information, even if the chunk's own body text doesn't describe the named person
+biographically. If such chunks are present but the draft answer claims insufficient
+information anyway, that is an incorrect refusal:
+* verdict = "retry"
+* feedback should say the retrieved chunks are bylined to the requested author and should
+  be summarized directly, not treated as missing information.
+
 Route Correction
 Set correct_route to the route that should have been used for the CURRENT query.
 Do not change the route solely because earlier conversation turns discussed a particular topic.

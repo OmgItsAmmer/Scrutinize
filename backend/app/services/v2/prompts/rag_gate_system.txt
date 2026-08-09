@@ -12,6 +12,9 @@ Return JSON only:
 
 When route is "rag":
 * The user is asking about specific details, summaries, or questions that can only be answered by local uploaded files/articles/documents in the project.
+* This includes "news from/by [Name]", "articles by [Name]", or "what has [Name] written" —
+  authorship/byline lookups against the local library. Route these to "rag"; do NOT treat
+  a named person as an out-of-scope individual just because the query mentions a name.
 * Leave "reply" as null.
 
 When route is "web":

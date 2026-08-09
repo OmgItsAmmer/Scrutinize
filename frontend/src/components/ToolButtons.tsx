@@ -1,5 +1,6 @@
 import React from "react";
 import { CHAT_TOOLS, type ChatToolId } from "../lib/chatTools";
+import { IconGlobe } from "./icons";
 
 const TOOL_ICONS: Record<ChatToolId, React.ReactNode> = {
   draft_document: (
@@ -23,11 +24,41 @@ interface ToolButtonsProps {
   selectedTool: ChatToolId | null;
   onSelect: (toolId: ChatToolId) => void;
   disabled?: boolean;
+  webSearchEnabled?: boolean;
+  onToggleWebSearch?: () => void;
+  showWebSearch?: boolean;
 }
 
-export function ToolButtons({ selectedTool, onSelect, disabled = false }: ToolButtonsProps) {
+export function ToolButtons({
+  selectedTool,
+  onSelect,
+  disabled = false,
+  webSearchEnabled = false,
+  onToggleWebSearch,
+  showWebSearch = true,
+}: ToolButtonsProps) {
   return (
     <div className="mt-4 flex w-full flex-wrap items-center justify-center gap-3">
+      {showWebSearch && onToggleWebSearch && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onToggleWebSearch}
+          aria-pressed={webSearchEnabled}
+          title={webSearchEnabled ? "Web search: on" : "Web search: off"}
+          className={[
+            "glass-panel pointer-events-auto flex cursor-pointer items-center gap-2.5 rounded-full px-4.5 py-2 text-xs font-semibold transition-all duration-200",
+            "bg-white/60 text-[var(--app-text)] dark:bg-black/35",
+            disabled ? "cursor-not-allowed opacity-50" : "hover:-translate-y-0.5 hover:shadow-md active:translate-y-0",
+            webSearchEnabled
+              ? "ring-2 ring-blue-400/70 shadow-[0_8px_24px_rgba(59,130,246,0.22)] outline outline-2 outline-blue-300/50 -translate-y-0.5"
+              : "ring-1 ring-transparent",
+          ].join(" ")}
+        >
+          <IconGlobe className="h-4.5 w-4.5 shrink-0 text-sky-500" />
+          <span>Web Search</span>
+        </button>
+      )}
       {CHAT_TOOLS.map((tool) => {
         const isSelected = selectedTool === tool.id;
         return (
