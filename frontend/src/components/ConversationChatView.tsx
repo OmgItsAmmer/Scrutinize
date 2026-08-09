@@ -49,6 +49,8 @@ function citationToSource(citation: Record<string, unknown>, index: number): Sea
     start_time: typeof citation.start_time === "number" ? citation.start_time : null,
     end_time: typeof citation.end_time === "number" ? citation.end_time : null,
     score: typeof citation.score === "number" ? citation.score : 1,
+    page_number: typeof citation.page_number === "number" ? citation.page_number : null,
+    section_path: typeof citation.section_path === "string" ? citation.section_path : null,
   };
 }
 

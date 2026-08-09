@@ -75,7 +75,7 @@ const preprocessMermaid = (code: string): string => {
   });
 
   // 4. Restore the original double-quoted strings
-  const finalCode = placeholderCode.replace(/__MERMAID_QUOTE_PLACEHOLDER_(\d+)__/g, (match, index) => {
+  const finalCode = placeholderCode.replace(/__MERMAID_QUOTE_PLACEHOLDER_(\d+)__/g, (_, index) => {
     return quotedStrings[parseInt(index, 10)];
   });
 

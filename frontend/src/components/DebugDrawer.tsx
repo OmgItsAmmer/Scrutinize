@@ -517,9 +517,9 @@ export function DebugDrawer({
     if (!conversationId) return;
     setCopyingConversation(true);
     try {
-      const msgs = await fetchConversationMessages(conversationId);
+      const { messages: msgs } = await fetchConversationMessages(conversationId);
       const enrichedMessages = await Promise.all(
-        msgs.map(async (msg) => {
+        (msgs || []).map(async (msg: import("../types/api").PersistedMessage) => {
           const msgObj: Record<string, unknown> = {
             role: msg.role,
             content: msg.content,
