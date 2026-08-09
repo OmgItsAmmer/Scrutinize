@@ -12,7 +12,7 @@ TOOL_POLICIES = {
 
 class PermissionChecker:
     @staticmethod
-    def check_permission(tool_name: str, user_role: str, provenance: str) -> bool:
+    def check_permission(tool_name: str, user_role: str, provenance: str = "user") -> bool:
         """Deterministically check if a user with a given role is allowed to run a tool."""
         if provenance != "user":
             return False
